@@ -245,11 +245,11 @@ def _use_first_unusual_token_if_no_numeric_token():
     SELECT
         * EXCLUDE (numeric_token_1, token_rel_freq_arr, first_unusual_token),
         CASE
-            WHEN numeric_token_1 IS NULL THEN first_unusual_token.tok
-            ELSE numeric_token_1
+            WHEN {input}.numeric_token_1 IS NULL THEN first_unusual_token.tok
+            ELSE {input}.numeric_token_1
         END AS numeric_token_1,
         CASE
-            WHEN numeric_token_1 IS NULL THEN
+            WHEN {input}.numeric_token_1 IS NULL THEN
                 list_filter(
                     token_rel_freq_arr,
                     x -> coalesce(x.tok != first_unusual_token.tok, TRUE)
@@ -338,37 +338,6 @@ def _generalised_token_aliases():
 
 
 @pipeline_stage(
-    name="final_column_order",
-    description="Reorder and aggregate columns to match the legacy final layout",
-    tags="data_preparation",
-)
-def _final_column_order():
-    """Reorder and aggregate columns to match the legacy final layout."""
-
-    sql = """
-    SELECT
-        unique_id,
-        numeric_token_1,
-        numeric_token_2,
-        numeric_token_3,
-        list_aggregate(token_rel_freq_arr, 'histogram') AS token_rel_freq_arr_hist,
-        list_aggregate(common_end_tokens, 'histogram') AS common_end_tokens_hist,
-        postcode,
-        * EXCLUDE (
-            unique_id,
-            numeric_token_1,
-            numeric_token_2,
-            numeric_token_3,
-            token_rel_freq_arr,
-            common_end_tokens,
-            postcode
-        )
-    FROM {input}
-    """
-    return sql
-
-
-@pipeline_stage(
     name="get_token_frequeny_table",
     description="Build a token frequency table from numeric and non-numeric tokens",
     tags="term_frequency_analysis",
@@ -416,3 +385,52 @@ def _get_token_frequeny_table():
     ]
 
     return steps
+
+
+@pipeline_stage(
+    name="attach_numeric_term_frequencies",
+    description="Attach numeric term frequencies from __ukam_numeric_term_frequencies table",
+    tags="term_frequency_analysis",
+)
+def _attach_numeric_term_frequencies(
+    numeric_tf_table: str = "__ukam_numeric_term_frequencies",
+):
+    """Attach numeric TF columns from precomputed __ukam_numeric_term_frequencies table."""
+
+    final_sql = f"""
+    SELECT
+        {{input}}.*,
+        tf1.tf_numeric_token AS tf_numeric_token_1,
+        tf2.tf_numeric_token AS tf_numeric_token_2,
+        tf3.tf_numeric_token AS tf_numeric_token_3
+    FROM {{input}}
+    LEFT JOIN {numeric_tf_table} AS tf1
+        ON {{input}}.numeric_token_1 = tf1.numeric_token
+    LEFT JOIN {numeric_tf_table} AS tf2
+        ON {{input}}.numeric_token_2 = tf2.numeric_token
+    LEFT JOIN {numeric_tf_table} AS tf3
+        ON {{input}}.numeric_token_3 = tf3.numeric_token
+    """
+
+    return final_sql
+
+
+@pipeline_stage(
+    name="create_histograms_from_token_frequencies",
+    description="Create histogram aggregates from token frequency arrays",
+    tags="term_frequency_analysis",
+)
+def _create_histograms_from_token_frequencies():
+    """Create histogram aggregates from token frequency arrays."""
+
+    sql = """
+    SELECT
+        * EXCLUDE (
+            token_rel_freq_arr,
+            common_end_tokens
+        ),
+        list_aggregate(token_rel_freq_arr, 'histogram') AS token_rel_freq_arr_hist,
+        list_aggregate(common_end_tokens, 'histogram') AS common_end_tokens_hist
+    FROM {input}
+    """
+    return sql

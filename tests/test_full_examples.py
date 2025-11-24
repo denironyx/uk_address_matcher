@@ -4,13 +4,12 @@ import subprocess
 import duckdb
 import pytest
 
-from uk_address_matcher.cleaning.pipelines import (
-    clean_data_using_precomputed_rel_tok_freq,
-)
+from uk_address_matcher import clean_data_with_term_frequencies
 
 
 def test_full_example():
     env = os.environ.copy()
+
     env["EPC_PATH"] = (
         f"read_csv('{os.path.abspath('tests/test_data/epc_fake.csv')}', filename=true)"
     )
@@ -55,7 +54,7 @@ def test_match_one(path, postcode):
         '{postcode}' as postcode
     """
     )
-    canon_data = clean_data_using_precomputed_rel_tok_freq(canon_data, con=con)
+    canon_data = clean_data_with_term_frequencies(canon_data, con=con)
     con.sql(
         f"COPY ({canon_data.sql_query()}) TO '{os.path.abspath(path)}' (FORMAT 'parquet')"
     )
@@ -78,6 +77,7 @@ def test_match_one(path, postcode):
 
 def test_match_fhrs_to_os():
     env = os.environ.copy()
+
     # Override the hardcoded paths in match_fhrs_to_os.py
     env["FHRS_PATH"] = (
         f"read_csv('{os.path.abspath('tests/test_data/fhrs_fake.csv')}', filename=true)"
