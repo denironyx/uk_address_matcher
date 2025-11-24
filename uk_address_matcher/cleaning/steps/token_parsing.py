@@ -126,16 +126,16 @@ def _parse_out_flat_position_and_letter():
     """
     Robustly extracts flat positions, letters, and numbers from address strings.
 
-    Strategy (same as before, just composed more tightly):
-      - Detect a 'flat signal' (FLAT, floor position, digit+letter like 15B, Scottish FLAT 3/2)
-      - Prefer letter next to FLAT/number tokens; otherwise fall back to digit+letter anywhere
-      - Only emit flat_number when there's a flat signal or strong heuristic (e.g., leading '11A')
+    Strategy:
+      - Detect a 'flat signal' (FLAT, floor position, digit+letter like 15B)
+      - When number+letter pattern exists (11A, 15B), the LETTER is the flat determinant
+      - Only extract flat_number from explicit FLAT markers (e.g., FLAT 12) or multi-number heuristics
       - Treat '2 69 GIPSY HILL' as flat_number=2 (two-number start heuristic)
     """
 
-    # Floor positions (extend in your normalizer as needed)
-    floor_positions = r"BASEMENT|GARDEN"
-    floors = [
+    # Floor positions: BASEMENT and GARDEN are standalone, others paired with FLOOR
+    standalone_floors = ["BASEMENT", "GARDEN"]
+    floor_with_suffix = [
         "UPPER",
         "GROUND",
         "FIRST",
@@ -143,14 +143,16 @@ def _parse_out_flat_position_and_letter():
         "THIRD",
         "FOURTH",
         "FIFTH",
-        "SXITH",
+        "SIXTH",
         "SEVENTH",
         "EIGHTH",
         "NINTH",
-        "TOP FLOOR",
+        "TOP",
     ]
-    floor_positions = r"BASEMENT|GARDEN|" + "|".join(
-        [f"{floor} FLOOR" for floor in floors]
+    floor_positions = (
+        r"\b("
+        + "|".join(standalone_floors + [f"{f} FLOOR" for f in floor_with_suffix])
+        + r")\b"
     )
 
     # Core token patterns (RE2-compatible; avoid lookbehind)
@@ -158,19 +160,18 @@ def _parse_out_flat_position_and_letter():
     leading_num_letter = (
         r"^\s*(\d{1,4})([A-Za-z])\b"  # e.g., 11A ... (number=grp1, letter=grp2)
     )
-    count_numbers = r"(?:^|\s)(\d{1,5})(?:\s|$)"  # Match numbers with space/boundary separation (not ranges)
+    # Match all numbers (standalone digits, not part of ranges like 120-122)
+    count_numbers = r"\b(\d{1,5})\b"
 
     flat_num_after_flat = r"\bFLAT\s+(\d{1,4})\b"  # FLAT 12
     flat_letter_after_num_after_flat = (
         r"\bFLAT\s+\d{1,4}\s*([A-Za-z])\b"  # FLAT 12A / FLAT 12 A
     )
     flat_letter_after_flat = r"\bFLAT\s+([A-Za-z])\b"  # FLAT A
-    flat_num_after_letter_immediate = r"\bFLAT\s+[A-Za-z]\s+(\d{1,4})\b"  # FLAT A 11
 
     # Scottish style "FLAT 3/2" → use the right-hand number as the unit/flat number
     scottish_flat = r"\bFLAT\s+(\d+)\s*/\s*(\d+)\b"
 
-    # Base step: compute final fields directly (no helper columns to drop)
     final_base_sql = f"""
     SELECT
         i.*,
@@ -187,28 +188,23 @@ def _parse_out_flat_position_and_letter():
         ) AS flat_letter,
 
         -- 3) flat_number (priority explained inline)
-        -- Only accept flat_number if there are 2+ space-separated numbers (not ranges like 120-122)
-        -- OR if we have a leading/anywhere number+letter pattern (e.g., 11A or 15B)
+        -- Accept flat_number if we have:
+        -- A) Explicit FLAT + number AND 2+ total numbers, OR
+        -- B) Multiple numbers AND no number+letter pattern
         CASE
             WHEN (
-                array_length(regexp_extract_all(i.clean_full_address, '{count_numbers}')) >= 2
-                OR regexp_extract(i.clean_full_address, '{leading_num_letter}', 1) IS NOT NULL
-                OR regexp_extract(i.clean_full_address, '{num_letter_anywhere}', 1) IS NOT NULL
+                regexp_extract(i.clean_full_address, '{flat_num_after_flat}', 1) IS NOT NULL
+                AND COALESCE(length(regexp_extract_all(i.clean_full_address, '{count_numbers}')), 0) >= 2
+            ) OR (
+                COALESCE(length(regexp_extract_all(i.clean_full_address, '{count_numbers}')), 0) >= 2
+                AND regexp_extract(i.clean_full_address, '{leading_num_letter}', 1) IS NULL
+                AND regexp_extract(i.clean_full_address, '{num_letter_anywhere}', 1) IS NULL
             ) THEN COALESCE(
                 -- FLAT 3/2 → 2
                 NULLIF(regexp_extract(i.original_address_concat, '{scottish_flat}', 2), ''),
 
-                -- FLAT 12 / FLAT 2 / FLAT 12A → take the number next to FLAT first
+                -- FLAT 12 → 12: take the number next to FLAT first
                 NULLIF(regexp_extract(i.clean_full_address, '{flat_num_after_flat}', 1), ''),
-
-                -- FLAT A 11 → 11
-                NULLIF(regexp_extract(i.clean_full_address, '{flat_num_after_letter_immediate}', 1), ''),
-
-                -- 11A at start → 11 (leading_num_letter group 1)
-                NULLIF(regexp_extract(i.clean_full_address, '{leading_num_letter}', 1), ''),
-
-                -- 15B anywhere → 15
-                NULLIF(regexp_extract(i.clean_full_address, '{num_letter_anywhere}', 1), ''),
 
                 -- Two-number start heuristic: "2 69 GIPSY HILL" → 2 (only if there is a second number)
                 CASE
@@ -296,39 +292,6 @@ def _clean_address_string_second_pass():
         * exclude (address_without_numbers),
         {fn_call} as address_without_numbers
     from {{input}}
-    """
-    return sql
-
-
-@pipeline_stage(
-    name="split_numeric_tokens_to_cols",
-    description="Split numeric tokens array into separate columns (numeric_token_1, numeric_token_2, numeric_token_3)",
-    tags="token_transformation",
-)
-def _split_numeric_tokens_to_cols():
-    sql = """
-    SELECT
-        * EXCLUDE (numeric_tokens),
-        regexp_extract_all(array_to_string(numeric_tokens, ' '), '\\d+')[1] as numeric_token_1,
-        regexp_extract_all(array_to_string(numeric_tokens, ' '), '\\d+')[2] as numeric_token_2,
-        regexp_extract_all(array_to_string(numeric_tokens, ' '), '\\d+')[3] as numeric_token_3
-    FROM {input}
-    """
-    return sql
-
-
-@pipeline_stage(
-    name="tokenise_address_without_numbers",
-    description="Split the address_without_numbers field into an array of tokens",
-    tags="tokenisation",
-)
-def _tokenise_address_without_numbers():
-    sql = """
-    select
-        * exclude (address_without_numbers),
-        regexp_split_to_array(trim(address_without_numbers), '\\s+')
-            AS address_without_numbers_tokenised
-    from {input}
     """
     return sql
 

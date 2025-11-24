@@ -18,16 +18,18 @@ def test_parse_out_flat_positional():
 
     # Format of test cases:
     # (input_address, flat_positional, flat_letter, flat_number)
+    # Note: When a number+letter pattern exists (e.g., 11A, 15B), only the LETTER is a flat determinant
+    # The number is the building/house number, not a flat identifier
     test_cases = [
-        ("11A SPITFIRE COURT 243 BIRMINGHAM", None, "A", "11"),
-        ("FLAT A 11 SPITFIRE COURT 243 BIRMINGHAM", None, "A", "11"),
-        ("BASEMENT FLAT A 11 SPITFIRE COURT 243 BIRMINGHAM", "BASEMENT", "A", "11"),
+        ("11A SPITFIRE COURT BIRMINGHAM", None, "A", None),
+        ("FLAT A 11 SPITFIRE COURT BIRMINGHAM", None, "A", None),
+        ("BASEMENT FLAT A 11 SPITFIRE COURT BIRMINGHAM", "BASEMENT", "A", None),
         ("BASEMENT FLAT 11 SPITFIRE COURT 243 BIRMINGHAM", "BASEMENT", None, "11"),
         ("GARDEN FLAT 11 SPITFIRE COURT 243 BIRMINGHAM", "GARDEN", None, "11"),
-        ("TOP FLOOR FLAT 12A HIGH STREET", "TOP FLOOR", "A", "12"),
-        ("SECOND FLOOR FLAT 12 A HIGH STREET", "SECOND FLOOR", "A", "12"),
-        ("GROUND FLOOR FLAT B 25 MAIN ROAD", "GROUND FLOOR", "B", "25"),
-        ("FIRST FLOOR 15B LONDON ROAD", "FIRST FLOOR", "B", "15"),
+        ("TOP FLOOR FLAT 12A HIGH STREET", "TOP FLOOR", "A", None),
+        ("SECOND FLOOR FLAT 12 A HIGH STREET", "SECOND FLOOR", "A", None),
+        ("GROUND FLOOR FLAT B 25 MAIN ROAD", "GROUND FLOOR", "B", None),
+        ("FIRST FLOOR 15B LONDON ROAD", "FIRST FLOOR", "B", None),
         ("FLAT C MY HOUSE 120 MY ROAD", None, "C", None),
         ("FLAT 2 69 GIPSY HILL", None, None, "2"),
         ("2 69 GIPSY HILL", None, None, "2"),
@@ -36,9 +38,19 @@ def test_parse_out_flat_positional():
         ("FLAT A GROUND FLOOR 18 RAVENSWOOD STREET", "GROUND FLOOR", "A", None),
         ("FLAT 3/2 41 DUMMY ROAD", None, None, "2"),
         ("FLAT THE CROWN TESTING ROAD", None, None, None),
-        ("FLAT 12A HIGH STREET", None, "A", "12"),  # adjacent letter after FLAT number
-        ("15B LONDON ROAD", None, "B", "15"),  # digit+letter not at start
-        ("BASEMENT 15B LONDON ROAD", "BASEMENT", "B", "15"),  # floor + digit+letter
+        (
+            "FLAT 12A HIGH STREET",
+            None,
+            "A",
+            None,
+        ),  # adjacent letter after FLAT number, letter is the flat determinant
+        (
+            "15B LONDON ROAD",
+            None,
+            "B",
+            None,
+        ),  # digit+letter: letter is flat determinant, not the number
+        ("BASEMENT 15B LONDON ROAD", "BASEMENT", "B", None),  # floor + digit+letter
         (
             "FLAT A MY HOUSE 120-122 SOME ROAD",
             None,
@@ -78,7 +90,8 @@ def test_parse_out_flat_positional():
             f"Address '{address}' expected number '{expected_number}' but got '{row[number_idx]}'"
         )
         expected_indicator = any(
-            value is not None for value in (expected_letter, expected_number)
+            value is not None
+            for value in (expected_pos, expected_letter, expected_number)
         )
         assert row[indicator_idx] == expected_indicator, (
             f"Address '{address}' expected has_flat_indicator '{expected_indicator}' but got '{row[indicator_idx]}'"
