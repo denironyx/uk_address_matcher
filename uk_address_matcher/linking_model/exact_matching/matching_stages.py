@@ -10,9 +10,6 @@ from uk_address_matcher.linking_model.exact_matching.annotate_exact_matches impo
 from uk_address_matcher.linking_model.exact_matching.input_filters import (
     _restrict_canonical_to_fuzzy_postcodes,
 )
-from uk_address_matcher.linking_model.exact_matching.resolve_with_trie import (
-    _resolve_with_trie,
-)
 from uk_address_matcher.linking_model.exact_matching.resolve_with_trigrams import (
     _resolve_with_trigrams,
 )
@@ -35,7 +32,6 @@ class StageName(str, Enum):
 
     EXACT_MATCHES = "exact_matches"
     UNIQUE_TRIGRAM = "unique_trigram"
-    TRIE = "trie"
 
 
 @dataclass(frozen=True)
@@ -80,12 +76,6 @@ _STAGE_REGISTRY: dict[StageName, ExactMatchStageConfig] = {
             include_trigram_text=True,
         ),
         pre_filter_canonical=_restrict_canonical_to_fuzzy_postcodes("exact"),
-    ),
-    StageName.TRIE: ExactMatchStageConfig(
-        factory=_resolve_with_trie,
-        pre_filter_canonical=_restrict_canonical_to_fuzzy_postcodes(
-            "drop_last_char"
-        ),
     ),
 }
 
@@ -281,6 +271,11 @@ def run_deterministic_match_pass(
         if df_fuzzy_unmatched.count("*").fetchone()[0] == 0:
             break
 
+        # Stages can return any number of columns, but MUST include:
+        # - ukam_address_id
+        # - canonical_ukam_address_id
+        # - resolved_canonical_id
+        # - match_reason
         stage_result = _run_stage(
             con,
             stage_name,
@@ -288,6 +283,8 @@ def run_deterministic_match_pass(
             df_addresses_to_search_within,
             debug_options,
             explain,
+        ).select(
+            "ukam_address_id, canonical_ukam_address_id, resolved_canonical_id, match_reason"
         )
 
         if explain:
