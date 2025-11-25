@@ -199,3 +199,4 @@ tmp/trie_matching_smoke.py
 tmp/trigram_tmp.py
 tmp/validate_chunking.py
 tmp/validate_exact_matching.py
+benchmarking/.config.json
