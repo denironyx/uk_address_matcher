@@ -1,19 +1,18 @@
 import duckdb
 import pandas as pd
 
-
 from uk_address_matcher import (
-    clean_data_using_precomputed_rel_tok_freq,
-    get_linker,
+    clean_data_with_term_frequencies,
     evaluate_predictions_against_labels,
+    get_linker,
     inspect_match_results_vs_labels,
-)
-from uk_address_matcher.post_linkage.identify_distinguishing_tokens import (
-    improve_predictions_using_distinguishing_tokens,
 )
 from uk_address_matcher.linking_model.training import get_settings_for_training
 from uk_address_matcher.post_linkage.analyse_results import (
     best_matches_with_distinguishability,
+)
+from uk_address_matcher.post_linkage.identify_distinguishing_tokens import (
+    improve_predictions_using_distinguishing_tokens,
 )
 
 try:
@@ -68,11 +67,13 @@ labels_rel = duckdb_con.sql("""
 df_os_rel = canonical_addresses_raw
 messy_data_rel = messy_addresses_raw
 
-df_messy_data_clean_rel = clean_data_using_precomputed_rel_tok_freq(
+df_messy_data_clean_rel = clean_data_with_term_frequencies(
     messy_data_rel.select("unique_id", "address_concat", "postcode"), con=duckdb_con
 )
 
-df_os_clean_rel = clean_data_using_precomputed_rel_tok_freq(df_os_rel, con=duckdb_con)
+df_os_clean_rel = clean_data_with_term_frequencies(
+    duckdb_con.from_df(df_os_rel), con=duckdb_con
+)
 
 settings = get_settings_for_training()
 

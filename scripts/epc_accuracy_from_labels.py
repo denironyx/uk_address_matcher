@@ -1,14 +1,16 @@
 import time
+
 import duckdb
+from IPython.display import display
+
 from uk_address_matcher import (
-    clean_data_using_precomputed_rel_tok_freq,
+    clean_data_with_term_frequencies,
     get_linker,
 )
+from uk_address_matcher.linking_model.training import get_settings_for_training
 from uk_address_matcher.post_linkage.identify_distinguishing_tokens import (
     improve_predictions_using_distinguishing_tokens,
 )
-from IPython.display import display
-from uk_address_matcher.linking_model.training import get_settings_for_training
 
 overall_start_time = time.time()
 
@@ -86,8 +88,8 @@ print(f"messy_count: {messy_count:,}, canonical_count: {canonical_count:,}")
 # -----------------------------------------------------------------------------
 
 
-df_epc_data_clean = clean_data_using_precomputed_rel_tok_freq(df_epc_data, con=con)
-df_os_clean = clean_data_using_precomputed_rel_tok_freq(df_os, con=con)
+df_epc_data_clean = clean_data_with_term_frequencies(con.from_df(df_epc_data), con=con)
+df_os_clean = clean_data_with_term_frequencies(con.from_df(df_os), con=con)
 
 end_time = time.time()
 print(f"Time to load/clean: {end_time - overall_start_time} seconds")
