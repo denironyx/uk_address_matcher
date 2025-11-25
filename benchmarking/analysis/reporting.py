@@ -20,7 +20,7 @@ def print_benchmark(dataset_name: str, variant_name: str) -> None:
 
 
 def print_stages_benchmark_header(
-    dataset_name: str, variant_name: str, enabled_stages: list | None
+    dataset_name: str, variant_name: str, enabled_stages: list | None = None
 ) -> None:
     """Print a clear header for benchmark run.
 

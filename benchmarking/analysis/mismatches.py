@@ -7,8 +7,8 @@ if TYPE_CHECKING:
 
 
 def analyse_mismatches(
-    matches: duckdb.DuckDBPyRelation,
-    canonical: duckdb.DuckDBPyRelation,
+    ukam_matches: duckdb.DuckDBPyRelation,
+    ukam_canonical: duckdb.DuckDBPyRelation,
     samples_per_reason: int = 10,
     top_worst: int = 10,
 ) -> dict[str, duckdb.DuckDBPyRelation]:
@@ -51,7 +51,7 @@ def analyse_mismatches(
             m.ukam_address_id,
             m.original_address_concat,
             m.postcode
-        FROM matches AS m
+        FROM ukam_matches AS m
         WHERE m.match_reason IS NOT NULL
           AND m.unique_id != m.resolved_canonical_id
     ),
@@ -70,7 +70,7 @@ def analyse_mismatches(
                 c.original_address_concat
             ) AS similarity_score
         FROM incorrect_matches AS im
-        LEFT JOIN canonical AS c
+        LEFT JOIN ukam_canonical AS c
           ON im.canonical_ukam_address_id = c.ukam_address_id
     ),
     sampled AS (
@@ -103,7 +103,7 @@ def analyse_mismatches(
     ORDER BY match_reason, similarity_score
     """
 
-    random_samples = matches.query("random_samples", random_samples_sql)
+    random_samples = ukam_matches.query("ukam_matches", random_samples_sql)
 
     # Build complete query for worst mismatches
     worst_mismatches_sql = f"""
@@ -116,7 +116,7 @@ def analyse_mismatches(
             m.match_reason,
             m.original_address_concat,
             m.postcode
-        FROM matches AS m
+        FROM ukam_matches AS m
         WHERE m.match_reason IS NOT NULL
           AND m.unique_id != m.resolved_canonical_id
     ),
@@ -135,7 +135,7 @@ def analyse_mismatches(
                 c.original_address_concat
             ) AS similarity_score
         FROM incorrect_matches AS im
-        LEFT JOIN canonical AS c
+        LEFT JOIN ukam_canonical AS c
           ON im.canonical_ukam_address_id = c.ukam_address_id
     )
     SELECT
@@ -152,7 +152,7 @@ def analyse_mismatches(
     LIMIT {top_worst}
     """
 
-    worst_mismatches = matches.query("worst_mismatches", worst_mismatches_sql)
+    worst_mismatches = ukam_matches.query("ukam_matches", worst_mismatches_sql)
 
     return {
         "random_samples": random_samples,

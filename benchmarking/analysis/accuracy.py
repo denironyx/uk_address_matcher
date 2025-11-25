@@ -7,12 +7,12 @@ if TYPE_CHECKING:
 
 
 def calculate_accuracy_metrics(
-    matches: duckdb.DuckDBPyRelation,
+    ukam_matches: duckdb.DuckDBPyRelation,
 ) -> duckdb.DuckDBPyRelation:
     dataset_column: str | None = None
-    if "dataset_name" in matches.columns:
+    if "dataset_name" in ukam_matches.columns:
         dataset_column = "dataset_name"
-    elif "source_dataset" in matches.columns:
+    elif "source_dataset" in ukam_matches.columns:
         dataset_column = "source_dataset"
 
     if dataset_column is None:
@@ -23,7 +23,7 @@ def calculate_accuracy_metrics(
                 resolved_canonical_id,
                 match_reason,
                 CASE WHEN unique_id = resolved_canonical_id THEN 1 ELSE 0 END AS is_correct
-            FROM matches
+            FROM ukam_matches
             WHERE match_reason IS NOT NULL
         )
         SELECT
@@ -38,7 +38,7 @@ def calculate_accuracy_metrics(
             CASE WHEN GROUPING(match_reason) = 1 THEN 0 ELSE 1 END,
             total_matched DESC
         """
-        return matches.query("accuracy", sql)
+        return ukam_matches.query("accuracy", sql)
 
     sql = f"""
     WITH matched_records AS (
@@ -48,7 +48,7 @@ def calculate_accuracy_metrics(
             match_reason,
             COALESCE({dataset_column}, 'UNKNOWN_DATASET') AS dataset_name,
             CASE WHEN unique_id = resolved_canonical_id THEN 1 ELSE 0 END AS is_correct
-        FROM matches
+        FROM ukam_matches
         WHERE match_reason IS NOT NULL
     ),
     aggregated AS (
@@ -89,4 +89,4 @@ def calculate_accuracy_metrics(
         total_matched DESC
     """
 
-    return matches.query("accuracy", sql)
+    return ukam_matches.query("accuracy", sql)
