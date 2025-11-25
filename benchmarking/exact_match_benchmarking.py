@@ -13,7 +13,6 @@ from benchmarking.datasets import get_dataset_info, load_benchmark_data
 from benchmarking.utils.io import setup_connection
 from benchmarking.utils.pipelines import run_deterministic_pipeline
 from benchmarking.utils.timing import time_phase
-from uk_address_matcher.linking_model.exact_matching import StageName
 from uk_address_matcher.post_linkage.analyse_results import calculate_match_metrics
 from uk_address_matcher.sql_pipeline.runner import DebugOptions
 
@@ -47,12 +46,12 @@ dataset_info = get_dataset_info(DATASET_NAME)
 # Define pipeline variants
 # Each variant specifies which optional stages to enable (exact matching always runs)
 pipeline_variants = {
-    # "exact_match_only": {
-    #     "enabled_stages": None,  # Only exact matching (always-on)
-    # },
-    "exact_match_then_trie": {
-        "enabled_stages": [StageName.TRIE],  # Exact matching + trie
+    "exact_match_only": {
+        "enabled_stages": None,  # Only exact matching (always-on)
     },
+    # "exact_match_then_trie": {
+    #     "enabled_stages": [StageName.TRIE],  # Exact matching + trie
+    # },
 }
 
 matches_by_variant: dict[str, duckdb.DuckDBPyRelation] = {}
@@ -116,8 +115,8 @@ for label, variant_spec in pipeline_variants.items():
             f"\n📊 Found {incorrect_count:,} incorrect matches. Analysing mismatches...\n"
         )
         mismatch_results = analyse_mismatches(
-            matches=matches,
-            canonical=df_os_clean,
+            ukam_matches=matches,
+            ukam_canonical=df_os_clean,
             samples_per_reason=MISMATCH_SAMPLES_PER_REASON,
             top_worst=TOP_WORST_MISMATCHES,
         )
