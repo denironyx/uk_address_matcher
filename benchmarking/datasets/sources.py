@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -16,6 +17,39 @@ UniqueIdFormatter = Callable[[str], str]
 def quote_identifier(identifier: str) -> str:
     """Return a DuckDB-safe quoted identifier."""
     return '"' + identifier.replace('"', '""') + '"'
+
+
+def resolve_s3_path(env_var_explicit: str, env_var_relative: str) -> str:
+    """Resolve an S3 path from environment variables.
+
+    First checks for an explicit full path in `env_var_explicit`.
+    If not set, constructs the path from UKAM_S3_BASE_PREFIX + the relative path
+    specified in `env_var_relative`.
+
+    Args:
+        env_var_explicit: Environment variable name for explicit full S3 path
+        env_var_relative: Environment variable name for relative path (under base prefix)
+
+    Returns:
+        Full S3 path with trailing slash
+
+    Raises:
+        RuntimeError: If required environment variables are not set
+    """
+    explicit = os.getenv(env_var_explicit)
+    if explicit is not None and explicit.strip():
+        path = explicit.strip().rstrip("/")
+    else:
+        prefix = get_env_setting("UKAM_S3_BASE_PREFIX")
+        relative = get_env_setting(env_var_relative)
+        if not prefix.strip() or not relative.strip():
+            raise RuntimeError(
+                f"Both UKAM_S3_BASE_PREFIX and {env_var_relative} must be set "
+                "to non-empty values."
+            )
+        path = f"{prefix.strip().rstrip('/')}/{relative.strip().lstrip('/')}"
+
+    return path if path.endswith("/") else f"{path}/"
 
 
 @lru_cache(maxsize=None)
@@ -60,6 +94,19 @@ class SourceConfig:
     unique_id_formatter: UniqueIdFormatter = lambda x: x
     prune_postcode_from_address: bool = False
 
+    @property
+    def _get_file_reader(self) -> str:
+        reader = {
+            "csv": "read_csv",
+            "parquet": "read_parquet",
+        }.get(self.s3_key.split(".")[-1].lower())
+        if reader is None:
+            raise ValueError(
+                f"Unsupported file format for source {self.name}: {self.s3_key}"
+            )
+
+        return reader
+
     def select_statement(self, base_path: str) -> str:
         """Generate SQL SELECT statement to read and transform this source.
 
@@ -98,7 +145,7 @@ class SourceConfig:
                 {address_expr} AS address_concat,
                 {quote_identifier(self.postcode_column)} AS postcode,
                 '{self.name}' AS dataset_name
-            FROM read_parquet('{base_path}{self.s3_key}')
+            FROM {self._get_file_reader}('{base_path}{self.s3_key}')
             WHERE address_concat IS NOT NULL
                 AND postcode IS NOT NULL
                 {f"AND {self.optional_filter}" if self.optional_filter else ""}

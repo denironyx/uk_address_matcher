@@ -1,34 +1,14 @@
 from __future__ import annotations
 
-import os
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
 from benchmarking.datasets.registry import DatasetInfo
-from benchmarking.datasets.sources import SourceConfig
-from benchmarking.utils.io import get_env_setting, load_duckdb_httpfs
+from benchmarking.datasets.sources import SourceConfig, resolve_s3_path
+from benchmarking.utils.io import load_duckdb_httpfs
 
 if TYPE_CHECKING:
     import duckdb
-
-
-def _resolve_lambeth_s3_base_path() -> str:
-    """Return the base S3 path for the Lambeth dataset from private settings."""
-
-    explicit = os.getenv("UKAM_LAMBETH_S3_BASE_PATH")
-    if explicit is not None and explicit.strip():
-        path = explicit.strip().rstrip("/")
-    else:
-        prefix = get_env_setting("UKAM_S3_BASE_PREFIX")
-        relative = get_env_setting("UKAM_LAMBETH_DATA_PATH")
-        if not prefix.strip() or not relative.strip():
-            raise RuntimeError(
-                "Both UKAM_S3_BASE_PREFIX and UKAM_LAMBETH_DATA_PATH must be set "
-                "to non-empty values."
-            )
-        path = f"{prefix.strip().rstrip('/')}/{relative.strip().lstrip('/')}"
-
-    return path if path.endswith("/") else f"{path}/"
 
 
 def _strip_decimal_suffix(expr: str) -> str:
@@ -93,7 +73,7 @@ def get_lambeth_council_data(
     # Ensure httpfs extension is loaded for S3 access
     load_duckdb_httpfs(con)
 
-    base_path = _resolve_lambeth_s3_base_path()
+    base_path = resolve_s3_path("UKAM_LAMBETH_S3_BASE_PATH", "UKAM_LAMBETH_DATA_PATH")
     print(f"Reading Lambeth datasets from S3: {base_path}")
     union_sql = "\nUNION ALL\n".join(
         cfg.select_statement(base_path) for cfg in _LAMBETH_SOURCES
