@@ -3,6 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from benchmarking.datasets.hackney_council import (
+    HACKNEY_COUNCIL_INFO,
+    get_hackney_council_data,
+)
 from benchmarking.datasets.lambeth_council import (
     LAMBETH_COUNCIL_INFO,
     get_lambeth_council_data,
@@ -30,6 +34,7 @@ if TYPE_CHECKING:
 
 # Register available datasets
 register_dataset("lambeth_council", LAMBETH_COUNCIL_INFO, get_lambeth_council_data)
+register_dataset("hackney_council", HACKNEY_COUNCIL_INFO, get_hackney_council_data)
 
 
 def load_benchmark_data(
@@ -107,4 +112,6 @@ __all__ = [
     "register_dataset",
     "LAMBETH_COUNCIL_INFO",
     "get_lambeth_council_data",
+    "HACKNEY_COUNCIL_INFO",
+    "get_hackney_council_data",
 ]

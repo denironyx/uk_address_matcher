@@ -25,7 +25,7 @@ from uk_address_matcher.sql_pipeline.runner import DebugOptions
 # Configuration
 # ============================================================================
 
-DATASET_NAME = "lambeth_council"
+DATASET_NAME = "hackney_council"
 OS_DATA_PATH: Path | None = None
 # DEBUG_OPTIONS: Optional[DebugOptions] = DebugOptions(
 #     pretty_print_sql=True, debug_incremental=True, debug_mode=True, debug_show_sql=True
