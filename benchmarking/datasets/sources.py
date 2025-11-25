@@ -22,11 +22,24 @@ def quote_identifier(identifier: str) -> str:
 def load_canonical_data(
     con: duckdb.DuckDBPyConnection,
     canonical_config: CanonicalConfig | None = None,
+    sample_mode: bool = False,
 ) -> duckdb.DuckDBPyRelation:
     config = canonical_config or CanonicalConfig.default()
     print(f"Loading canonical OS data from {config.local_path}...")
     config.validate()
-    return con.read_parquet(str(config.local_path))
+    rel = con.read_parquet(str(config.local_path))
+
+    # Apply deterministic sampling if requested (pushed down to SQL for efficiency)
+    if sample_mode:
+        rel = con.sql(
+            """
+            SELECT * FROM rel
+            ORDER BY ukam_address_id
+            LIMIT 1_000_000
+            """
+        )
+
+    return rel
 
 
 @dataclass(frozen=True)
@@ -60,9 +73,7 @@ class SourceConfig:
             address_expr = f"trim({quote_identifier(self.address_columns)})"
         else:
             # Multiple columns: concatenate, trim, and normalise spaces
-            cols = ", ".join(
-                quote_identifier(col) for col in self.address_columns
-            )
+            cols = ", ".join(quote_identifier(col) for col in self.address_columns)
             address_expr = (
                 "regexp_replace(trim(concat_ws(' ', {cols})), '\\s+', ' ')".format(
                     cols=cols
@@ -90,7 +101,7 @@ class SourceConfig:
             FROM read_parquet('{base_path}{self.s3_key}')
             WHERE address_concat IS NOT NULL
                 AND postcode IS NOT NULL
-                {f'AND {self.optional_filter}' if self.optional_filter else ''}
+                {f"AND {self.optional_filter}" if self.optional_filter else ""}
         """
 
 
@@ -107,9 +118,7 @@ class CanonicalConfig:
 
     @classmethod
     def default(cls) -> CanonicalConfig:
-        configured_path = get_env_setting(
-            "UKAM_OS_CANONICAL_PATH"
-        )
+        configured_path = get_env_setting("UKAM_OS_CANONICAL_PATH")
         if not configured_path:
             raise RuntimeError(
                 "Environment variable UKAM_OS_CANONICAL_PATH must be set to the "

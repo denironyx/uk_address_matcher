@@ -3,12 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from benchmarking.datasets.registry import DatasetInfo
 from benchmarking.datasets.lambeth_council import (
     LAMBETH_COUNCIL_INFO,
     get_lambeth_council_data,
 )
 from benchmarking.datasets.registry import (
+    DatasetInfo,
     get_all_dataset_info,
     get_dataset_info,
     list_datasets,
@@ -20,9 +20,9 @@ from benchmarking.datasets.sources import (
     SourceConfig,
     load_canonical_data,
 )
-from uk_address_matcher.cleaning.pipelines import (
-    clean_data_using_precomputed_rel_tok_freq,
+from uk_address_matcher import (
     clean_data_with_minimal_steps,
+    clean_data_with_term_frequencies,
 )
 
 if TYPE_CHECKING:
@@ -66,36 +66,24 @@ def load_benchmark_data(
     print(f"Available datasets: {', '.join(list_datasets())}")
     print(f"Loading dataset: {dataset_name}\n")
 
-    # Load raw messy data
-    df_messy = load_dataset(dataset_name, con)
-
-    # Apply deterministic sampling if requested (before cleaning for efficiency)
-    if sample_mode:
-        df_messy = con.sql(
-            "SELECT * FROM df_messy ORDER BY unique_id LIMIT 10000"
-        )
+    # Load raw messy data with optional sampling
+    df_messy = load_dataset(dataset_name, con, sample_mode=sample_mode)
 
     # Apply cleaning logic
     if include_term_frequencies:
-        cleaning_function = clean_data_using_precomputed_rel_tok_freq
+        cleaning_function = clean_data_with_term_frequencies
     else:
         cleaning_function = clean_data_with_minimal_steps
 
     df_messy = cleaning_function(df_messy, con)
 
-    # Load canonical data once
+    # Load canonical data once with optional sampling
     canonical_config = (
         CanonicalConfig(local_path=os_data_path)
         if os_data_path
         else CanonicalConfig.default()
     )
-    df_canonical = load_canonical_data(con, canonical_config)
-
-    # Apply deterministic sampling if requested
-    if sample_mode:
-        df_canonical = con.sql(
-            "SELECT * FROM df_canonical ORDER BY ukam_address_id LIMIT 1_000_000"
-        )
+    df_canonical = load_canonical_data(con, canonical_config, sample_mode=sample_mode)
 
     # Show dataset info
     info = get_dataset_info(dataset_name)

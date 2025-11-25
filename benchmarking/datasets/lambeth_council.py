@@ -88,6 +88,7 @@ LAMBETH_COUNCIL_INFO = DatasetInfo(
 @lru_cache(maxsize=None)
 def get_lambeth_council_data(
     con: duckdb.DuckDBPyConnection,
+    sample_mode: bool = False,
 ) -> duckdb.DuckDBPyRelation:
     # Ensure httpfs extension is loaded for S3 access
     load_duckdb_httpfs(con)
@@ -98,5 +99,17 @@ def get_lambeth_council_data(
         cfg.select_statement(base_path) for cfg in _LAMBETH_SOURCES
     )
     df_messy_raw = con.sql(union_sql).filter("unique_id IS NOT NULL")
+
+    # Apply deterministic sampling if requested (pushed down to SQL for efficiency)
+    # Use hash-based sampling to get a representative spread across all sources
+    if sample_mode:
+        df_messy_raw = con.sql(
+            """
+            SELECT * FROM df_messy_raw
+            WHERE hash(unique_id || dataset_name) % 100 < 10
+            ORDER BY unique_id, dataset_name
+            LIMIT 10000
+            """
+        )
 
     return df_messy_raw
