@@ -18,14 +18,14 @@ from uk_address_matcher.sql_pipeline.steps import CTEStep, pipeline_stage
 
 @pipeline_stage(
     name="ensure_ukam_address_id",
-    description="Ensure input addresses have deterministic stable ID based on unique_id and address_concat",
+    description="Assign a unique UUID to each row for safe joining without duplicates",
     tags=["setup"],
 )
 def _add_ukam_address_id():
     return """
     SELECT
         *,
-        MD5(CONCAT(unique_id, address_concat)) AS ukam_address_id
+        uuid() AS ukam_address_id
     FROM {input}
     """
 
