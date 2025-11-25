@@ -175,3 +175,27 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 .DS_Store
+tmp/aaaaa.py
+tmp/abbr_mappings.py
+tmp/benchmark_abbr_replacement.py
+tmp/chunking_test_gym.py
+tmp/clean_os_data_with_new_chunking.py
+tmp/clean_os_data.py
+tmp/cleaning_testing.py
+tmp/cleaning_with_sub_tokens.py
+tmp/demo_normalise_abbreviations.py
+tmp/dupes_checks.py
+tmp/duplicate_os_addresses.py
+tmp/performance_testing_exact_match.py
+tmp/quick_clean_os_data.py
+tmp/test_chunking.py
+tmp/test_empty_splink_df.py
+tmp/test_trigram_os.py
+tmp/test_trigram.py
+tmp/testing_enum_logic.py
+tmp/testing_validation.py
+tmp/tmp_clean_os.py
+tmp/trie_matching_smoke.py
+tmp/trigram_tmp.py
+tmp/validate_chunking.py
+tmp/validate_exact_matching.py
