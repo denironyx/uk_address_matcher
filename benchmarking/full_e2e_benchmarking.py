@@ -15,6 +15,7 @@ from uk_address_matcher import (
     get_linker,
     improve_predictions_using_distinguishing_tokens,
 )
+from uk_address_matcher.linking_model.exact_matching.matching_stages import StageName
 from uk_address_matcher.post_linkage.analyse_results import calculate_match_metrics
 from uk_address_matcher.post_linkage.match_candidate_selection import (
     select_top_match_candidates,
@@ -25,6 +26,7 @@ from uk_address_matcher.sql_pipeline.runner import DebugOptions
 # Configuration
 # ============================================================================
 
+# DATASET_NAME = "lambeth_council"
 DATASET_NAME = "hackney_council"
 OS_DATA_PATH: Path | None = None
 # DEBUG_OPTIONS: Optional[DebugOptions] = DebugOptions(
@@ -70,11 +72,12 @@ with time_phase(variant_timings, variant_label, "pipeline"):
         con=con,
         # For benchmarking, we want to load the messy data in with the column `dataset_name`.
         # This needs to be removed for matching, but is joined back on later.
-        df_to_match=df_messy_clean.select("* EXCLUDE (dataset_name)"),
+        df_to_match=df_messy_clean.select("* EXCLUDE (dataset_name)").execute(),
         df_canonical=df_os_clean,
         pipeline_name=f"Exact benchmark - {variant_label}",
         debug_options=DEBUG_OPTIONS,
         explain=EXPLAIN,
+        enabled_stage_names=[StageName.UNIQUE_TRIGRAM],
     )
 
 pipeline_duration = variant_timings[variant_label]["pipeline"]

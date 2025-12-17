@@ -1,4 +1,3 @@
-from pathlib import Path
 from typing import Optional
 
 import duckdb
@@ -23,14 +22,18 @@ from uk_address_matcher.sql_pipeline.runner import DebugOptions
 # Configuration
 # ============================================================================
 
-DATASET_NAME = "lambeth_council"
-OS_DATA_PATH: Path | None = None
+# DATASET_NAME = "lambeth_council"
+DATASET_NAME = "hackney_council"
 DEBUG_OPTIONS: Optional[DebugOptions] = None
 # DEBUG_OPTIONS = DebugOptions(
 #     pretty_print_sql=True, debug_mode=True, debug_show_sql=True, debug_incremental=True
 # )
 EXPLAIN = False
-pipeline_variants = [StageName.UNIQUE_TRIGRAM]
+pipeline_variants = [
+    StageName.UNIQUE_TRIGRAM,
+    # StageName.JARO_WINKLER,
+    # StageName.DAMERAU_LEVENSHTEIN,
+]
 
 # Analysis configuration
 MISMATCH_SAMPLES_PER_REASON = 10  # Random samples per match_reason
@@ -43,7 +46,7 @@ TOP_WORST_MISMATCHES = 10  # Worst mismatches by similarity
 print("Initialising benchmark environment...")
 con = setup_connection()
 # TODO(ThomasHepworth): LRU cache isn't working...
-df_messy_clean, df_os_clean = load_benchmark_data(con, DATASET_NAME, OS_DATA_PATH)
+df_messy_clean, df_os_clean = load_benchmark_data(con, DATASET_NAME)
 
 
 # Get dataset info for reporting
@@ -104,8 +107,8 @@ for pipeline_variant in pipeline_variants:
             f"\n📊 Found {incorrect_count:,} incorrect matches. Analysing mismatches...\n"
         )
         mismatch_results = analyse_mismatches(
-            matches=matches,
-            canonical=df_os_clean,
+            ukam_matches=matches,
+            ukam_canonical=df_os_clean,
             samples_per_reason=MISMATCH_SAMPLES_PER_REASON,
             top_worst=TOP_WORST_MISMATCHES,
         )
