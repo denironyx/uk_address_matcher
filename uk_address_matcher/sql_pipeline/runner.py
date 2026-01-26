@@ -586,9 +586,9 @@ class DuckDBPipeline(CTEPipeline):
             )
             rel = self.con.table(fragment.alias)
             if max_rows is not None:
-                rel.show(max_rows=max_rows)
+                rel.show(max_rows=max_rows, max_width=50000)
             else:
-                rel.show()
+                rel.show(max_width=50000)
 
             rel.count("*").show()
             elapsed = perf_counter() - start

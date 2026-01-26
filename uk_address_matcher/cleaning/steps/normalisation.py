@@ -97,8 +97,8 @@ def _canonicalise_postcode() -> str:
 def _upper_case_address_and_postcode() -> str:
     sql = r"""
     SELECT
-        * EXCLUDE (original_address_concat, postcode),
-        UPPER(original_address_concat) AS original_address_concat,
+        * EXCLUDE (postcode),
+        UPPER(original_address_concat) AS clean_full_address,
         UPPER(postcode)       AS postcode
     FROM {input}
     """
@@ -112,7 +112,7 @@ def _upper_case_address_and_postcode() -> str:
 )
 def _clean_address_string_first_pass() -> str:
     fn_call = construct_nested_call(
-        "original_address_concat",
+        "clean_full_address",
         [
             remove_commas_periods,
             remove_apostrophes,
@@ -134,8 +134,7 @@ def _clean_address_string_first_pass() -> str:
         FROM {{input}}
     )
     SELECT
-        * EXCLUDE (__clean_address, original_address_concat),
-        __clean_address AS original_address_concat,
+        * EXCLUDE (__clean_address, clean_full_address),
         __clean_address AS clean_full_address
     FROM cleaned
     """
