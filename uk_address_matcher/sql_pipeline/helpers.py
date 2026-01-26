@@ -1,8 +1,10 @@
+import importlib.resources as pkg_resources
 import logging
 import random
 import re
 import string
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import List
 
 import duckdb
@@ -123,6 +125,25 @@ def _slug(s: str) -> str:
 def _pretty_sql(sql: str) -> str:
     # Hook for pretty printers if desired
     return sql
+
+
+def package_resource_read_sql(package: str, filename: str) -> str:
+    """Build a SELECT statement for a packaged resource based on file suffix.
+
+    Supports JSON, CSV, and Parquet inputs via DuckDB reader functions.
+    """
+    suffix = Path(filename).suffix.lower()
+    readers = {
+        ".json": "read_json_auto",
+        ".csv": "read_csv_auto",
+        ".parquet": "read_parquet",
+    }
+    reader = readers.get(suffix)
+    if reader is None:
+        raise ValueError(f"Unsupported resource type '{suffix}' for '{filename}'.")
+
+    with pkg_resources.path(package, filename) as resource_path:
+        return f"SELECT * FROM {reader}('{resource_path}')"
 
 
 def _duckdb_table_exists(con: duckdb.DuckDBPyConnection, table_name: str) -> bool:

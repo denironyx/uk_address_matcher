@@ -1,4 +1,3 @@
-from importlib import resources
 from typing import Optional
 
 from duckdb import DuckDBPyConnection, DuckDBPyRelation
@@ -35,7 +34,7 @@ from uk_address_matcher.cleaning.steps.term_frequencies import (
 from uk_address_matcher.cleaning.steps.tokenisation import (
     _create_tokenised_address_concat,
 )
-from uk_address_matcher.sql_pipeline.helpers import _uid
+from uk_address_matcher.sql_pipeline.helpers import _uid, package_resource_read_sql
 from uk_address_matcher.sql_pipeline.runner import DebugOptions, create_sql_pipeline
 
 QUEUE_PRE_TF = [
@@ -261,20 +260,16 @@ def _create_term_frequency_tables(
         numeric_term_frequencies_rel.create("__ukam_numeric_term_frequencies")
 
     else:
-        default_tf_path = (
-            resources.files("uk_address_matcher")
-            / "data"
-            / "address_token_frequencies.parquet"
+        read_tf_sql = package_resource_read_sql(
+            "uk_address_matcher.data", "address_token_frequencies.parquet"
         )
-        address_token_frequencies_rel = con.read_parquet(str(default_tf_path))
+        address_token_frequencies_rel = con.sql(read_tf_sql)
 
         # Load precomputed numeric term frequencies as well
-        default_numeric_tf_path = (
-            resources.files("uk_address_matcher")
-            / "data"
-            / "numeric_token_frequencies.parquet"
+        read_numeric_tf_sql = package_resource_read_sql(
+            "uk_address_matcher.data", "numeric_token_frequencies.parquet"
         )
-        numeric_term_frequencies_rel = con.read_parquet(str(default_numeric_tf_path))
+        numeric_term_frequencies_rel = con.sql(read_numeric_tf_sql)
         con.sql("DROP TABLE IF EXISTS __ukam_numeric_term_frequencies")
         numeric_term_frequencies_rel.create("__ukam_numeric_term_frequencies")
 

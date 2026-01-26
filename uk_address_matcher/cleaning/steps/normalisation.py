@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib.resources as pkg_resources
 from typing import Final
 
 from uk_address_matcher.cleaning.steps.regexes import (
@@ -14,6 +13,7 @@ from uk_address_matcher.cleaning.steps.regexes import (
     standarise_num_letter,
     trim,
 )
+from uk_address_matcher.sql_pipeline.helpers import package_resource_read_sql
 from uk_address_matcher.sql_pipeline.steps import CTEStep, pipeline_stage
 
 
@@ -206,17 +206,17 @@ def _normalise_abbreviations_and_units() -> list[CTEStep]:
     - 3. Vectorised transform over token list, then join back to a string
     """
 
-    with pkg_resources.path(
+    read_abbr_sql = package_resource_read_sql(
         "uk_address_matcher.data", "address_abbreviations.json"
-    ) as json_path:
-        # 1) Load lookup (upper-case keys for case-insensitive match)
-        abbr_lookup_sql = f"""
-        SELECT
-          UPPER(TRIM(token))       AS token,
-          TRIM(replacement)        AS replacement
-        FROM read_json_auto('{json_path}')
-        WHERE token IS NOT NULL AND replacement IS NOT NULL
-        """
+    )
+    # 1) Load lookup (upper-case keys for case-insensitive match)
+    abbr_lookup_sql = f"""
+    SELECT
+        UPPER(TRIM(token))       AS token,
+        TRIM(replacement)        AS replacement
+    FROM ({read_abbr_sql})
+    WHERE token IS NOT NULL AND replacement IS NOT NULL
+    """
 
     # 2) Build a single-row MAP using list aggregations (works on DuckDB without map_agg)
     abbr_map_sql = """
@@ -262,24 +262,24 @@ def _classify_non_traditional_address() -> list[CTEStep]:
     Adds a `non_traditional_address_type` column with the classification or NULL
     if the address appears to be a traditional building address.
     """
-    with pkg_resources.path(
+    read_non_trad_sql = package_resource_read_sql(
         "uk_address_matcher.data", "non_traditional_address_types.json"
-    ) as json_path:
-        load_lookup_sql = f"""
-        WITH json_data AS (
-            SELECT * FROM read_json_auto('{json_path}')
-        ),
-        unpivoted AS (
-            UNPIVOT json_data
-            ON COLUMNS(*)
-            INTO NAME classification VALUE patterns
-        )
-        SELECT
-            UPPER(TRIM(unnest(patterns))) AS pattern,
-            LOWER(classification) AS classification
-        FROM unpivoted
-        WHERE patterns IS NOT NULL
-        """
+    )
+    load_lookup_sql = f"""
+    WITH json_data AS (
+        {read_non_trad_sql}
+    ),
+    unpivoted AS (
+        UNPIVOT json_data
+        ON COLUMNS(*)
+        INTO NAME classification VALUE patterns
+    )
+    SELECT
+        UPPER(TRIM(unnest(patterns))) AS pattern,
+        LOWER(classification) AS classification
+    FROM unpivoted
+    WHERE patterns IS NOT NULL
+    """
 
     # Checks if any non-traditional patterns match the address tokens string
     classify_sql = """
@@ -323,11 +323,12 @@ def _peel_common_uk_end_tokens(fuzzy_threshold: int = 1) -> list[CTEStep]:
 
     # Build lookup with pre-computed typo variants for efficient hash-based JOINs
     # Distance 1: deletions (remove 1 char) + transpositions (swap adjacent chars)
-    load_lookup_sql = """
+    read_end_tokens_sql = package_resource_read_sql(
+        "uk_address_matcher.data", "common_uk_end_tokens.json"
+    )
+    load_lookup_sql = f"""
         WITH json_data AS (
-            SELECT * FROM read_json_auto(
-                'uk_address_matcher/data/common_uk_end_tokens.json'
-            )
+            {read_end_tokens_sql}
         ),
         single_tokens AS (
             SELECT UPPER(TRIM(unnest(single_tokens))) AS pattern, 1 AS token_count

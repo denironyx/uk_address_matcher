@@ -4,6 +4,8 @@ import json
 from duckdb import DuckDBPyConnection, DuckDBPyRelation
 from splink import DuckDBAPI, Linker, SettingsCreator
 
+from uk_address_matcher.sql_pipeline.helpers import package_resource_read_sql
+
 
 def _get_model_settings_dict():
     with (
@@ -15,10 +17,10 @@ def _get_model_settings_dict():
 
 
 def _get_precomputed_numeric_tf_table(con: DuckDBPyConnection):
-    tf_path = pkg_resources.files("uk_address_matcher.data").joinpath(
-        "numeric_token_frequencies.parquet"
+    read_tf_sql = package_resource_read_sql(
+        "uk_address_matcher.data", "numeric_token_frequencies.parquet"
     )
-    return con.read_parquet(str(tf_path))
+    return con.sql(read_tf_sql)
 
 
 def get_linker(

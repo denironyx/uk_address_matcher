@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import importlib.resources as pkg_resources
-
+from uk_address_matcher.sql_pipeline.helpers import package_resource_read_sql
 from uk_address_matcher.sql_pipeline.steps import CTEStep, pipeline_stage
 
 
@@ -159,14 +158,14 @@ def _move_common_end_tokens_to_field():
     SELECT * FROM {input}
     """
 
-    with pkg_resources.path(
+    read_common_tokens_sql = package_resource_read_sql(
         "uk_address_matcher.data", "common_end_tokens.csv"
-    ) as csv_path:
-        common_end_tokens_sql = f"""
-            select array_agg(token) as end_tokens_to_remove
-            from read_csv_auto('{csv_path}')
-            where token_count > 3000
-            """
+    )
+    common_end_tokens_sql = f"""
+        select array_agg(token) as end_tokens_to_remove
+        from ({read_common_tokens_sql})
+        where token_count > 3000
+        """
 
     joined_sql = """
     SELECT *
