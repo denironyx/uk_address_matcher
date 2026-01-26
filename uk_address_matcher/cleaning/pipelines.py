@@ -46,13 +46,13 @@ QUEUE_PRE_TF = [
     _canonicalise_postcode,
     _clean_address_string_first_pass,
     _normalise_abbreviations_and_units,
-    _remove_duplicate_end_tokens,
+    _remove_duplicate_end_tokens,  # clean_full_address now completed
+    _create_tokenised_address_concat,  # based on clean_full_address
     _parse_out_flat_position_and_letter,
     _parse_out_business_unit,
     _parse_out_numbers,
     _clean_address_string_second_pass,
     _split_numeric_tokens_to_cols,
-    _create_tokenised_address_concat,
     _tokenise_address_without_numbers,
     _classify_non_traditional_address,
 ]
