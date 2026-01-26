@@ -262,27 +262,26 @@ def _classify_non_traditional_address() -> list[CTEStep]:
     Adds a `non_traditional_address_type` column with the classification or NULL
     if the address appears to be a traditional building address.
     """
-    # Load JSON and unpivot: columns become classification, array values become patterns
-    load_lookup_sql = """
-    WITH json_data AS (
-        SELECT * FROM read_json_auto(
-            'uk_address_matcher/data/non_traditional_address_types.json'
+    with pkg_resources.path(
+        "uk_address_matcher.data", "non_traditional_address_types.json"
+    ) as json_path:
+        load_lookup_sql = f"""
+        WITH json_data AS (
+            SELECT * FROM read_json_auto('{json_path}')
+        ),
+        unpivoted AS (
+            UNPIVOT json_data
+            ON COLUMNS(*)
+            INTO NAME classification VALUE patterns
         )
-    ),
-    unpivoted AS (
-        UNPIVOT json_data
-        ON COLUMNS(*)
-        INTO NAME classification VALUE patterns
-    )
-    SELECT
-        UPPER(TRIM(unnest(patterns))) AS pattern,
-        LOWER(classification) AS classification
-    FROM unpivoted
-    WHERE patterns IS NOT NULL
-    """
+        SELECT
+            UPPER(TRIM(unnest(patterns))) AS pattern,
+            LOWER(classification) AS classification
+        FROM unpivoted
+        WHERE patterns IS NOT NULL
+        """
 
-    # Build the classification using a correlated subquery
-    # This checks if any pattern matches the address tokens string
+    # Checks if any non-traditional patterns match the address tokens string
     classify_sql = """
     SELECT
         input_data.*,
