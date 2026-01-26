@@ -32,16 +32,17 @@ def get_hackney_council_data(
     con: duckdb.DuckDBPyConnection,
     sample_mode: bool = False,
 ) -> duckdb.DuckDBPyRelation:
-    """Load Hackney council tax band data from S3.
+    """Load Hackney council tax band data.
 
     The CSV contains council tax band records with UPRN as the unique identifier.
     """
-    load_duckdb_httpfs(con)
-
     base_path = resolve_s3_path("UKAM_HACKNEY_S3_BASE_PATH", "UKAM_HACKNEY_DATA_PATH")
+    if base_path.startswith("s3://"):
+        load_duckdb_httpfs(con)
+
     sql = _HACKNEY_SOURCE.select_statement(base_path)
 
-    print(f"Reading Hackney dataset from S3: {base_path}{_HACKNEY_SOURCE.s3_key}")
+    print(f"Reading Hackney dataset from: {base_path}{_HACKNEY_SOURCE.s3_key}")
 
     df_messy_raw = con.sql(sql)
 

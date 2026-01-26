@@ -140,7 +140,7 @@ print(calculate_match_metrics(match_candidates))
 
 print("\n--- Accuracy Metrics ---\n")
 accuracy = calculate_accuracy_metrics(match_candidates)
-accuracy.show()
+accuracy.show(max_width=10000)
 
 incorrect_count = (
     match_candidates.filter(

@@ -70,11 +70,10 @@ def get_lambeth_council_data(
     con: duckdb.DuckDBPyConnection,
     sample_mode: bool = False,
 ) -> duckdb.DuckDBPyRelation:
-    # Ensure httpfs extension is loaded for S3 access
-    load_duckdb_httpfs(con)
-
     base_path = resolve_s3_path("UKAM_LAMBETH_S3_BASE_PATH", "UKAM_LAMBETH_DATA_PATH")
-    print(f"Reading Lambeth datasets from S3: {base_path}")
+    if base_path.startswith("s3://"):
+        load_duckdb_httpfs(con)
+    print(f"Reading Lambeth datasets from: {base_path}")
     union_sql = "\nUNION ALL\n".join(
         cfg.select_statement(base_path) for cfg in _LAMBETH_SOURCES
     )
