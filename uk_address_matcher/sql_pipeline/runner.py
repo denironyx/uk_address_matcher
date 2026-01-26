@@ -522,9 +522,10 @@ class DuckDBPipeline(CTEPipeline):
                 current_fragment = subset[-1]
                 sql = self._compose_with_sql_from(subset)
 
-                header = f"\n=== DEBUG STEP {index}/{total} — alias `{current_fragment.alias}`"
+                header = f"\n=== DEBUG STEP {index}/{total}"
                 if current_fragment.stage_name:
-                    header += f" · stage `{current_fragment.stage_name}`"
+                    header += f" — stage `{current_fragment.stage_name}`"
+                header += f" · alias `{current_fragment.alias}`"
                 if current_fragment.fragment_name:
                     header += f" · cte `{current_fragment.fragment_name}`"
                 header += " ===\n"
@@ -565,11 +566,16 @@ class DuckDBPipeline(CTEPipeline):
         total = len(work_items)
         for idx, fragment in enumerate(work_items, start=1):
             # Always emit a header during materialised debug to mirror non-materialised mode
-            header = f"\n=== DEBUG STEP {idx}/{total} — alias `{fragment.alias}`"
+            header = f"\n=== DEBUG STEP {idx}/{total}"
             if fragment.stage_name:
-                header += f" · stage `{fragment.stage_name}`"
-            if fragment.fragment_name:
-                header += f" · cte `{fragment.fragment_name}`"
+                header += f" — stage `{fragment.stage_name}`"
+                header += f" · alias `{fragment.alias}`"
+                if fragment.fragment_name:
+                    header += f" · cte `{fragment.fragment_name}`"
+            else:
+                header += f" — alias `{fragment.alias}`"
+                if fragment.fragment_name:
+                    header += f" · cte `{fragment.fragment_name}`"
             header += " ===\n"
             _emit_debug(header)
             if fragment.stage_description:
