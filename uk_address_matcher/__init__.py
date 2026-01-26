@@ -1,4 +1,4 @@
-__version__ = "0.0.3"
+__version__ = "1.0.0.dev23"
 
 from uk_address_matcher.cleaning.chunking_strategies import (
     clean_data_with_minimal_steps,
