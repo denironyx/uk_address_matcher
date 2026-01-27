@@ -65,7 +65,6 @@ def _restrict_canonical_to_fuzzy_postcodes(
         "canon.has_business_unit",
         "canon.business_unit_type",
         "canon.business_unit_id",
-        "canon.non_traditional_address_type",
     ]
 
     if postcode_strategy == "exact":

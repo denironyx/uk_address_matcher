@@ -3,7 +3,6 @@ from __future__ import annotations
 from uk_address_matcher.cleaning.steps.normalisation import (
     _add_ukam_address_id,
     _canonicalise_postcode,
-    _classify_non_traditional_address,
     _clean_address_string_first_pass,
     _normalise_abbreviations_and_units,
     _remove_duplicate_end_tokens,
@@ -53,8 +52,6 @@ __all__ = [
     "_rename_and_select_columns",
     "_normalise_abbreviations_and_units",
     "_add_ukam_address_id",
-    # TODO(ThomasHepworth): this may be better extracted directly from the OS data?
-    "_classify_non_traditional_address",
     # tokenisation
     "_split_numeric_tokens_to_cols",
     "_tokenise_address_without_numbers",

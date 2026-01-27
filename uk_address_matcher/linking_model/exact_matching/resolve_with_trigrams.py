@@ -55,8 +55,6 @@ def _resolve_with_trigrams(
     # We require exact matches on these to reduce false positives (e.g. matching
     # "12 ALLEN ROAD" to "FIRST FLOOR FLAT 12 ALLEN ROAD" or
     # "UNIT C 32 PARKHALL" to "UNIT F 32 PARKHALL").
-    # We also include non_traditional_address_type to ensure we only match
-    # addresses of the same classification (e.g. bus shelters to bus shelters).
     unit_fields = """
         has_flat_indicator,
         flat_positional,
@@ -64,8 +62,7 @@ def _resolve_with_trigrams(
         flat_number,
         has_business_unit,
         business_unit_type,
-        business_unit_id,
-        non_traditional_address_type
+        business_unit_id
     """
 
     canonical_trigrams_sql = f"""
@@ -107,7 +104,6 @@ def _resolve_with_trigrams(
             has_business_unit,
             business_unit_type,
             business_unit_id,
-            non_traditional_address_type,
             trigram_hash,
             MIN(canonical_ukam_address_id) AS canonical_ukam_address_id,
             MIN(canonical_unique_id) AS canonical_unique_id
@@ -122,7 +118,6 @@ def _resolve_with_trigrams(
             has_business_unit,
             business_unit_type,
             business_unit_id,
-            non_traditional_address_type,
             trigram_hash
         HAVING COUNT(DISTINCT canonical_ukam_address_id) = 1
     """
@@ -179,7 +174,6 @@ def _resolve_with_trigrams(
             AND fuzzy.has_business_unit IS NOT DISTINCT FROM unique_index.has_business_unit
             AND fuzzy.business_unit_type IS NOT DISTINCT FROM unique_index.business_unit_type
             AND fuzzy.business_unit_id IS NOT DISTINCT FROM unique_index.business_unit_id
-            AND fuzzy.non_traditional_address_type IS NOT DISTINCT FROM unique_index.non_traditional_address_type
     """
 
     # TODO(ThomasHepworth): Realistically, we don't need the count check if
