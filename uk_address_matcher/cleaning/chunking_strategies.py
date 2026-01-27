@@ -122,7 +122,7 @@ def clean_data_with_minimal_steps(
         # causes the lazy eval to return the same rows each time
         chunk = con.sql(f"""
         SELECT *
-            FROM __ukam_input_addresses_{uid}
+            FROM {input_name}
             LIMIT {chunk_size} OFFSET {offset}
         """)
 
