@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import TYPE_CHECKING, Optional
 
 from duckdb import DuckDBPyConnection, DuckDBPyRelation
@@ -18,14 +19,38 @@ if TYPE_CHECKING:
 logger = logging.getLogger("uk_address_matcher")
 
 
-def _log_progress(total_records: int, processed_records: int, stage_type: str) -> None:
+def _format_elapsed(elapsed_seconds: float) -> str:
+    total_seconds = int(round(max(0.0, elapsed_seconds)))
+    minutes, seconds = divmod(total_seconds, 60)
+    return f"{minutes}m {seconds:02d}s"
+
+
+def _log_progress(
+    total_records: int,
+    processed_records: int,
+    stage_type: str,
+    *,
+    chunk_index: int | None = None,
+    total_chunks: int | None = None,
+    chunk_elapsed_seconds: float | None = None,
+) -> None:
     percentage_complete = (
         processed_records / total_records if total_records > 0 else 1.0
     )
-    logger.info(
+
+    message = (
         f"{stage_type}"
         f"{processed_records:,.0f} records ({percentage_complete:.0%} complete)"
     )
+    if chunk_elapsed_seconds is not None:
+        chunk_suffix = ""
+        if chunk_index is not None and total_chunks is not None:
+            chunk_suffix = f"chunk {chunk_index + 1}/{total_chunks} "
+        message += (
+            f" \u2014 {chunk_suffix}took {_format_elapsed(chunk_elapsed_seconds)}"
+        )
+
+    logger.info(message)
 
 
 def _calculate_chunk_size(total_records: int, num_of_chunks: int) -> int:
@@ -86,10 +111,12 @@ def clean_data_with_minimal_steps(
     total_rows = address_table.count("*").fetchone()[0]
 
     chunk_size = _calculate_chunk_size(total_rows, num_of_chunks)
+    total_chunks = (total_rows + chunk_size - 1) // chunk_size
 
     con.execute(f"DROP TABLE IF EXISTS __ukam_chunked_addresses_{uid}")
 
     for chunk_index, offset in enumerate(range(0, total_rows, chunk_size)):
+        chunk_started_at = time.perf_counter()
         # NB: using address_table.limit(n=chunk_size, offset=offset).execute()
         # causes the lazy eval to return the same rows each time
         chunk = con.sql(f"""
@@ -103,16 +130,19 @@ def clean_data_with_minimal_steps(
             chunk, con, debug_options=debug_options if chunk_index == 0 else None
         )
 
-        _log_progress(
-            total_rows,
-            min(offset + chunk_size, total_rows),
-            stage_type="Cleaned and preprocessed: ",
-        )
-
         if chunk_index == 0:
             processed_chunk.create(f"__ukam_chunked_addresses_{uid}")
         else:
             processed_chunk.insert_into(f"__ukam_chunked_addresses_{uid}")
+
+        _log_progress(
+            total_rows,
+            min(offset + chunk_size, total_rows),
+            stage_type="Cleaned and preprocessed: ",
+            chunk_index=chunk_index,
+            total_chunks=total_chunks,
+            chunk_elapsed_seconds=time.perf_counter() - chunk_started_at,
+        )
 
     return con.table(f"__ukam_chunked_addresses_{uid}")
 
@@ -187,9 +217,11 @@ def clean_data_with_term_frequencies(
     )
 
     chunk_size = _calculate_chunk_size(total_rows, num_of_chunks)
+    total_chunks = (total_rows + chunk_size - 1) // chunk_size
 
     # Apply term frequencies to cleaned chunks
     for chunk_index, offset in enumerate(range(0, total_rows, chunk_size)):
+        chunk_started_at = time.perf_counter()
         chunk = con.sql(f"""
         SELECT *
             FROM __ukam_cleaned_addresses_{uid}
@@ -206,17 +238,20 @@ def clean_data_with_term_frequencies(
             debug_options=debug_options if chunk_index == 0 else None,
         )
 
-        _log_progress(
-            total_rows,
-            min(offset + chunk_size, total_rows),
-            stage_type="Applied term frequencies: ",
-        )
-
         if offset == 0:
             con.execute(f"DROP TABLE IF EXISTS __ukam_addresses_processed_{uid}")
             processed_chunk.create(f"__ukam_addresses_processed_{uid}")
         else:
             processed_chunk.insert_into(f"__ukam_addresses_processed_{uid}")
+
+        _log_progress(
+            total_rows,
+            min(offset + chunk_size, total_rows),
+            stage_type="Applied term frequencies: ",
+            chunk_index=chunk_index,
+            total_chunks=total_chunks,
+            chunk_elapsed_seconds=time.perf_counter() - chunk_started_at,
+        )
 
     return con.table(f"__ukam_addresses_processed_{uid}")
 
