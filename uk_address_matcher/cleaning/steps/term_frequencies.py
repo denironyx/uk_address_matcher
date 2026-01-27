@@ -14,6 +14,8 @@ def _add_term_frequencies_to_address_tokens():
 
     Uses explode-join-reaggregate but only sorts/aggregates scalar rel_freq values,
     then zips them back to the original token list to build structs at the end.
+    Performance optimisation: drop token strings after join to make sorting (int, float)
+    pairs extremely fast compared to sorting (int, string, float) tuples.
     """
 
     base_sql = """
@@ -32,26 +34,29 @@ def _add_term_frequencies_to_address_tokens():
     GROUP BY token
     """
 
+    # 1. Explode to rows - we only need ID, Token, and Index
     exploded_tokens_sql = """
     SELECT
-        b.ukam_address_id,
-        t.token,
-        t.ord AS token_idx
-    FROM {base} AS b
-    CROSS JOIN unnest(b.address_without_numbers_tokenised)
-        WITH ORDINALITY AS t(token, ord)
+        ukam_address_id,
+        UNNEST(address_without_numbers_tokenised) AS token,
+        GENERATE_SUBSCRIPTS(address_without_numbers_tokenised, 1) AS token_idx
+    FROM {base}
     """
 
+    # 2. Join to frequencies - we ONLY keep the Frequency (Float) and the Index (Int)
+    # We drop the Token string here. It is dead weight for the sort.
     joined_scalars_sql = """
     SELECT
         e.ukam_address_id,
         e.token_idx,
-        COALESCE(f.rel_freq, 5e-5) AS rel_freq
+        COALESCE(CAST(f.rel_freq AS REAL), CAST(5e-5 AS REAL)) AS rel_freq
     FROM {exploded_tokens} e
     LEFT JOIN {rel_tok_freq_cte} f
         ON e.token = f.token
     """
 
+    # 3. Aggregate ONLY the frequencies
+    # Sorting (Int, Float) pairs is extremely fast compared to (Int, String, Float)
     reaggregated_freqs_sql = """
     SELECT
         ukam_address_id,
@@ -60,6 +65,9 @@ def _add_term_frequencies_to_address_tokens():
     GROUP BY ukam_address_id
     """
 
+    # 4. Zip the sorted frequencies back to the ORIGINAL token list
+    # This guarantees order (because the original list is the source of truth)
+    # and constructs the Structs at the very last moment
     final_sql = """
     SELECT
         base.* EXCLUDE (address_without_numbers_tokenised),
@@ -94,32 +102,37 @@ def _add_term_frequencies_to_address_tokens_using_registered_df():
 
     Uses explode-join-reaggregate but only sorts/aggregates scalar rel_freq values,
     then zips them back to the original token list to build structs at the end.
+    Performance optimisation: drop token strings after join to make sorting (int, float)
+    pairs extremely fast compared to sorting (int, string, float) tuples.
     """
 
     base_sql = """
     SELECT * FROM {input}
     """
 
+    # 1. Explode to rows - we only need ID, Token, and Index
     exploded_tokens_sql = """
     SELECT
-        b.ukam_address_id,
-        t.token,
-        t.ord AS token_idx
-    FROM {base} AS b
-    CROSS JOIN unnest(b.address_without_numbers_tokenised)
-        WITH ORDINALITY AS t(token, ord)
+        ukam_address_id,
+        UNNEST(address_without_numbers_tokenised) AS token,
+        GENERATE_SUBSCRIPTS(address_without_numbers_tokenised, 1) AS token_idx
+    FROM {base}
     """
 
+    # 2. Join to frequencies - we ONLY keep the Frequency (Float) and the Index (Int)
+    # We drop the Token string here. It is dead weight for the sort.
     joined_scalars_sql = """
     SELECT
         e.ukam_address_id,
         e.token_idx,
-        COALESCE(rel_tok_freq.rel_freq, 5e-5) AS rel_freq
+        COALESCE(CAST(rel_tok_freq.rel_freq AS REAL), CAST(5e-5 AS REAL)) AS rel_freq
     FROM {exploded_tokens} e
     LEFT JOIN rel_tok_freq
         ON e.token = rel_tok_freq.token
     """
 
+    # 3. Aggregate ONLY the frequencies
+    # Sorting (Int, Float) pairs is extremely fast compared to (Int, String, Float)
     reaggregated_freqs_sql = """
     SELECT
         ukam_address_id,
@@ -128,6 +141,9 @@ def _add_term_frequencies_to_address_tokens_using_registered_df():
     GROUP BY ukam_address_id
     """
 
+    # 4. Zip the sorted frequencies back to the ORIGINAL token list
+    # This guarantees order (because the original list is the source of truth)
+    # and constructs the Structs at the very last moment
     final_sql = """
     SELECT
         base.* EXCLUDE (address_without_numbers_tokenised),
