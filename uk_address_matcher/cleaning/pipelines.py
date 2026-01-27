@@ -6,7 +6,7 @@ from uk_address_matcher.cleaning.steps import (
     _add_term_frequencies_to_address_tokens_using_registered_df,
     _add_ukam_address_id,
     _canonicalise_postcode,
-    # _classify_non_traditional_address,
+    _classify_non_traditional_address,
     _clean_address_string_first_pass,
     _clean_address_string_second_pass,
     _first_unusual_token,
@@ -53,7 +53,7 @@ QUEUE_PRE_TF = [
     _clean_address_string_second_pass,
     _split_numeric_tokens_to_cols,
     _tokenise_address_without_numbers,
-    # _classify_non_traditional_address,
+    _classify_non_traditional_address,
 ]
 
 COMMON_AND_UNIQUE = [
