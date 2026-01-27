@@ -246,59 +246,6 @@ def _normalise_abbreviations_and_units() -> list[CTEStep]:
 
 
 @pipeline_stage(
-    name="classify_non_traditional_address",
-    description="Classify addresses as non-traditional types (e.g. bus shelters, telephone boxes, substations)",
-    tags=["classification"],
-)
-def _classify_non_traditional_address() -> list[CTEStep]:
-    """Classify addresses that represent non-traditional address types.
-
-    Loads classification patterns from a JSON file and scans the address for
-    bigrams/trigrams that match known non-traditional address patterns
-    (e.g. BUS SHELTER, TELEPHONE BOX, ELECTRICITY SUBSTATION).
-
-    Adds a `non_traditional_address_type` column with the classification or NULL
-    if the address appears to be a traditional building address.
-    """
-    read_non_trad_sql = package_resource_read_sql(
-        "uk_address_matcher.data", "non_traditional_address_types.json"
-    )
-    load_lookup_sql = f"""
-    WITH json_data AS (
-        {read_non_trad_sql}
-    ),
-    unpivoted AS (
-        UNPIVOT json_data
-        ON COLUMNS(*)
-        INTO NAME classification VALUE patterns
-    )
-    SELECT
-        UPPER(TRIM(unnest(patterns))) AS pattern,
-        LOWER(classification) AS classification
-    FROM unpivoted
-    WHERE patterns IS NOT NULL
-    """
-
-    # Checks if any non-traditional patterns match the address tokens string
-    classify_sql = """
-    SELECT
-        input_data.*,
-        (
-            SELECT classification
-            FROM {non_trad_lookup} lookup
-            WHERE array_to_string(input_data.address_tokens, ' ') LIKE '%' || lookup.pattern || '%'
-            LIMIT 1
-        ) AS non_traditional_address_type
-    FROM {input} input_data
-    """
-
-    return [
-        CTEStep("non_trad_lookup", load_lookup_sql),
-        CTEStep("with_classification", classify_sql),
-    ]
-
-
-@pipeline_stage(
     name="peel_common_uk_end_tokens",
     description="Iteratively remove common UK locality tokens (cities, counties, boroughs) from the end of addresses",
     tags=["cleaning", "normalisation"],
