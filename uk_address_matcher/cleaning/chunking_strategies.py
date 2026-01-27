@@ -46,9 +46,7 @@ def _log_progress(
         chunk_suffix = ""
         if chunk_index is not None and total_chunks is not None:
             chunk_suffix = f"chunk {chunk_index + 1}/{total_chunks} "
-        message += (
-            f" \u2014 {chunk_suffix}took {_format_elapsed(chunk_elapsed_seconds)}"
-        )
+        message += f" - {chunk_suffix}took {_format_elapsed(chunk_elapsed_seconds)}"
 
     logger.info(message)
 
@@ -116,14 +114,12 @@ def clean_data_with_minimal_steps(
 
     con.execute(f"DROP TABLE IF EXISTS __ukam_chunked_addresses_{uid}")
 
-    for chunk_index, offset in enumerate(range(0, total_rows, chunk_size)):
+    for chunk_index in range(total_chunks):
         chunk_started_at = time.perf_counter()
-        # NB: using address_table.limit(n=chunk_size, offset=offset).execute()
-        # causes the lazy eval to return the same rows each time
         chunk = con.sql(f"""
         SELECT *
             FROM {input_name}
-            LIMIT {chunk_size} OFFSET {offset}
+            WHERE (abs(hash(coalesce(address_concat, ''))) % {total_chunks}) = {chunk_index}
         """)
 
         # Process the chunk without address ID, applying debug options only on first iteration
@@ -138,7 +134,7 @@ def clean_data_with_minimal_steps(
 
         _log_progress(
             total_rows,
-            min(offset + chunk_size, total_rows),
+            min((chunk_index + 1) * chunk_size, total_rows),
             stage_type="Cleaned and preprocessed: ",
             chunk_index=chunk_index,
             total_chunks=total_chunks,
@@ -221,12 +217,12 @@ def clean_data_with_term_frequencies(
     total_chunks = (total_rows + chunk_size - 1) // chunk_size
 
     # Apply term frequencies to cleaned chunks
-    for chunk_index, offset in enumerate(range(0, total_rows, chunk_size)):
+    for chunk_index in range(total_chunks):
         chunk_started_at = time.perf_counter()
         chunk = con.sql(f"""
         SELECT *
             FROM __ukam_cleaned_addresses_{uid}
-            LIMIT {chunk_size} OFFSET {offset}
+            WHERE (abs(hash(coalesce(original_address_concat, ''))) % {total_chunks}) = {chunk_index}
         """)
 
         # Numeric TF columns should only be attached when using precomputed TFs
@@ -239,7 +235,7 @@ def clean_data_with_term_frequencies(
             debug_options=debug_options if chunk_index == 0 else None,
         )
 
-        if offset == 0:
+        if chunk_index == 0:
             con.execute(f"DROP TABLE IF EXISTS __ukam_addresses_processed_{uid}")
             processed_chunk.create(f"__ukam_addresses_processed_{uid}")
         else:
@@ -247,7 +243,7 @@ def clean_data_with_term_frequencies(
 
         _log_progress(
             total_rows,
-            min(offset + chunk_size, total_rows),
+            min((chunk_index + 1) * chunk_size, total_rows),
             stage_type="Applied term frequencies: ",
             chunk_index=chunk_index,
             total_chunks=total_chunks,
