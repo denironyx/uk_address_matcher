@@ -23,7 +23,7 @@ def _add_term_frequencies_to_address_tokens():
     rel_tok_freq_cte_sql = """
     SELECT
         token,
-        CAST(count(*) / sum(count(*)) OVER () AS REAL) AS rel_freq
+        count(*)::DOUBLE / sum(count(*)) OVER () AS rel_freq
     FROM (
         SELECT
             unnest(address_without_numbers_tokenised) AS token
@@ -46,7 +46,7 @@ def _add_term_frequencies_to_address_tokens():
     SELECT
         e.ukam_address_id,
         e.token_idx,
-        COALESCE(CAST(f.rel_freq AS REAL), CAST(5e-5 AS REAL)) AS rel_freq
+        COALESCE(f.rel_freq, 5e-5) AS rel_freq
     FROM {exploded_tokens} e
     LEFT JOIN {rel_tok_freq_cte} f
         ON e.token = f.token
@@ -65,7 +65,7 @@ def _add_term_frequencies_to_address_tokens():
         base.* EXCLUDE (address_without_numbers_tokenised),
         list_transform(
             list_zip(base.address_without_numbers_tokenised, agg.freq_arr),
-            x -> struct_pack(tok := x[1], rel_freq := CAST(x[2] AS REAL))
+            x -> struct_pack(tok := x[1], rel_freq := x[2])
         ) AS token_rel_freq_arr
     FROM {base} AS base
     INNER JOIN {reaggregated_freqs} AS agg
@@ -114,7 +114,7 @@ def _add_term_frequencies_to_address_tokens_using_registered_df():
     SELECT
         e.ukam_address_id,
         e.token_idx,
-        COALESCE(CAST(rel_tok_freq.rel_freq AS REAL), CAST(5e-5 AS REAL)) AS rel_freq
+        COALESCE(rel_tok_freq.rel_freq, 5e-5) AS rel_freq
     FROM {exploded_tokens} e
     LEFT JOIN rel_tok_freq
         ON e.token = rel_tok_freq.token
@@ -133,7 +133,7 @@ def _add_term_frequencies_to_address_tokens_using_registered_df():
         base.* EXCLUDE (address_without_numbers_tokenised),
         list_transform(
             list_zip(base.address_without_numbers_tokenised, agg.freq_arr),
-            x -> struct_pack(tok := x[1], rel_freq := CAST(x[2] AS REAL))
+            x -> struct_pack(tok := x[1], rel_freq := x[2])
         ) AS token_rel_freq_arr
     FROM {base} AS base
     INNER JOIN {reaggregated_freqs} AS agg
@@ -360,7 +360,7 @@ def _get_token_frequeny_table():
         SELECT
             token,
             COUNT(*) AS count,
-            CAST(COUNT(*) / (SELECT COUNT(*) FROM {unnested}) AS REAL) AS rel_freq
+            COUNT(*)::DOUBLE / (SELECT COUNT(*) FROM {unnested}) AS rel_freq
         FROM {unnested}
         GROUP BY token
     ) AS token_counts
