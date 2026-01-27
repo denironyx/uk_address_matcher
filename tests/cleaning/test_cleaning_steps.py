@@ -2,7 +2,6 @@ import duckdb
 import pytest
 
 from uk_address_matcher.cleaning.steps import (
-    _classify_non_traditional_address,
     _parse_out_business_unit,
     _parse_out_flat_position_and_letter,
     _remove_duplicate_end_tokens,
@@ -192,92 +191,6 @@ def test_remove_duplicate_end_tokens():
     for (address, expected), row in zip(test_cases, rows):
         assert row[0] == expected, (
             f"Address '{address}' expected '{expected}' but got '{row[0]}'"
-        )
-
-
-def test_classify_non_traditional_address():
-    connection = duckdb.connect()
-
-    # Format: (address_tokens, expected_classification)
-    # Note: address_tokens is a list that gets joined with spaces for matching
-    # Classifications are lowercase as per the implementation
-    test_cases = [
-        # Bus infrastructure
-        (["BUS", "SHELTER", "MAIN", "STREET"], "bus_infrastructure"),
-        (["BUS", "STOP", "HIGH", "ROAD"], "bus_infrastructure"),
-        (["BUS", "STATION", "LONDON"], "bus_infrastructure"),
-        # Telephone
-        (["TELEPHONE", "BOX", "OXFORD", "STREET"], "telephone"),
-        (["TELEPHONE", "KIOSK", "PARK", "LANE"], "telephone"),
-        (["PHONE", "BOX", "CORNER"], "telephone"),
-        # Post
-        (["POST", "BOX", "123", "HIGH", "STREET"], "post"),
-        (["POST", "OFFICE", "MAIN", "ROAD"], "post"),
-        # Toilet
-        (["PUBLIC", "TOILET", "PARK", "ROAD"], "toilet"),
-        (["PUBLIC", "CONVENIENCE", "TOWN", "CENTRE"], "toilet"),
-        # Notice board
-        (["NOTICE", "BOARD", "VILLAGE", "GREEN"], "notice_board"),
-        (["INFORMATION", "BOARD", "STATION"], "notice_board"),
-        # Electricity
-        (["ELECTRICITY", "SUBSTATION", "INDUSTRIAL", "ESTATE"], "electricity"),
-        (["TRANSFORMER", "STATION", "REAR", "OF"], "electricity"),
-        # Gas
-        (["GAS", "GOVERNOR", "FIELD", "LANE"], "gas"),
-        # Water
-        (["PUMPING", "STATION", "WATER", "LANE"], "water"),
-        (["SEWAGE", "WORKS", "RIVERSIDE"], "water"),
-        # Telecom
-        (["TELECOMMUNICATIONS", "MAST", "HILLTOP"], "telecom"),
-        (["MOBILE", "MAST", "FARM", "LANE"], "telecom"),
-        # Parking
-        (["CAR", "PARK", "SHOPPING", "CENTRE"], "parking"),
-        (["PARKING", "BAY", "HIGH", "STREET"], "parking"),
-        # Railway
-        (["RAILWAY", "STATION", "TOWN", "CENTRE"], "railway"),
-        (["TRAIN", "STATION", "LONDON"], "railway"),
-        # ATM
-        (["ATM", "SITE", "SUPERMARKET"], "atm"),
-        (["CASH", "MACHINE", "BANK"], "atm"),
-        # CCTV
-        (["CCTV", "COLUMN", "HIGH", "STREET"], "cctv"),
-        # Lighting
-        (["STREET", "LIGHT", "PARK", "ROAD"], "lighting"),
-        (["LAMP", "POST", "CORNER"], "lighting"),
-        # Land
-        (["LAND", "AT", "REAR", "OF", "10", "HIGH", "STREET"], "land"),
-        (["LAND", "ADJACENT", "TO", "FARM"], "land"),
-        # Garage
-        (["GARAGE", "BLOCK", "ESTATE", "ROAD"], "garage"),
-        (["LOCK", "UP", "GARAGE", "REAR"], "garage"),
-        # Shop
-        (["SHOP", "268", "KNIGHTS", "HILL", "LONDON"], "shop"),
-        # Traditional addresses (should return NULL)
-        (["10", "HIGH", "STREET", "LONDON"], None),
-        (["FLAT", "A", "25", "MAIN", "ROAD"], None),
-        (["THE", "OLD", "RECTORY", "CHURCH", "LANE"], None),
-        (["APARTMENT", "5", "RIVERSIDE", "COURT"], None),
-    ]
-
-    # Build input with address_tokens as arrays
-    values = ",".join(f"(ARRAY{tokens})" for tokens, _ in test_cases)
-    input_relation = connection.sql(
-        f"SELECT * FROM (VALUES {values}) AS t(address_tokens)"
-    )
-
-    result = _run_single_stage(
-        _classify_non_traditional_address, input_relation, connection
-    )
-    rows = result.fetchall()
-    columns = result.columns
-    classification_idx = columns.index("non_traditional_address_type")
-
-    for (tokens, expected_classification), row in zip(test_cases, rows):
-        address_str = " ".join(tokens)
-        actual = row[classification_idx]
-        assert actual == expected_classification, (
-            f"Address '{address_str}' expected classification '{expected_classification}' "
-            f"but got '{actual}'"
         )
 
 
