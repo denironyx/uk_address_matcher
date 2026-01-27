@@ -106,7 +106,8 @@ def clean_data_with_minimal_steps(
         Cleaned address data without term frequencies, materialised as a relation.
     """
     uid = _uid()
-    address_table.to_table(f"__ukam_input_addresses_{uid}")
+    input_name = f"__ukam_input_addresses_{uid}"
+    con.register(input_name, address_table)
     # For chunked processing, don't add ID yet - process chunks first
     total_rows = address_table.count("*").fetchone()[0]
 
@@ -121,7 +122,7 @@ def clean_data_with_minimal_steps(
         # causes the lazy eval to return the same rows each time
         chunk = con.sql(f"""
         SELECT *
-            FROM __ukam_input_addresses_{uid}
+            FROM {input_name}
             LIMIT {chunk_size} OFFSET {offset}
         """)
 
