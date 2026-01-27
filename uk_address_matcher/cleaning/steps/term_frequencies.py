@@ -10,13 +10,7 @@ from uk_address_matcher.sql_pipeline.steps import CTEStep, pipeline_stage
     tags="term_frequency_analysis",
 )
 def _add_term_frequencies_to_address_tokens():
-    """Compute token-level relative frequencies and attach them to each record.
-
-    Uses explode-join-reaggregate but only sorts/aggregates scalar rel_freq values,
-    then zips them back to the original token list to build structs at the end.
-    Performance optimisation: drop token strings after join to make sorting (int, float)
-    pairs extremely fast compared to sorting (int, string, float) tuples.
-    """
+    """Compute token-level relative frequencies and attach them to each record."""
 
     base_sql = """
     SELECT * FROM {input}
@@ -98,13 +92,7 @@ def _add_term_frequencies_to_address_tokens():
     tags="term_frequency_analysis",
 )
 def _add_term_frequencies_to_address_tokens_using_registered_df():
-    """Attach precomputed token frequencies registered as rel_tok_freq.
-
-    Uses explode-join-reaggregate but only sorts/aggregates scalar rel_freq values,
-    then zips them back to the original token list to build structs at the end.
-    Performance optimisation: drop token strings after join to make sorting (int, float)
-    pairs extremely fast compared to sorting (int, string, float) tuples.
-    """
+    """Attach precomputed token frequencies registered as rel_tok_freq."""
 
     base_sql = """
     SELECT * FROM {input}
