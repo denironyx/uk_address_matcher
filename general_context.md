@@ -8,9 +8,13 @@ df_addresses_to_search_within
 | Column          | Description                                      |
 |-----------------|--------------------------------------------------|
 | `unique_id`     | Unique identifier for each record                |
-| `source_dataset`| Constant string identifying the dataset, e.g., `epc` |
-| `address_concat`| Full address concatenated without postcode       |
-| `postcode`      | Postcode                                         |
+| `address_concat`| Full address (may include postcode)              |
+| `postcode`      | (Optional) Postcode - if not provided, will be extracted from `address_concat` |
+
+The library automatically handles postcode extraction:
+- If a `postcode` column exists with a non-empty value, that postcode is used
+- If no `postcode` column exists, or the value is NULL/empty, the postcode is extracted from `address_concat`
+- The postcode is always removed from `address_concat` to avoid duplication in matching
 
 This makes the package very flexible as the user doesn't need to worry about the format of the address data.
 
