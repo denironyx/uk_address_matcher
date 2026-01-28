@@ -92,7 +92,16 @@ def _clean_data_with_minimal_steps(
         pipeline_name="Clean data with minimal steps",
         pipeline_description="A minimal cleaning pipeline without term frequencies",
     )
-    return pipeline.run(debug_options)
+    result = pipeline.run(debug_options)
+
+    # Exclude source_dataset column if present (will be overwritten by linker)
+    if "source_dataset" in result.columns:
+        con.register("__temp_result_for_exclude", result)
+        result = con.sql(
+            "SELECT * EXCLUDE (source_dataset) FROM __temp_result_for_exclude"
+        )
+
+    return result
 
 
 def _clean_data_using_precomputed_rel_tok_freq(
@@ -132,7 +141,16 @@ def _clean_data_using_precomputed_rel_tok_freq(
             "Clean address data using a supplied table of relative token frequencies"
         ),
     )
-    return pipeline.run(debug_options)
+    result = pipeline.run(debug_options)
+
+    # Exclude source_dataset column if present (will be overwritten by linker)
+    if "source_dataset" in result.columns:
+        con.register("__temp_result_for_exclude", result)
+        result = con.sql(
+            "SELECT * EXCLUDE (source_dataset) FROM __temp_result_for_exclude"
+        )
+
+    return result
 
 
 def get_numeric_term_frequencies_from_address_table(
@@ -251,5 +269,9 @@ def _create_term_frequency_tables(
         con.sql("DROP TABLE IF EXISTS __ukam_numeric_term_frequencies")
         numeric_term_frequencies_rel.create("__ukam_numeric_term_frequencies")
 
-    con.register("rel_tok_freq", address_token_frequencies_rel)
-    return address_token_frequencies_rel
+    # Materialise the term frequency table to avoid lazy evaluation issues
+    # when the underlying data is modified or dropped
+    con.sql("DROP TABLE IF EXISTS __ukam_rel_tok_freq")
+    address_token_frequencies_rel.create("__ukam_rel_tok_freq")
+    con.register("rel_tok_freq", con.table("__ukam_rel_tok_freq"))
+    return con.table("__ukam_rel_tok_freq")
