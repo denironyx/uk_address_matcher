@@ -23,11 +23,12 @@ High performance address matching using a pre-trained [Splink](https://github.co
 
 Will match two datasets provided in this format:
 
-| address_concat               | postcode  |
-|------------------------------|-----------|
-| 123 Fake Street, Faketown    | FA1 2KE   |
-| 456 Other Road, Otherville   | NO1 3WY   |
-| ...                          | ...       |
+| unique_id | address_concat               | postcode  |
+|-----------|------------------------------|-----------|
+| 1         | 123 Fake Street, Faketown    | FA1 2KE   |
+| 2         | 456 Other Road, Otherville   | NO1 3WY   |
+| ...       | ...                          | ...       |
+
 
 Generally one dataset will be a dataset of 'messy addresses' which need matching, and the second will be a 'canonical dataset' of addresses to match to.
 
