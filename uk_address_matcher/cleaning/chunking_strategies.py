@@ -123,14 +123,20 @@ def clean_data_with_minimal_steps(
         """)
 
         # Process the chunk without address ID, applying debug options only on first iteration
+        materialised_chunk_name = f"__ukam_minimal_chunk_{uid}_{chunk_index}"
         processed_chunk = _clean_data_with_minimal_steps(
-            chunk, con, debug_options=debug_options if chunk_index == 0 else None
+            chunk,
+            con,
+            debug_options=debug_options if chunk_index == 0 else None,
+            materialised_table_name=materialised_chunk_name,
         )
 
         if chunk_index == 0:
             processed_chunk.create(f"__ukam_chunked_addresses_{uid}")
         else:
             processed_chunk.insert_into(f"__ukam_chunked_addresses_{uid}")
+
+        con.execute(f"DROP TABLE IF EXISTS {materialised_chunk_name}")
 
         _log_progress(
             total_rows,
@@ -222,17 +228,19 @@ def clean_data_with_term_frequencies(
         chunk = con.sql(f"""
         SELECT *
             FROM __ukam_cleaned_addresses_{uid}
-            WHERE (abs(hash(coalesce(original_address_concat, ''))) % {total_chunks}) = {chunk_index}
+            WHERE (abs(hash(original_address_concat)) % {total_chunks}) = {chunk_index}
         """)
 
         # Numeric TF columns should only be attached when using precomputed TFs
         # If we are chunking, we want to precompute rel token freqs and then use them
+        materialised_chunk_name = f"__ukam_tf_chunk_{uid}_{chunk_index}"
         processed_chunk = _clean_data_using_precomputed_rel_tok_freq(
             chunk,
             con=con,
             pre_cleaned_addresses=True,
             derive_distinguishing_wrt_adjacent_records=derive_distinguishing_wrt_adjacent_records,
             debug_options=debug_options if chunk_index == 0 else None,
+            materialised_table_name=materialised_chunk_name,
         )
 
         if chunk_index == 0:
@@ -240,6 +248,10 @@ def clean_data_with_term_frequencies(
             processed_chunk.create(f"__ukam_addresses_processed_{uid}")
         else:
             processed_chunk.insert_into(f"__ukam_addresses_processed_{uid}")
+
+        con.execute(f"DROP TABLE IF EXISTS {materialised_chunk_name}")
+
+        con.sql("select * from duckdb_tables").show(max_width=10000)
 
         _log_progress(
             total_rows,

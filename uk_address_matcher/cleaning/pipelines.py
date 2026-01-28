@@ -80,6 +80,9 @@ def _materialise_output_table(
     rel: DuckDBPyRelation,
     uid: str,
     exclude_source_dataset_name: bool = True,
+    *,
+    table_name: str | None = None,
+    table_name_prefix: str = "__address_table_cleaned",
 ) -> DuckDBPyRelation:
     con.register("__address_table_res", rel)
     has_source_dataset = "source_dataset" in rel.columns
@@ -88,7 +91,7 @@ def _materialise_output_table(
         if has_source_dataset and exclude_source_dataset_name
         else ""
     )
-    materialised_name = f"__address_table_cleaned_{uid}"
+    materialised_name = table_name or f"{table_name_prefix}_{uid}"
     con.execute(
         f"""
         create or replace temporary table {materialised_name} as
@@ -103,6 +106,7 @@ def _clean_data_with_minimal_steps(
     con: DuckDBPyConnection,
     *,
     debug_options: Optional[DebugOptions] = None,
+    materialised_table_name: str | None = None,
 ) -> DuckDBPyRelation:
     # Materialise the input to ensure it's properly bound
     pipeline = create_sql_pipeline(
@@ -114,7 +118,12 @@ def _clean_data_with_minimal_steps(
     )
     table_rel = pipeline.run(debug_options)
     return _materialise_output_table(
-        con, table_rel, _uid(), exclude_source_dataset_name=False
+        con,
+        table_rel,
+        _uid(),
+        exclude_source_dataset_name=False,
+        table_name=materialised_table_name,
+        table_name_prefix="__ukam_address_table_minimal",
     )
 
 
@@ -126,6 +135,7 @@ def _clean_data_using_precomputed_rel_tok_freq(
     pre_cleaned_addresses: bool = False,
     additional_stages: list = [],
     debug_options: Optional[DebugOptions] = None,
+    materialised_table_name: str | None = None,
 ) -> DuckDBPyRelation:
     pre_queue = (
         QUEUE_PRE_TF_WITH_UNIQUE_AND_COMMON
@@ -152,7 +162,13 @@ def _clean_data_using_precomputed_rel_tok_freq(
         ),
     )
     result_rel = pipeline.run(debug_options)
-    return _materialise_output_table(con, result_rel, _uid())
+    return _materialise_output_table(
+        con,
+        result_rel,
+        _uid(),
+        table_name=materialised_table_name,
+        table_name_prefix="__ukam_address_table_with_term_frequencies",
+    )
 
 
 def get_numeric_term_frequencies_from_address_table(
