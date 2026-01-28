@@ -40,11 +40,30 @@ from uk_address_matcher.sql_pipeline.runner import DebugOptions, create_sql_pipe
 
 
 def _ensure_postcode_column(rel: DuckDBPyRelation) -> DuckDBPyRelation:
-    """Ensure the relation has a postcode column, adding NULL if missing."""
-    if "postcode" not in rel.columns:
+    """Ensure the relation has a postcode column, adding NULL if missing.
+
+    Handles case-insensitive matching (e.g., 'PostCode', 'POSTCODE', 'postcode').
+    """
+    # Check for postcode column case-insensitively
+    columns_lower = [col.lower() for col in rel.columns]
+
+    if "postcode" in columns_lower:
+        # Find the actual column name (might be PostCode, POSTCODE, etc.)
+        postcode_col = [col for col in rel.columns if col.lower() == "postcode"][0]
+
+        if postcode_col != "postcode":
+            # Rename to lowercase and ensure VARCHAR type
+            return rel.select(
+                f"* EXCLUDE ({postcode_col}), CAST({postcode_col} AS VARCHAR) AS postcode"
+            )
+        else:
+            # Already lowercase, just ensure VARCHAR type
+            return rel.select(
+                "* EXCLUDE (postcode), CAST(postcode AS VARCHAR) AS postcode"
+            )
+    else:
+        # No postcode column exists, add NULL
         return rel.select("*, CAST(NULL AS VARCHAR) AS postcode")
-    # Ensure postcode is VARCHAR type (handles NULL being typed as INTEGER)
-    return rel.select("* EXCLUDE (postcode), CAST(postcode AS VARCHAR) AS postcode")
 
 
 QUEUE_PRE_TF = [

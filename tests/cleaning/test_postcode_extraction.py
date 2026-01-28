@@ -229,3 +229,45 @@ def test_postcode_extraction_preserves_other_columns():
     result = result_rel.select("other_column, numeric_column").fetchall()[0]
     assert result[0] == "some_value"
     assert result[1] == 123
+
+
+def test_postcode_column_case_insensitive():
+    """Test that postcode column is matched case-insensitively."""
+    connection = duckdb.connect()
+
+    test_cases = [
+        ("PostCode", "SW1A 1AA"),  # Mixed case
+        ("POSTCODE", "M1 2AB"),  # Upper case
+        ("postcode", "B12 3CD"),  # Lower case (already correct)
+        ("PoStCoDe", "GIR 0AA"),  # Random case
+    ]
+
+    for column_name, postcode_value in test_cases:
+        input_rel = connection.sql(
+            f"""
+            SELECT
+                '1' as unique_id,
+                '10 HIGH STREET' as address_concat,
+                '{postcode_value}' as {column_name}
+            """
+        )
+
+        result_rel = _clean_data_with_minimal_steps(input_rel, connection)
+
+        # Check that the column was renamed to lowercase 'postcode'
+        assert "postcode" in result_rel.columns, (
+            f"Expected 'postcode' column for input column '{column_name}'"
+        )
+
+        # Check that the original column name is gone (if it wasn't 'postcode')
+        if column_name != "postcode":
+            assert column_name not in result_rel.columns, (
+                f"Original column '{column_name}' should be renamed to 'postcode'"
+            )
+
+        # Check that the postcode value is preserved
+        result = result_rel.select("postcode").fetchall()[0]
+        extracted_postcode = result[0]
+        assert extracted_postcode == postcode_value, (
+            f"Expected postcode '{postcode_value}', got '{extracted_postcode}'"
+        )
