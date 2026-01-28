@@ -33,7 +33,7 @@ from uk_address_matcher.cleaning.steps.term_frequencies import (
 from uk_address_matcher.cleaning.steps.tokenisation import (
     _create_tokenised_address_concat,
 )
-from uk_address_matcher.sql_pipeline.helpers import _uid, package_resource_read_sql
+from uk_address_matcher.sql_pipeline.helpers import package_resource_read_sql
 from uk_address_matcher.sql_pipeline.runner import DebugOptions, create_sql_pipeline
 
 QUEUE_PRE_TF = [
@@ -75,40 +75,16 @@ QUEUE_POST_TF = [
 ]
 
 
-def _materialise_output_table(
-    con: DuckDBPyConnection,
-    rel: DuckDBPyRelation,
-    uid: str,
-    exclude_source_dataset_name: bool = True,
-    *,
-    table_name: str | None = None,
-    table_name_prefix: str = "__address_table_cleaned",
-) -> DuckDBPyRelation:
-    con.register("__address_table_res", rel)
-    has_source_dataset = "source_dataset" in rel.columns
-    exclude_clause = (
-        "EXCLUDE (source_dataset)"
-        if has_source_dataset and exclude_source_dataset_name
-        else ""
-    )
-    materialised_name = table_name or f"{table_name_prefix}_{uid}"
-    con.execute(
-        f"""
-        create or replace temporary table {materialised_name} as
-        select * {exclude_clause} from __address_table_res
-        """
-    )
-    return con.table(materialised_name)
-
-
 def _clean_data_with_minimal_steps(
     address_table: DuckDBPyRelation,
     con: DuckDBPyConnection,
     *,
     debug_options: Optional[DebugOptions] = None,
-    materialised_table_name: str | None = None,
 ) -> DuckDBPyRelation:
-    # Materialise the input to ensure it's properly bound
+    """Run the minimal cleaning pipeline and return a (non-materialised) relation.
+
+    Caller is responsible for materialising via create() or insert_into().
+    """
     pipeline = create_sql_pipeline(
         con,
         input_rel=address_table,
@@ -116,15 +92,7 @@ def _clean_data_with_minimal_steps(
         pipeline_name="Clean data with minimal steps",
         pipeline_description="A minimal cleaning pipeline without term frequencies",
     )
-    table_rel = pipeline.run(debug_options)
-    return _materialise_output_table(
-        con,
-        table_rel,
-        _uid(),
-        exclude_source_dataset_name=False,
-        table_name=materialised_table_name,
-        table_name_prefix="__ukam_address_table_minimal",
-    )
+    return pipeline.run(debug_options)
 
 
 def _clean_data_using_precomputed_rel_tok_freq(
@@ -135,8 +103,11 @@ def _clean_data_using_precomputed_rel_tok_freq(
     pre_cleaned_addresses: bool = False,
     additional_stages: list = [],
     debug_options: Optional[DebugOptions] = None,
-    materialised_table_name: str | None = None,
 ) -> DuckDBPyRelation:
+    """Run the term-frequency cleaning pipeline and return a (non-materialised) relation.
+
+    Caller is responsible for materialising via create() or insert_into().
+    """
     pre_queue = (
         QUEUE_PRE_TF_WITH_UNIQUE_AND_COMMON
         if derive_distinguishing_wrt_adjacent_records
@@ -161,14 +132,7 @@ def _clean_data_using_precomputed_rel_tok_freq(
             "Clean address data using a supplied table of relative token frequencies"
         ),
     )
-    result_rel = pipeline.run(debug_options)
-    return _materialise_output_table(
-        con,
-        result_rel,
-        _uid(),
-        table_name=materialised_table_name,
-        table_name_prefix="__ukam_address_table_with_term_frequencies",
-    )
+    return pipeline.run(debug_options)
 
 
 def get_numeric_term_frequencies_from_address_table(
