@@ -40,11 +40,7 @@ from uk_address_matcher.sql_pipeline.runner import DebugOptions, create_sql_pipe
 
 
 def _ensure_postcode_column(rel: DuckDBPyRelation) -> DuckDBPyRelation:
-    """Ensure the relation has a postcode column, adding NULL if missing.
-
-    This is done at the Python level before pipeline entry to avoid
-    complex SQL patterns (UNION ALL BY NAME) that can hinder DuckDB optimisation.
-    """
+    """Ensure the relation has a postcode column, adding NULL if missing."""
     if "postcode" not in rel.columns:
         return rel.select("*, CAST(NULL AS VARCHAR) AS postcode")
     # Ensure postcode is VARCHAR type (handles NULL being typed as INTEGER)
