@@ -39,10 +39,11 @@ def _add_ukam_address_id():
 def _rename_and_select_columns() -> str:
     sql = r"""
     SELECT
+        unique_id,
         address_concat as original_address_concat,
         postcode,
         ukam_address_id,
-        * EXCLUDE (address_concat, postcode, ukam_address_id)
+        * EXCLUDE (unique_id, address_concat, postcode, ukam_address_id)
     FROM {input}
     """
     return sql
