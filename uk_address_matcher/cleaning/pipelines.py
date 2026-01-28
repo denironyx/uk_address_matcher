@@ -81,10 +81,6 @@ def _clean_data_with_minimal_steps(
     *,
     debug_options: Optional[DebugOptions] = None,
 ) -> DuckDBPyRelation:
-    """Run the minimal cleaning pipeline and return a (non-materialised) relation.
-
-    Caller is responsible for materialising via create() or insert_into().
-    """
     pipeline = create_sql_pipeline(
         con,
         input_rel=address_table,
@@ -113,10 +109,6 @@ def _clean_data_using_precomputed_rel_tok_freq(
     additional_stages: list = [],
     debug_options: Optional[DebugOptions] = None,
 ) -> DuckDBPyRelation:
-    """Run the term-frequency cleaning pipeline and return a (non-materialised) relation.
-
-    Caller is responsible for materialising via create() or insert_into().
-    """
     pre_queue = (
         QUEUE_PRE_TF_WITH_UNIQUE_AND_COMMON
         if derive_distinguishing_wrt_adjacent_records
