@@ -43,7 +43,7 @@ def _add_term_frequencies_to_address_tokens():
     SELECT
         e.ukam_address_id,
         e.token_idx,
-        COALESCE(CAST(f.rel_freq AS REAL), CAST(5e-5 AS REAL)) AS rel_freq
+        COALESCE(f.rel_freq, 5e-5) AS rel_freq
     FROM {exploded_tokens} e
     LEFT JOIN {rel_tok_freq_cte} f
         ON e.token = f.token
@@ -113,7 +113,7 @@ def _add_term_frequencies_to_address_tokens_using_registered_df():
     SELECT
         e.ukam_address_id,
         e.token_idx,
-        COALESCE(CAST(rel_tok_freq.rel_freq AS REAL), CAST(5e-5 AS REAL)) AS rel_freq
+        COALESCE(rel_tok_freq.rel_freq, 5e-5) AS rel_freq
     FROM {exploded_tokens} e
     LEFT JOIN rel_tok_freq
         ON e.token = rel_tok_freq.token
