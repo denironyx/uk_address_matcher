@@ -32,6 +32,46 @@ def _add_ukam_address_id():
 
 
 @pipeline_stage(
+    name="extract_postcode_from_address",
+    description="Extract UK postcode from address_concat and remove it from the address string",
+    tags=["setup", "parsing"],
+)
+def _extract_postcode_from_address() -> str:
+    """Extract UK postcode and remove it from the address string.
+
+    This stage handles three scenarios:
+    1. If a postcode column exists with a non-empty value, use that postcode
+    2. If postcode is empty/NULL, extract postcode from address_concat
+    3. Always remove the postcode from address_concat to avoid duplication
+
+    Uses a regex to find valid UK postcodes (including GIR 0AA special case).
+
+    Note: The postcode column must exist before this stage runs. This is ensured
+    by _ensure_postcode_column() in pipelines.py at pipeline entry.
+    """
+    # UK postcode regex: matches standard formats and GIR 0AA
+    uk_postcode_regex = r"\b(?:GIR ?0AA|[A-Z][A-HJ-Y]?\d[A-Z\d]? ?\d[A-Z]{2})\b"
+
+    # Extract postcode from address and remove it from address_concat
+    # - Use COALESCE to prefer existing postcode over extracted
+    # - Always remove postcode from address_concat to avoid duplication
+    return f"""
+    SELECT
+        * EXCLUDE (postcode, address_concat),
+        TRIM(regexp_replace(
+            UPPER(address_concat),
+            '{uk_postcode_regex}',
+            ''
+        )) AS address_concat,
+        COALESCE(
+            NULLIF(TRIM(postcode), ''),
+            UPPER(regexp_extract(UPPER(address_concat), '{uk_postcode_regex}'))
+        ) AS postcode
+    FROM {{input}}
+    """
+
+
+@pipeline_stage(
     name="rename_and_select_columns",
     description="Rename and select key columns for downstream processing and assign ukam_address_id",
     tags=["setup"],

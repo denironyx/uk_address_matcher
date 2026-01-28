@@ -2,12 +2,14 @@ from typing import Optional
 
 from duckdb import DuckDBPyConnection, DuckDBPyRelation
 
+
 from uk_address_matcher.cleaning.steps import (
     _add_term_frequencies_to_address_tokens_using_registered_df,
     _add_ukam_address_id,
     _canonicalise_postcode,
     _clean_address_string_first_pass,
     _clean_address_string_second_pass,
+    _extract_postcode_from_address,
     _first_unusual_token,
     _generalised_token_aliases,
     _get_token_frequeny_table,
@@ -36,8 +38,22 @@ from uk_address_matcher.cleaning.steps.tokenisation import (
 from uk_address_matcher.sql_pipeline.helpers import _uid, package_resource_read_sql
 from uk_address_matcher.sql_pipeline.runner import DebugOptions, create_sql_pipeline
 
+
+def _ensure_postcode_column(rel: DuckDBPyRelation) -> DuckDBPyRelation:
+    """Ensure the relation has a postcode column, adding NULL if missing.
+
+    This is done at the Python level before pipeline entry to avoid
+    complex SQL patterns (UNION ALL BY NAME) that can hinder DuckDB optimisation.
+    """
+    if "postcode" not in rel.columns:
+        return rel.select("*, CAST(NULL AS VARCHAR) AS postcode")
+    # Ensure postcode is VARCHAR type (handles NULL being typed as INTEGER)
+    return rel.select("* EXCLUDE (postcode), CAST(postcode AS VARCHAR) AS postcode")
+
+
 QUEUE_PRE_TF = [
     _add_ukam_address_id,
+    _extract_postcode_from_address,
     _rename_and_select_columns,
     _trim_whitespace_address_and_postcode,
     _upper_case_address_and_postcode,
@@ -104,7 +120,8 @@ def _clean_data_with_minimal_steps(
     *,
     debug_options: Optional[DebugOptions] = None,
 ) -> DuckDBPyRelation:
-    # Materialise the input to ensure it's properly bound
+    # Ensure postcode column exists before pipeline entry
+    address_table = _ensure_postcode_column(address_table)
     pipeline = create_sql_pipeline(
         con,
         input_rel=address_table,
@@ -127,6 +144,9 @@ def _clean_data_using_precomputed_rel_tok_freq(
     additional_stages: list = [],
     debug_options: Optional[DebugOptions] = None,
 ) -> DuckDBPyRelation:
+    # Ensure postcode column exists before pipeline entry
+    if not pre_cleaned_addresses:
+        address_table = _ensure_postcode_column(address_table)
     pre_queue = (
         QUEUE_PRE_TF_WITH_UNIQUE_AND_COMMON
         if derive_distinguishing_wrt_adjacent_records

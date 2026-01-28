@@ -4,6 +4,7 @@ from uk_address_matcher.cleaning.steps.normalisation import (
     _add_ukam_address_id,
     _canonicalise_postcode,
     _clean_address_string_first_pass,
+    _extract_postcode_from_address,
     _normalise_abbreviations_and_units,
     _remove_duplicate_end_tokens,
     _rename_and_select_columns,
@@ -44,6 +45,7 @@ __all__ = [
     "_get_token_frequeny_table",
     "_separate_distinguishing_start_tokens_from_with_respect_to_adjacent_records",
     # normalisation
+    "_extract_postcode_from_address",
     "_trim_whitespace_address_and_postcode",
     "_canonicalise_postcode",
     "_upper_case_address_and_postcode",
