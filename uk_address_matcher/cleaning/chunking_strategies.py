@@ -217,8 +217,7 @@ def clean_data_with_term_frequencies(
     chunk_size = _calculate_chunk_size(total_rows, num_of_chunks)
     total_chunks = (total_rows + chunk_size - 1) // chunk_size
 
-    # Register the cleaned table for chunked access
-    con.register("__ukam_cleaned_addresses_for_tf", cleaned_address_table)
+    # Get the underlying table name for direct access
     cleaned_table_name = cleaned_address_table.alias
 
     # Apply term frequencies to cleaned chunks
@@ -226,7 +225,7 @@ def clean_data_with_term_frequencies(
         chunk_started_at = time.perf_counter()
         chunk = con.sql(f"""
         SELECT *
-            FROM __ukam_cleaned_addresses_for_tf
+            FROM {cleaned_table_name}
             WHERE (abs(hash(original_address_concat)) % {total_chunks}) = {chunk_index}
         """)
 
@@ -251,8 +250,6 @@ def clean_data_with_term_frequencies(
             DELETE FROM {cleaned_table_name}
             WHERE (abs(hash(original_address_concat)) % {total_chunks}) = {chunk_index}
         """)
-
-        con.sql("select * from duckdb_tables").show(max_width=10000)
 
         _log_progress(
             total_rows,
