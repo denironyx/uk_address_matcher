@@ -119,7 +119,7 @@ def clean_data_with_minimal_steps(
         chunk = con.sql(f"""
         SELECT *
             FROM {input_name}
-            WHERE (abs(hash(coalesce(address_concat, ''))) % {total_chunks}) = {chunk_index}
+            WHERE (abs(hash(address_concat)) % {total_chunks}) = {chunk_index}
         """)
 
         # Process the chunk without address ID, applying debug options only on first iteration
