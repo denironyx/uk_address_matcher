@@ -120,8 +120,8 @@ with time_phase(variant_timings, variant_label, "candidate_selection"):
         df_exact_matches=deterministic_matches,
         df_splink_matches=best_matches,
         df_canonical=df_os_clean,
-        match_weight_threshold=15,
-        distinguishability_threshold=None,
+        match_weight_threshold=10,
+        distinguishability_threshold=5,
         # include_unmatched=True,
         include_unmatched=False,
     )

@@ -41,6 +41,10 @@ def improve_predictions_using_distinguishing_tokens(
     SELECT *
     FROM df_predict
     WHERE match_weight > {match_weight_threshold}
+    QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY unique_id_r, unique_id_l
+        ORDER BY match_weight DESC, ukam_address_id_r DESC, ukam_address_id_l DESC
+    ) = 1
     """
     good_matches = con.sql(sql_good_matches)
 
