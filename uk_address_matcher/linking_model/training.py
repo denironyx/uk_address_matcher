@@ -583,5 +583,6 @@ def get_settings_for_training(
         blocking_rules_to_generate_predictions=blocking_rules,
         comparisons=comparisons,
         retain_intermediate_calculation_columns=True,
+        unique_id_column_name="ukam_address_id",
     )
     return settings_for_training
