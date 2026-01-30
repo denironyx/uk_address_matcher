@@ -23,10 +23,13 @@ def test_postcode_extraction_no_column_provided():
 
         result_rel = _clean_data_with_minimal_steps(input_rel, connection)
         result = result_rel.select(
-            "unique_id, original_address_concat, postcode"
+            "unique_id, original_address_concat, clean_full_address, postcode"
         ).fetchall()[0]
 
-        _, cleaned_address, extracted_postcode = result
+        _, raw_address, cleaned_address, extracted_postcode = result
+
+        # original_address_concat should be preserved verbatim
+        assert raw_address == input_address
 
         # Check postcode extraction
         if expected_postcode:
@@ -40,7 +43,9 @@ def test_postcode_extraction_no_column_provided():
 
         # Check postcode removal from address
         if should_remove and expected_postcode:
-            assert expected_postcode not in cleaned_address, (
+            assert expected_postcode.replace(" ", "") not in cleaned_address.replace(
+                " ", ""
+            ), (
                 f"Postcode '{expected_postcode}' should be removed from address, "
                 f"but found in '{cleaned_address}'"
             )
@@ -65,10 +70,13 @@ def test_postcode_extraction_with_column_provided():
 
         result_rel = _clean_data_with_minimal_steps(input_rel, connection)
         result = result_rel.select(
-            "unique_id, original_address_concat, postcode"
+            "unique_id, original_address_concat, clean_full_address, postcode"
         ).fetchall()[0]
 
-        _, cleaned_address, extracted_postcode = result
+        _, raw_address, cleaned_address, extracted_postcode = result
+
+        # original_address_concat should be preserved verbatim
+        assert raw_address == input_address
 
         # Postcode column should take precedence
         assert extracted_postcode == expected_postcode, (
@@ -115,10 +123,13 @@ def test_postcode_extraction_empty_column():
 
         result_rel = _clean_data_with_minimal_steps(input_rel, connection)
         result = result_rel.select(
-            "unique_id, original_address_concat, postcode"
+            "unique_id, original_address_concat, clean_full_address, postcode"
         ).fetchall()[0]
 
-        _, cleaned_address, extracted_postcode = result
+        _, raw_address, cleaned_address, extracted_postcode = result
+
+        # original_address_concat should be preserved verbatim
+        assert raw_address == input_address
 
         # Should extract from address when column is empty/NULL
         assert extracted_postcode == expected_postcode, (
@@ -127,7 +138,9 @@ def test_postcode_extraction_empty_column():
         )
 
         # Postcode should be removed from address
-        assert expected_postcode not in cleaned_address, (
+        assert expected_postcode.replace(" ", "") not in cleaned_address.replace(
+            " ", ""
+        ), (
             f"Postcode '{expected_postcode}' should be removed from address, "
             f"but found in '{cleaned_address}'"
         )
