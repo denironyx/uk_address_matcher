@@ -11,7 +11,7 @@
     "bayes_factor_column_prefix": "bf_",
     "term_frequency_adjustment_column_prefix": "tf_",
     "comparison_vector_value_column_prefix": "gamma_",
-    "unique_id_column_name": "unique_id",
+    "unique_id_column_name": "ukam_address_id",
     "source_dataset_column_name": "source_dataset",
     "blocking_rules_to_generate_predictions": [
         {
