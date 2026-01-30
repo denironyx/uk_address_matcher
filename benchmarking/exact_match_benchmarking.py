@@ -127,6 +127,7 @@ for label, variant_spec in pipeline_variants.items():
         mismatch_results = analyse_mismatches(
             ukam_matches=matches,
             ukam_canonical=df_os_clean,
+            ukam_messy=df_messy_clean,
             samples_per_reason=MISMATCH_SAMPLES_PER_REASON,
             top_worst=TOP_WORST_MISMATCHES,
         )
