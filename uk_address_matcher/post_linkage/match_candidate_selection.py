@@ -33,9 +33,11 @@ def _prepare_splink_candidates(
 
     distinguishability_filter = ""
     if distinguishability_threshold is not None:
+        # If distinguishability is null, then there was only one plausible candidate
+        # so these rows should be retained
         distinguishability_filter = (
-            "AND distinguishability IS NOT NULL "
-            f"AND distinguishability >= {distinguishability_threshold}"
+            "AND (distinguishability IS NULL "
+            f"OR distinguishability >= {distinguishability_threshold})"
         )
 
     # _r = record from addresses to match (fuzzy)
