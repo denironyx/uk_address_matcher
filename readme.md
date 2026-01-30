@@ -12,7 +12,6 @@ at a rate of 15,008 addresses per second
 
 ## Installation
 
-At the moment this uses a branch of Splink only available on Github.
 ```bash
 pip install --pre uk_address_matcher
 ```
