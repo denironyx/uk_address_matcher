@@ -23,6 +23,7 @@ HACKNEY_COUNCIL_INFO = DatasetInfo(
             WHERE postcode IS NOT NULL
               AND trim(postcode) <> ''
         )
+        and substr(classification_code, 1, 1) = 'R'
     """.strip(),
 )
 
