@@ -13,6 +13,7 @@ from benchmarking.datasets.lambeth_council import (
 )
 from benchmarking.datasets.registry import (
     DatasetInfo,
+    _DATASET_REGISTRY,
     get_all_dataset_info,
     get_dataset_info,
     list_datasets,
@@ -72,7 +73,8 @@ def load_benchmark_data(
     print(f"Loading dataset: {dataset_name}\n")
 
     # Load raw messy data with optional sampling
-    df_messy = load_dataset(dataset_name, con, sample_mode=sample_mode)
+    df_messy_raw = load_dataset(dataset_name, con, sample_mode=sample_mode)
+    df_messy_raw.show(max_width=100000)
 
     # Apply cleaning logic
     if include_term_frequencies:
@@ -80,7 +82,7 @@ def load_benchmark_data(
     else:
         cleaning_function = clean_data_with_minimal_steps
 
-    df_messy = cleaning_function(df_messy, con)
+    df_messy = cleaning_function(df_messy_raw, con)
 
     # Load canonical data once with optional sampling
     canonical_config = (
@@ -89,6 +91,17 @@ def load_benchmark_data(
         else CanonicalConfig.default()
     )
     df_canonical = load_canonical_data(con, canonical_config, sample_mode=sample_mode)
+
+    # Apply dataset-specific canonical filter if defined
+    canonical_filter_sql = _DATASET_REGISTRY[dataset_name].info.canonical_filter_sql
+    if canonical_filter_sql is not None and canonical_filter_sql.strip():
+        df_canonical = con.sql(
+            f"""
+            SELECT *
+            FROM df_canonical
+            WHERE {canonical_filter_sql.strip()}
+            """
+        )
 
     # Show dataset info
     info = get_dataset_info(dataset_name)
