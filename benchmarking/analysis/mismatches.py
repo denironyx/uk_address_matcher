@@ -6,16 +6,10 @@ if TYPE_CHECKING:
     import duckdb
 
 
-def _get_clean_address_select(ukam_matches: duckdb.DuckDBPyRelation) -> str:
-    """Determine the clean address column to use."""
-    match_columns = {col.lower() for col in ukam_matches.columns}
-    has_clean_address = "clean_full_address" in match_columns
-    return "m.clean_full_address" if has_clean_address else "m.original_address_concat"
-
-
 def analyse_mismatches(
     ukam_matches: duckdb.DuckDBPyRelation,
     ukam_canonical: duckdb.DuckDBPyRelation,
+    ukam_messy: duckdb.DuckDBPyRelation,
     samples_per_reason: int = 10,
     top_worst: int = 10,
     top_high_confidence: int = 10,
@@ -37,7 +31,11 @@ def analyse_mismatches(
         Match results with unique_id, resolved_canonical_id, match_reason, and
         original_address_concat (ground truth address).
     ukam_canonical:
-        Canonical dataset with ukam_address_id and original_address_concat.
+        Canonical dataset with ukam_address_id, original_address_concat, and
+        clean_full_address.
+    ukam_messy:
+        Messy dataset with ukam_address_id, original_address_concat, and
+        clean_full_address.
     samples_per_reason:
         Number of random samples to return per match_reason.
     top_worst:
@@ -57,7 +55,6 @@ def analyse_mismatches(
         Dictionary with keys for each analysis type, including
         'unmatchable_summary' if exclude_unmatchable is True.
     """
-    clean_address_select = _get_clean_address_select(ukam_matches)
 
     results: dict[str, duckdb.DuckDBPyRelation] = {}
 
@@ -101,9 +98,8 @@ def analyse_mismatches(
         else ""
     )
 
-    # Create materialised view of mismatches with canonical data
-    # Note: we use 'matches_input' as the alias to avoid conflicts with existing tables
-    clean_address_col = clean_address_select.replace("m.", "matches_input.")
+    # Create materialised view of mismatches with canonical and messy data
+    # Join to get clean_full_address from both messy and canonical datasets
     base_mismatches_sql = f"""
     SELECT
         im.unique_id,
@@ -111,11 +107,12 @@ def analyse_mismatches(
         im.ukam_address_id,
         im.canonical_ukam_address_id,
         im.match_reason,
-        im.clean_full_address AS fuzzy_clean_address,
-        im.original_address_concat AS fuzzy_original_address,
-        im.postcode AS fuzzy_postcode,
-        c.original_address_concat AS predicted_address,
-        c.postcode AS predicted_postcode,
+        im.original_address_concat AS messy_original_address_concat,
+        messy.clean_full_address AS messy_clean_full_address,
+        im.postcode AS postcode_messy,
+        c.original_address_concat AS canonical_original_address_concat,
+        c.clean_full_address AS canonical_clean_full_address,
+        c.postcode AS postcode_canonical,
         jaro_winkler_similarity(
             im.original_address_concat,
             c.original_address_concat
@@ -128,7 +125,6 @@ def analyse_mismatches(
             matches_input.canonical_ukam_address_id,
             matches_input.match_reason,
             matches_input.original_address_concat,
-            {clean_address_col} AS clean_full_address,
             matches_input.postcode
         FROM matches_input
         WHERE matches_input.match_reason IS NOT NULL
@@ -136,6 +132,8 @@ def analyse_mismatches(
     ) AS im
     LEFT JOIN ukam_canonical AS c
       ON im.canonical_ukam_address_id = c.ukam_address_id
+    LEFT JOIN ukam_messy AS messy
+      ON im.ukam_address_id = messy.ukam_address_id
     """
 
     # Materialise by fetching into a new relation (forces evaluation once)
@@ -151,6 +149,7 @@ def analyse_mismatches(
     )
 
     # 1. Random samples by match_reason (using materialised table)
+    # Address order: messy_original, messy_clean, canonical_clean, canonical_original
     random_samples_sql = f"""
     WITH sampled AS (
         SELECT
@@ -158,10 +157,12 @@ def analyse_mismatches(
             unique_id,
             ukam_address_id,
             resolved_canonical_id,
-            fuzzy_postcode AS postcode,
-            fuzzy_clean_address,
-            predicted_address,
-            fuzzy_original_address,
+            postcode_messy,
+            postcode_canonical,
+            messy_original_address_concat,
+            messy_clean_full_address,
+            canonical_clean_full_address,
+            canonical_original_address_concat,
             similarity_score,
             ROW_NUMBER() OVER (
                 PARTITION BY match_reason
@@ -174,10 +175,12 @@ def analyse_mismatches(
         unique_id,
         resolved_canonical_id,
         ukam_address_id,
-        postcode,
-        fuzzy_clean_address,
-        predicted_address,
-        fuzzy_original_address,
+        postcode_messy,
+        postcode_canonical,
+        messy_original_address_concat,
+        messy_clean_full_address,
+        canonical_clean_full_address,
+        canonical_original_address_concat,
         ROUND(similarity_score, 3) AS similarity_score
     FROM sampled
     WHERE rn <= {samples_per_reason}
@@ -186,15 +189,18 @@ def analyse_mismatches(
     random_samples = mismatches_materialised.query("m", random_samples_sql)
 
     # 2. Worst mismatches (lowest similarity) - completely wrong predictions
+    # Address order: messy_original, messy_clean, canonical_clean, canonical_original
     worst_mismatches_sql = f"""
     SELECT
         unique_id,
         ukam_address_id,
         resolved_canonical_id,
-        fuzzy_postcode AS postcode,
-        fuzzy_clean_address,
-        predicted_address,
-        fuzzy_original_address,
+        postcode_messy,
+        postcode_canonical,
+        messy_original_address_concat,
+        messy_clean_full_address,
+        canonical_clean_full_address,
+        canonical_original_address_concat,
         ROUND(similarity_score, 3) AS similarity_score,
         match_reason
     FROM m
@@ -205,15 +211,18 @@ def analyse_mismatches(
 
     # 3. High-confidence wrong matches (highest similarity) - subtle differences
     # These are the trickiest: the algorithm was confident but wrong
+    # Address order: messy_original, messy_clean, canonical_clean, canonical_original
     high_confidence_wrong_sql = f"""
     SELECT
         unique_id,
         ukam_address_id,
         resolved_canonical_id,
-        fuzzy_postcode AS postcode,
-        fuzzy_clean_address,
-        predicted_address,
-        fuzzy_original_address,
+        postcode_messy,
+        postcode_canonical,
+        messy_original_address_concat,
+        messy_clean_full_address,
+        canonical_clean_full_address,
+        canonical_original_address_concat,
         ROUND(similarity_score, 3) AS similarity_score,
         match_reason
     FROM m
@@ -227,15 +236,18 @@ def analyse_mismatches(
 
     # 4. Same-building mismatches (similarity > 0.9) - likely flat/unit confusion
     # Very high similarity suggests same building, wrong flat/unit
+    # Address order: messy_original, messy_clean, canonical_clean, canonical_original
     same_building_sql = f"""
     SELECT
         unique_id,
         ukam_address_id,
         resolved_canonical_id,
-        fuzzy_postcode AS postcode,
-        fuzzy_clean_address,
-        predicted_address,
-        fuzzy_original_address,
+        postcode_messy,
+        postcode_canonical,
+        messy_original_address_concat,
+        messy_clean_full_address,
+        canonical_clean_full_address,
+        canonical_original_address_concat,
         ROUND(similarity_score, 3) AS similarity_score,
         match_reason
     FROM m
@@ -331,10 +343,12 @@ def print_mismatch_analysis(
         reason_samples.select(
             "unique_id",
             "resolved_canonical_id",
-            "postcode",
-            "fuzzy_clean_address",
-            "predicted_address",
-            "fuzzy_original_address",
+            "postcode_messy",
+            "postcode_canonical",
+            "messy_original_address_concat",
+            "messy_clean_full_address",
+            "canonical_clean_full_address",
+            "canonical_original_address_concat",
             "similarity_score",
         ).show(max_width=50000)
 

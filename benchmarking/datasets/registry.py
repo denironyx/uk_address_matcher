@@ -21,6 +21,7 @@ class DatasetInfo:
     description: str
     source: str
     notes: str = ""
+    canonical_filter_sql: str | None = None
 
     def summary(self, record_count: int | None = None) -> str:
         """Return a human-readable summary."""

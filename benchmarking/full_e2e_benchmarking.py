@@ -55,7 +55,7 @@ df_messy_clean, df_os_clean = load_benchmark_data(
 )
 con.sql("DROP TABLE IF EXISTS df_messy")
 df_messy_clean.to_table("df_messy_clean")
-
+df_os_clean.show(max_width=100000)
 # Get dataset info for reporting
 dataset_info = get_dataset_info(DATASET_NAME)
 
@@ -157,6 +157,7 @@ if incorrect_count > 0:
     mismatch_results = analyse_mismatches(
         ukam_matches=match_candidates,
         ukam_canonical=df_os_clean,
+        ukam_messy=df_messy_clean,
         samples_per_reason=MISMATCH_SAMPLES_PER_REASON,
         top_worst=TOP_WORST_MISMATCHES,
     )

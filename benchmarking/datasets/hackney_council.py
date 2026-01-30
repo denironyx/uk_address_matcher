@@ -16,6 +16,15 @@ HACKNEY_COUNCIL_INFO = DatasetInfo(
     description="Council tax band records from Hackney Borough Council",
     source="S3: linking bucket (Hackney open data via Datadaptive)",
     notes="Open data council tax bands with ONSUD geocoding (July 2025)",
+    canonical_filter_sql="""
+        postcode IN (
+            SELECT DISTINCT postcode
+            FROM df_messy_raw
+            WHERE postcode IS NOT NULL
+              AND trim(postcode) <> ''
+        )
+        and substr(classification_code, 1, 1) = 'R'
+    """.strip(),
 )
 
 _HACKNEY_SOURCE = SourceConfig(
