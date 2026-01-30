@@ -74,7 +74,6 @@ def load_benchmark_data(
 
     # Load raw messy data with optional sampling
     df_messy_raw = load_dataset(dataset_name, con, sample_mode=sample_mode)
-    df_messy_raw.show(max_width=100000)
 
     # Apply cleaning logic
     if include_term_frequencies:
