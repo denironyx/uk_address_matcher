@@ -2254,7 +2254,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "boto3", marker = "extra == 'dev'", specifier = ">=1.40.0" },
-    { name = "duckdb", specifier = "==1.4.4" },
+    { name = "duckdb", specifier = ">=1.4.1" },
     { name = "ipykernel", marker = "extra == 'dev'", specifier = ">=6.29.4" },
     { name = "splink", specifier = ">=4.0.8" },
     { name = "sqlglot", specifier = "==26.6.0" },
