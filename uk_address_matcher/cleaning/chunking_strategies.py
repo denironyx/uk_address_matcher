@@ -119,12 +119,14 @@ def clean_data_with_minimal_steps(
         chunk = con.sql(f"""
         SELECT *
             FROM {input_name}
-            WHERE (abs(hash(coalesce(address_concat, ''))) % {total_chunks}) = {chunk_index}
+            WHERE (abs(hash(address_concat)) % {total_chunks}) = {chunk_index}
         """)
 
         # Process the chunk without address ID, applying debug options only on first iteration
         processed_chunk = _clean_data_with_minimal_steps(
-            chunk, con, debug_options=debug_options if chunk_index == 0 else None
+            chunk,
+            con,
+            debug_options=debug_options if chunk_index == 0 else None,
         )
 
         if chunk_index == 0:
@@ -201,7 +203,6 @@ def clean_data_with_term_frequencies(
     cleaned_address_table = clean_data_with_minimal_steps(
         address_table, con, num_of_chunks=num_of_chunks, debug_options=debug_options
     )
-    cleaned_address_table.to_table(f"__ukam_cleaned_addresses_{uid}")
 
     total_rows = cleaned_address_table.count("*").fetchone()[0]
     use_data_specific_tfs = _should_use_data_specific_term_frequencies(
@@ -216,13 +217,16 @@ def clean_data_with_term_frequencies(
     chunk_size = _calculate_chunk_size(total_rows, num_of_chunks)
     total_chunks = (total_rows + chunk_size - 1) // chunk_size
 
+    # Get the underlying table name for direct access
+    cleaned_table_name = cleaned_address_table.alias
+
     # Apply term frequencies to cleaned chunks
     for chunk_index in range(total_chunks):
         chunk_started_at = time.perf_counter()
         chunk = con.sql(f"""
         SELECT *
-            FROM __ukam_cleaned_addresses_{uid}
-            WHERE (abs(hash(coalesce(original_address_concat, ''))) % {total_chunks}) = {chunk_index}
+            FROM {cleaned_table_name}
+            WHERE (abs(hash(original_address_concat)) % {total_chunks}) = {chunk_index}
         """)
 
         # Numeric TF columns should only be attached when using precomputed TFs
@@ -241,6 +245,12 @@ def clean_data_with_term_frequencies(
         else:
             processed_chunk.insert_into(f"__ukam_addresses_processed_{uid}")
 
+        # Delete processed rows from the intermediate cleaned table to free memory
+        con.execute(f"""
+            DELETE FROM {cleaned_table_name}
+            WHERE (abs(hash(original_address_concat)) % {total_chunks}) = {chunk_index}
+        """)
+
         _log_progress(
             total_rows,
             min((chunk_index + 1) * chunk_size, total_rows),
@@ -249,6 +259,17 @@ def clean_data_with_term_frequencies(
             total_chunks=total_chunks,
             chunk_elapsed_seconds=time.perf_counter() - chunk_started_at,
         )
+
+    # Verify the intermediate table is now empty (all chunks processed)
+    remaining_rows = con.sql(f"SELECT COUNT(*) FROM {cleaned_table_name}").fetchone()[0]
+    if remaining_rows != 0:
+        raise ValueError(
+            f"Expected intermediate table {cleaned_table_name} to be empty after processing, "
+            f"but found {remaining_rows} rows remaining."
+        )
+
+    # Drop the now-empty intermediate table
+    con.execute(f"DROP TABLE IF EXISTS {cleaned_table_name}")
 
     return con.table(f"__ukam_addresses_processed_{uid}")
 
