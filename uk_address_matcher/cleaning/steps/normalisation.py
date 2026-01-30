@@ -26,6 +26,7 @@ def _add_ukam_address_id():
     return """
     SELECT
         *,
+        address_concat AS original_address_concat,
         uuid() AS ukam_address_id
     FROM {input}
     """
@@ -53,15 +54,17 @@ def _extract_postcode_from_address() -> str:
     uk_postcode_regex = r"\b(?:GIR ?0AA|[A-Z][A-HJ-Y]?\d[A-Z\d]? ?\d[A-Z]{2})\b"
 
     # Extract postcode from address and remove it from address_concat
+
     # - Use COALESCE to prefer existing postcode over extracted
-    # - Always remove postcode from address_concat to avoid duplication
+    # - Always remove postcode from  address_concat to avoid duplication
     return f"""
     SELECT
         * EXCLUDE (postcode, address_concat),
         TRIM(regexp_replace(
-            UPPER(address_concat),
+            address_concat,
             '{uk_postcode_regex}',
-            ''
+            '',
+            'gi'
         )) AS address_concat,
         COALESCE(
             NULLIF(TRIM(postcode), ''),
@@ -80,10 +83,11 @@ def _rename_and_select_columns() -> str:
     sql = r"""
     SELECT
         unique_id,
-        address_concat as original_address_concat,
+        original_address_concat,
+        address_concat,
         postcode,
         ukam_address_id,
-        * EXCLUDE (unique_id, address_concat, postcode, ukam_address_id)
+        * EXCLUDE (unique_id, original_address_concat, address_concat, postcode, ukam_address_id)
     FROM {input}
     """
     return sql
@@ -97,8 +101,8 @@ def _rename_and_select_columns() -> str:
 def _trim_whitespace_address_and_postcode() -> str:
     sql = r"""
     SELECT
-        * EXCLUDE (original_address_concat, postcode),
-        TRIM(original_address_concat) AS original_address_concat,
+        * EXCLUDE (address_concat, postcode),
+        TRIM(address_concat) AS address_concat,
         TRIM(postcode)       AS postcode
     FROM {input}
     """
@@ -137,8 +141,8 @@ def _canonicalise_postcode() -> str:
 def _upper_case_address_and_postcode() -> str:
     sql = r"""
     SELECT
-        * EXCLUDE (postcode),
-        UPPER(original_address_concat) AS clean_full_address,
+        * EXCLUDE (postcode, address_concat),
+        UPPER(address_concat) AS clean_full_address,
         UPPER(postcode)       AS postcode
     FROM {input}
     """
