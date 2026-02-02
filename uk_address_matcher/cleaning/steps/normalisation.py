@@ -68,7 +68,7 @@ def _extract_postcode_from_address() -> str:
         )) AS address_concat,
         COALESCE(
             NULLIF(TRIM(postcode), ''),
-            UPPER(regexp_extract(UPPER(address_concat), '{uk_postcode_regex}'))
+            NULLIF(UPPER(regexp_extract(UPPER(address_concat), '{uk_postcode_regex}')), '')
         ) AS postcode
     FROM {{input}}
     """
