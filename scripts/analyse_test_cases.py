@@ -2,7 +2,7 @@ import duckdb
 from splink import block_on
 
 from tests.utils import prepare_combined_test_data
-from uk_address_matcher import clean_data_with_term_frequencies, get_linker
+from uk_address_matcher import prepare_data_for_matching, get_linker
 from uk_address_matcher.post_linkage.identify_distinguishing_tokens import (
     improve_predictions_using_distinguishing_tokens,
 )
@@ -25,8 +25,8 @@ messy_addresses
 canonical_addresses = canonical_addresses.filter(f"test_block = {test_block}")
 canonical_addresses
 # Clean the input data
-messy_clean = clean_data_with_term_frequencies(messy_addresses, con=duckdb_con)
-canonical_clean = clean_data_with_term_frequencies(canonical_addresses, con=duckdb_con)
+messy_clean = prepare_data_for_matching(messy_addresses, con=duckdb_con)
+canonical_clean = prepare_data_for_matching(canonical_addresses, con=duckdb_con)
 
 # Configure the linker
 columns_to_retain = ["original_address_concat", "true_match_id"]

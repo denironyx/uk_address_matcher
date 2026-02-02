@@ -4,7 +4,7 @@ import duckdb
 from IPython.display import display
 
 from uk_address_matcher import (
-    clean_data_with_term_frequencies,
+    prepare_data_for_matching,
     get_linker,
 )
 from uk_address_matcher.linking_model.training import get_settings_for_training
@@ -88,8 +88,8 @@ print(f"messy_count: {messy_count:,}, canonical_count: {canonical_count:,}")
 # -----------------------------------------------------------------------------
 
 
-df_epc_data_clean = clean_data_with_term_frequencies(con.from_df(df_epc_data), con=con)
-df_os_clean = clean_data_with_term_frequencies(con.from_df(df_os), con=con)
+df_epc_data_clean = prepare_data_for_matching(con.from_df(df_epc_data), con=con)
+df_os_clean = prepare_data_for_matching(con.from_df(df_os), con=con)
 
 end_time = time.time()
 print(f"Time to load/clean: {end_time - overall_start_time} seconds")

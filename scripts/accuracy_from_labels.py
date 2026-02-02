@@ -2,7 +2,7 @@ import duckdb
 import pandas as pd
 
 from uk_address_matcher import (
-    clean_data_with_term_frequencies,
+    prepare_data_for_matching,
     evaluate_predictions_against_labels,
     get_linker,
     inspect_match_results_vs_labels,
@@ -67,11 +67,11 @@ labels_rel = duckdb_con.sql("""
 df_os_rel = canonical_addresses_raw
 messy_data_rel = messy_addresses_raw
 
-df_messy_data_clean_rel = clean_data_with_term_frequencies(
+df_messy_data_clean_rel = prepare_data_for_matching(
     messy_data_rel.select("unique_id", "address_concat", "postcode"), con=duckdb_con
 )
 
-df_os_clean_rel = clean_data_with_term_frequencies(
+df_os_clean_rel = prepare_data_for_matching(
     duckdb_con.from_df(df_os_rel), con=duckdb_con
 )
 

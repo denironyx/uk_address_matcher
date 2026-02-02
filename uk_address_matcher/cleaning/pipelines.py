@@ -113,7 +113,7 @@ QUEUE_POST_TF = [
 ]
 
 
-def _clean_data_with_minimal_steps(
+def _clean_data_pre_term_frequencies(
     address_table: DuckDBPyRelation,
     con: DuckDBPyConnection,
     *,
@@ -125,8 +125,8 @@ def _clean_data_with_minimal_steps(
         con,
         input_rel=address_table,
         stage_specs=QUEUE_PRE_TF,
-        pipeline_name="Clean data with minimal steps",
-        pipeline_description="A minimal cleaning pipeline without term frequencies",
+        pipeline_name="Clean data pre term frequencies",
+        pipeline_description="The cleaning pipeline pre the term frequency steps",
     )
     result = pipeline.run(debug_options)
 

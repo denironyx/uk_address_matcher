@@ -7,7 +7,7 @@ import duckdb
 from secret_data.secrets import epc_addresses_path
 from splink import DuckDBAPI, Linker
 
-from uk_address_matcher import clean_data_with_term_frequencies
+from uk_address_matcher import prepare_data_for_matching
 from uk_address_matcher.linking_model.training import get_settings_for_training
 
 LIMIT = 100000000
@@ -29,7 +29,7 @@ con.execute(sql)
 epc_addresses = con.table("epc_addresses")
 
 
-epc_addresses_clean = clean_data_with_term_frequencies(epc_addresses, con=con)
+epc_addresses_clean = prepare_data_for_matching(epc_addresses, con=con)
 
 
 db_api = DuckDBAPI(connection=con)

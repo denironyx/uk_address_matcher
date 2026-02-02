@@ -3,7 +3,7 @@ import os
 import duckdb
 
 from uk_address_matcher import (
-    clean_data_with_term_frequencies,
+    prepare_data_for_matching,
     get_linker,
     run_deterministic_match_pass,
 )
@@ -32,7 +32,7 @@ df_messy = con.table("df_messy")
 print(" - messy records prepared:", df_messy.count("*").fetchall()[0][0])
 
 # Step 2: Clean the messy record using the standard pipeline
-df_messy_clean = clean_data_with_term_frequencies(df_messy, con=con)
+df_messy_clean = prepare_data_for_matching(df_messy, con=con)
 df_messy_clean.show(max_width=5000, max_rows=20)
 
 
