@@ -1,4 +1,5 @@
 [
+  { "token": "&", "replacement": "AND" },
   { "token": "APARTMENT", "replacement": "FLAT" },
   { "token": "APT", "replacement": "FLAT" },
   { "token": "APTS", "replacement": "FLAT" },
