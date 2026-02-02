@@ -138,10 +138,11 @@ def test_get_linker_raises_error_with_source_dataset():
 
     # Clean the data to remove source_dataset
     test_data_clean = prepare_data_for_matching(test_data, con=con)
+    test_data_no_source_clean = prepare_data_for_matching(test_data_no_source, con=con)
 
     # Verify this works without error
     get_linker(
         df_addresses_to_match=test_data_clean,
-        df_addresses_to_search_within=test_data_no_source,
+        df_addresses_to_search_within=test_data_no_source_clean,
         con=con,
     )
