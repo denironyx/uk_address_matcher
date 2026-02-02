@@ -137,19 +137,19 @@ def test_postcode_extraction_empty_column():
         # original_address_concat should be preserved verbatim
         assert raw_address == input_address
 
-        # Should extract from address when column is empty/NULL
+        # Should extract from address when column is empty/NULL (or be NULL if no postcode exists)
         assert extracted_postcode == expected_postcode, (
-            f"Expected extracted postcode '{expected_postcode}', "
-            f"got '{extracted_postcode}'"
+            f"Expected postcode '{expected_postcode}', got '{extracted_postcode}'"
         )
 
-        # Postcode should be removed from address
-        assert expected_postcode.replace(" ", "") not in cleaned_address.replace(
-            " ", ""
-        ), (
-            f"Postcode '{expected_postcode}' should be removed from address, "
-            f"but found in '{cleaned_address}'"
-        )
+        # Postcode should be removed from address (if one was found)
+        if expected_postcode:
+            assert expected_postcode.replace(" ", "") not in cleaned_address.replace(
+                " ", ""
+            ), (
+                f"Postcode '{expected_postcode}' should be removed from address, "
+                f"but found in '{cleaned_address}'"
+            )
 
 
 def test_postcode_case_normalisation():
