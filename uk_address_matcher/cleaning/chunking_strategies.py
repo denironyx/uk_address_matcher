@@ -7,10 +7,13 @@ from typing import TYPE_CHECKING, Optional
 from duckdb import DuckDBPyConnection, DuckDBPyRelation
 
 from uk_address_matcher.cleaning.pipelines import (
+    QUEUE_FOR_TF_DERIVATION,
     _clean_data_using_precomputed_rel_tok_freq,
     _clean_data_pre_term_frequencies,
     _create_term_frequency_tables,
+    _ensure_postcode_column,
 )
+from uk_address_matcher.sql_pipeline.runner import create_sql_pipeline
 from uk_address_matcher.sql_pipeline.helpers import _uid
 
 if TYPE_CHECKING:
@@ -62,20 +65,6 @@ def _calculate_chunk_size(total_records: int, num_of_chunks: int) -> int:
     num_of_chunks = max(1, min(num_of_chunks, max_chunks))
     chunk_size = (total_records + num_of_chunks - 1) // num_of_chunks
     return max(1, chunk_size)
-
-
-def _should_use_data_specific_term_frequencies(
-    total_records: int,
-    use_data_specific_term_frequencies: bool | None,
-) -> bool:
-    if use_data_specific_term_frequencies is True:
-        return True
-    elif use_data_specific_term_frequencies is False:
-        return False
-    else:
-        # Auto-select TF strategy based on record count if not explicitly specified
-        # Use data-specific TFs for large datasets (>= 500k records)
-        return total_records >= 500_000
 
 
 def clean_data_pre_term_frequencies(
@@ -146,34 +135,134 @@ def clean_data_pre_term_frequencies(
     return con.table(f"__ukam_chunked_addresses_{uid}")
 
 
+def derive_term_frequencies_table(
+    address_table: DuckDBPyRelation,
+    con: DuckDBPyConnection,
+    num_of_chunks: int = 10,
+    *,
+    debug_options: Optional["DebugOptions"] = None,
+) -> DuckDBPyRelation:
+    """Derive a term frequency lookup table from address data.
+
+    This function cleans and tokenises addresses in chunks, then computes
+    relative token frequencies from the combined result. The returned table
+    can be passed to prepare_data_for_matching to ensure consistent term
+    frequencies across multiple datasets.
+
+    Example usage:
+        tf_table = derive_term_frequencies_table(df_canonical, con)
+        df_messy = prepare_data_for_matching(df_messy, con, term_frequency_lookup=tf_table)
+        df_canonical = prepare_data_for_matching(df_canonical, con, term_frequency_lookup=tf_table)
+
+    Args:
+        address_table: Input address relation with address_concat column.
+        con: DuckDB connection.
+        num_of_chunks: Number of chunks to split the data into for cleaning.
+            Set to 1 for no chunking.
+        debug_options: Optional debug configuration for pipeline execution.
+
+    Returns:
+        Term frequency table with 'token' and 'rel_freq' columns.
+    """
+    uid = _uid()
+
+    # Ensure postcode column exists
+    address_table = _ensure_postcode_column(address_table)
+
+    # Register input for chunked access
+    input_name = f"__ukam_tf_derive_input_{uid}"
+    con.register(input_name, address_table)
+
+    total_rows = address_table.count("*").fetchone()[0]
+    chunk_size = _calculate_chunk_size(total_rows, num_of_chunks)
+    total_chunks = (total_rows + chunk_size - 1) // chunk_size
+
+    cleaned_table = f"__ukam_tf_derive_cleaned_{uid}"
+    con.execute(f"DROP TABLE IF EXISTS {cleaned_table}")
+
+    # Process in chunks using minimal pipeline (clean + tokenise only)
+    for chunk_index in range(total_chunks):
+        chunk_started_at = time.perf_counter()
+        chunk = con.sql(f"""
+            SELECT *
+            FROM {input_name}
+            WHERE (abs(hash(address_concat)) % {total_chunks}) = {chunk_index}
+        """)
+
+        pipeline = create_sql_pipeline(
+            con,
+            input_rel=chunk,
+            stage_specs=QUEUE_FOR_TF_DERIVATION,
+            pipeline_name="Clean for TF derivation",
+            pipeline_description="Clean and tokenise for term frequency computation",
+        )
+        processed_chunk = pipeline.run(debug_options if chunk_index == 0 else None)
+
+        if chunk_index == 0:
+            processed_chunk.create(cleaned_table)
+        else:
+            processed_chunk.insert_into(cleaned_table)
+
+        _log_progress(
+            total_rows,
+            min((chunk_index + 1) * chunk_size, total_rows),
+            stage_type="Cleaned for TF derivation: ",
+            chunk_index=chunk_index,
+            total_chunks=total_chunks,
+            chunk_elapsed_seconds=time.perf_counter() - chunk_started_at,
+        )
+
+    # Compute token frequencies from address_tokens
+    tf_sql = f"""
+    WITH unnested AS (
+        SELECT unnest(address_tokens) AS token
+        FROM {cleaned_table}
+    )
+    SELECT
+        token,
+        COUNT(*)::DOUBLE / (SELECT COUNT(*) FROM unnested) AS rel_freq
+    FROM unnested
+    GROUP BY token
+    ORDER BY COUNT(*) DESC
+    """
+
+    # Materialise the result (consistent with parquet loading pattern)
+    result_table = "__ukam_derived_term_frequencies"
+    con.sql(f"DROP TABLE IF EXISTS {result_table}")
+    con.sql(tf_sql).create(result_table)
+
+    # Clean up intermediate table
+    con.execute(f"DROP TABLE IF EXISTS {cleaned_table}")
+
+    return con.table(result_table)
+
+
 # Chunking this requires a three phase approach:
 # 1. Clean data in chunks without term frequencies
-# 2. At the end of each chunk, accumulate token counts to compute global term frequencies
-# 3. Use computed term frequencies to populate term frequency fields in cleaned data and
+# 2. Register term frequency tables (either provided or pre-baked)
+# 3. Use term frequencies to populate term frequency fields in cleaned data and
 #   finally apply QUEUE_POST_TF
 def prepare_data_for_matching(
     address_table: DuckDBPyRelation,
     con: DuckDBPyConnection,
     num_of_chunks: int = 10,
-    use_data_specific_term_frequencies: bool | None = None,
+    term_frequency_lookup: Optional[DuckDBPyRelation] = None,
     derive_distinguishing_wrt_adjacent_records: bool = False,
     *,
     debug_options: Optional[DebugOptions] = None,
 ) -> DuckDBPyRelation:
-    """Prepare address data for matching
-
+    """Prepare address data for matching.
 
     Args:
         address_table: Input address relation with standard schema.
         con: DuckDB connection.
         num_of_chunks: Number of chunks to split the data into. Term frequencies
-            are computed upfront from the full dataset, then chunks are processed with
-            precomputed frequencies applied.
-        use_data_specific_term_frequencies:
-            - True: Always compute TFs from input data
-            - False: Always use package's precomputed TFs
-            - None (default): Auto-select based on record count
-                (< 1M → precomputed; ≥ 1M → data-specific)
+            are applied from either the provided lookup table or pre-baked frequencies,
+            then chunks are processed with those frequencies applied.
+        term_frequency_lookup: Optional pre-computed term frequency table with
+            'token' and 'rel_freq' columns. Use derive_term_frequencies_table()
+            to create this from a reference dataset (typically the canonical addresses).
+            If not provided, uses the package's pre-baked term frequencies.
         derive_distinguishing_wrt_adjacent_records: Whether to derive distinguishing
             tokens relative to adjacent records.
         debug_options: Optional debug configuration for pipeline execution.
@@ -183,6 +272,15 @@ def prepare_data_for_matching(
     Returns:
         Cleaned address data with computed term frequencies, including numeric
         term frequency columns (tf_numeric_token_1, tf_numeric_token_2, tf_numeric_token_3).
+
+    Example:
+        # For consistent term frequencies across datasets:
+        tf_table = derive_term_frequencies_table(df_canonical, con)
+        df_messy = prepare_data_for_matching(df_messy, con, term_frequency_lookup=tf_table)
+        df_canonical = prepare_data_for_matching(df_canonical, con, term_frequency_lookup=tf_table)
+
+        # Using pre-baked term frequencies (default):
+        df_prepared = prepare_data_for_matching(df_addresses, con)
     """
     uid = _uid()
 
@@ -192,14 +290,7 @@ def prepare_data_for_matching(
     )
 
     total_rows = cleaned_address_table.count("*").fetchone()[0]
-    use_data_specific_tfs = _should_use_data_specific_term_frequencies(
-        total_rows, use_data_specific_term_frequencies
-    )
-    _create_term_frequency_tables(
-        cleaned_address_table,
-        con,
-        use_data_specific_term_frequencies=use_data_specific_tfs,
-    )
+    _create_term_frequency_tables(con, term_frequency_lookup=term_frequency_lookup)
 
     chunk_size = _calculate_chunk_size(total_rows, num_of_chunks)
     total_chunks = (total_rows + chunk_size - 1) // chunk_size
@@ -263,5 +354,6 @@ def prepare_data_for_matching(
 
 __all__ = [
     "clean_data_pre_term_frequencies",
+    "derive_term_frequencies_table",
     "prepare_data_for_matching",
 ]
