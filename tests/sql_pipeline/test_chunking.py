@@ -2,7 +2,10 @@ from unittest.mock import patch
 
 import pytest
 
-from uk_address_matcher import clean_data_pre_term_frequencies
+from uk_address_matcher import (
+    clean_data_pre_term_frequencies,
+    derive_term_frequencies_table,
+)
 from uk_address_matcher.cleaning.chunking_strategies import (
     prepare_data_for_matching,
 )
@@ -136,12 +139,19 @@ def test_token_rel_freq_arr_hist_consistent_across_chunks(
     duck_con, fhrs_data, mock_chunk_size_1k, use_data_specific_tfs
 ):
     """Verify token_rel_freq_arr_hist is identical irrespective of chunking strategy."""
+    # Derive term frequencies if using data-specific TFs
+    tf_lookup = (
+        derive_term_frequencies_table(fhrs_data, con=duck_con)
+        if use_data_specific_tfs
+        else None
+    )
+
     # Process without chunking (baseline)
     no_chunk = prepare_data_for_matching(
         fhrs_data,
         con=duck_con,
         num_of_chunks=1,
-        use_data_specific_term_frequencies=use_data_specific_tfs,
+        term_frequency_lookup=tf_lookup,
     )
     no_chunk_hist = (
         no_chunk.order("unique_id").select("token_rel_freq_arr_hist").fetchall()[:50]
@@ -152,7 +162,7 @@ def test_token_rel_freq_arr_hist_consistent_across_chunks(
         fhrs_data,
         con=duck_con,
         num_of_chunks=5,
-        use_data_specific_term_frequencies=use_data_specific_tfs,
+        term_frequency_lookup=tf_lookup,
     )
     chunked_hist = (
         chunked.order("unique_id").select("token_rel_freq_arr_hist").fetchall()[:50]
@@ -172,14 +182,21 @@ def test_numeric_term_frequency_columns_present_when_using_precomputed_tfs(
 
     Both data-specific and precomputed TF strategies should include numeric term frequency
     columns (tf_numeric_token_1, tf_numeric_token_2, tf_numeric_token_3):
-    - When use_data_specific_tfs=True: numeric TFs are computed from input data
-    - When use_data_specific_tfs=False: numeric TFs are loaded from precomputed files
+    - When term_frequency_lookup is provided: TFs from the lookup table are used
+    - When term_frequency_lookup is None: TFs are loaded from precomputed files
     """
+    # Derive term frequencies if using data-specific TFs
+    tf_lookup = (
+        derive_term_frequencies_table(fhrs_data, con=duck_con)
+        if use_data_specific_tfs
+        else None
+    )
+
     result = prepare_data_for_matching(
         fhrs_data,
         con=duck_con,
         num_of_chunks=1,
-        use_data_specific_term_frequencies=use_data_specific_tfs,
+        term_frequency_lookup=tf_lookup,
     )
 
     columns = set(result.columns)

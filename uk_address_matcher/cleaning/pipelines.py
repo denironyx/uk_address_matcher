@@ -112,6 +112,9 @@ QUEUE_POST_TF = [
     _attach_numeric_term_frequencies,
 ]
 
+# Minimal pipeline for TF derivation: just clean address + tokenise
+QUEUE_FOR_TF_DERIVATION = QUEUE_CLEAN_FULL_ADDRESS + [_create_tokenised_address_concat]
+
 
 def _clean_data_pre_term_frequencies(
     address_table: DuckDBPyRelation,
@@ -267,42 +270,36 @@ def get_address_token_frequencies_from_address_table(
 
 
 def _create_term_frequency_tables(
-    cleaned_address_table: DuckDBPyRelation,
     con: DuckDBPyConnection,
-    # Default is to use precomputed term frequencies
-    use_data_specific_term_frequencies: bool | None = False,
-    *,
-    pre_cleaned_addresses: bool = True,
-) -> tuple[DuckDBPyRelation, DuckDBPyRelation, str]:
-    """Compute and register address and numeric term frequency tables."""
-    # Compute or load address token frequencies
-    if use_data_specific_term_frequencies:
-        address_token_frequencies_rel = (
-            get_address_token_frequencies_from_address_table(
-                cleaned_address_table, con, pre_cleaned_addresses=pre_cleaned_addresses
-            )
-        )
+    term_frequency_lookup: Optional[DuckDBPyRelation] = None,
+) -> DuckDBPyRelation:
+    """Register address and numeric term frequency tables.
 
-        # Compute numeric term frequencies
-        numeric_term_frequencies_rel = get_numeric_term_frequencies_from_address_table(
-            cleaned_address_table, con, pre_cleaned_addresses=pre_cleaned_addresses
-        )
-        con.sql("DROP TABLE IF EXISTS __ukam_numeric_term_frequencies")
-        numeric_term_frequencies_rel.create("__ukam_numeric_term_frequencies")
+    Args:
+        con: DuckDB connection.
+        term_frequency_lookup: Optional pre-computed term frequency table with
+            'token' and 'rel_freq' columns. If not provided, uses the package's
+            pre-baked term frequencies.
 
+    Returns:
+        The registered term frequency table.
+    """
+    # Use provided term frequencies or load pre-baked
+    if term_frequency_lookup is not None:
+        address_token_frequencies_rel = term_frequency_lookup
     else:
         read_tf_sql = package_resource_read_sql(
             "uk_address_matcher.data", "address_token_frequencies.parquet"
         )
         address_token_frequencies_rel = con.sql(read_tf_sql)
 
-        # Load precomputed numeric term frequencies as well
-        read_numeric_tf_sql = package_resource_read_sql(
-            "uk_address_matcher.data", "numeric_token_frequencies.parquet"
-        )
-        numeric_term_frequencies_rel = con.sql(read_numeric_tf_sql)
-        con.sql("DROP TABLE IF EXISTS __ukam_numeric_term_frequencies")
-        numeric_term_frequencies_rel.create("__ukam_numeric_term_frequencies")
+    # Always load pre-baked numeric term frequencies
+    read_numeric_tf_sql = package_resource_read_sql(
+        "uk_address_matcher.data", "numeric_token_frequencies.parquet"
+    )
+    numeric_term_frequencies_rel = con.sql(read_numeric_tf_sql)
+    con.sql("DROP TABLE IF EXISTS __ukam_numeric_term_frequencies")
+    numeric_term_frequencies_rel.create("__ukam_numeric_term_frequencies")
 
     # Materialise the term frequency table to avoid lazy evaluation issues
     # when the underlying data is modified or dropped
