@@ -26,8 +26,8 @@ from benchmarking.datasets.sources import (
     load_canonical_data,
 )
 from uk_address_matcher import (
-    clean_data_with_minimal_steps,
-    clean_data_with_term_frequencies,
+    clean_data_pre_term_frequencies,
+    prepare_data_for_matching,
 )
 
 if TYPE_CHECKING:
@@ -77,9 +77,9 @@ def load_benchmark_data(
 
     # Apply cleaning logic
     if include_term_frequencies:
-        cleaning_function = clean_data_with_term_frequencies
+        cleaning_function = prepare_data_for_matching
     else:
-        cleaning_function = clean_data_with_minimal_steps
+        cleaning_function = clean_data_pre_term_frequencies
 
     df_messy = cleaning_function(df_messy_raw, con)
 

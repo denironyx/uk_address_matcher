@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 from uk_address_matcher import (
-    clean_data_with_term_frequencies,
+    prepare_data_for_matching,
     get_linker,
 )
 from uk_address_matcher.linking_model.training import get_settings_for_training
@@ -200,7 +200,7 @@ print(f"messy_count: {messy_count:,}, canonical_count: {canonical_count:,}")
 # Step 2: Clean data
 # -----------------------------------------------------------------------------
 
-df_messy_data_clean = clean_data_with_term_frequencies(messy_data, con=con_disk)
+df_messy_data_clean = prepare_data_for_matching(messy_data, con=con_disk)
 sql = """
 create table messy_data_clean as
 select * exclude (labels_filename) from df_messy_data_clean
@@ -208,7 +208,7 @@ select * exclude (labels_filename) from df_messy_data_clean
 con_disk.execute(sql)
 
 
-df_os_clean = clean_data_with_term_frequencies(con_disk.from_df(df_os), con=con_disk)
+df_os_clean = prepare_data_for_matching(con_disk.from_df(df_os), con=con_disk)
 sql = """
 create table os_clean as
 select * from df_os_clean

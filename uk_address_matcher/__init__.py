@@ -1,8 +1,8 @@
 __version__ = "0.0.4"
 
 from uk_address_matcher.cleaning.chunking_strategies import (
-    clean_data_with_minimal_steps,
-    clean_data_with_term_frequencies,
+    clean_data_pre_term_frequencies,
+    prepare_data_for_matching,
 )
 from uk_address_matcher.linking_model.exact_matching import (
     StageName,
@@ -25,8 +25,8 @@ from uk_address_matcher.post_linkage.identify_distinguishing_tokens import (
 
 __all__ = [
     "get_linker",
-    "clean_data_with_term_frequencies",
-    "clean_data_with_minimal_steps",
+    "prepare_data_for_matching",
+    "clean_data_pre_term_frequencies",
     "calculate_match_metrics",
     "improve_predictions_using_distinguishing_tokens",
     "best_matches_with_distinguishability",

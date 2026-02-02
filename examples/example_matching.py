@@ -9,7 +9,7 @@ from uk_address_matcher import (
     best_matches_summary,
     best_matches_with_distinguishability,
     calculate_match_metrics,
-    clean_data_with_term_frequencies,
+    prepare_data_for_matching,
     get_linker,
     improve_predictions_using_distinguishing_tokens,
 )
@@ -59,8 +59,8 @@ if os.getenv("TEST_LIMIT"):
 # -----------------------------------------------------------------------------
 # Step 2: Clean the data/feature engineering to prepare for matching model
 # -----------------------------------------------------------------------------
-df_ch_clean = clean_data_with_term_frequencies(df_ch, con=con)
-df_fhrs_clean = clean_data_with_term_frequencies(df_fhrs, con=con)
+df_ch_clean = prepare_data_for_matching(df_ch, con=con)
+df_fhrs_clean = prepare_data_for_matching(df_fhrs, con=con)
 
 # -----------------------------------------------------------------------------
 # Step 3: Run exact matching to reduce the number of records to consider

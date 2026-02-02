@@ -8,7 +8,7 @@ from duckdb import DuckDBPyConnection, DuckDBPyRelation
 
 from uk_address_matcher.cleaning.pipelines import (
     _clean_data_using_precomputed_rel_tok_freq,
-    _clean_data_with_minimal_steps,
+    _clean_data_pre_term_frequencies,
     _create_term_frequency_tables,
 )
 from uk_address_matcher.sql_pipeline.helpers import _uid
@@ -78,7 +78,7 @@ def _should_use_data_specific_term_frequencies(
         return total_records >= 500_000
 
 
-def clean_data_with_minimal_steps(
+def clean_data_pre_term_frequencies(
     address_table: DuckDBPyRelation,
     con: DuckDBPyConnection,
     num_of_chunks: int = 10,
@@ -123,7 +123,7 @@ def clean_data_with_minimal_steps(
         """)
 
         # Process the chunk without address ID, applying debug options only on first iteration
-        processed_chunk = _clean_data_with_minimal_steps(
+        processed_chunk = _clean_data_pre_term_frequencies(
             chunk,
             con,
             debug_options=debug_options if chunk_index == 0 else None,
@@ -151,7 +151,7 @@ def clean_data_with_minimal_steps(
 # 2. At the end of each chunk, accumulate token counts to compute global term frequencies
 # 3. Use computed term frequencies to populate term frequency fields in cleaned data and
 #   finally apply QUEUE_POST_TF
-def clean_data_with_term_frequencies(
+def prepare_data_for_matching(
     address_table: DuckDBPyRelation,
     con: DuckDBPyConnection,
     num_of_chunks: int = 10,
@@ -160,21 +160,8 @@ def clean_data_with_term_frequencies(
     *,
     debug_options: Optional[DebugOptions] = None,
 ) -> DuckDBPyRelation:
-    """Clean address data using term frequencies computed from the input data.
+    """Prepare address data for matching
 
-    Computes relative token frequencies directly from the input address table
-    and applies them during cleaning. This approach ensures term frequencies
-    reflect the specific input dataset, making it ideal for single-run analyses
-    or when you have a representative sample.
-
-    The pipeline applies all stages from QUEUE_PRE_TF + term frequency stage + QUEUE_POST_TF
-    (see pipelines.py for full stage list). Post-TF stages include:
-    - Moving common end tokens to a dedicated field
-    - Identifying first unusual tokens
-    - Separating distinguishing unusual tokens
-
-    When chunking is enabled, term frequencies are computed once across the full dataset,
-    then each chunk is processed independently and results are unioned.
 
     Args:
         address_table: Input address relation with standard schema.
@@ -200,7 +187,7 @@ def clean_data_with_term_frequencies(
     uid = _uid()
 
     # Clean data in chunks (without term frequencies)
-    cleaned_address_table = clean_data_with_minimal_steps(
+    cleaned_address_table = clean_data_pre_term_frequencies(
         address_table, con, num_of_chunks=num_of_chunks, debug_options=debug_options
     )
 
@@ -275,6 +262,6 @@ def clean_data_with_term_frequencies(
 
 
 __all__ = [
-    "clean_data_with_minimal_steps",
-    "clean_data_with_term_frequencies",
+    "clean_data_pre_term_frequencies",
+    "prepare_data_for_matching",
 ]

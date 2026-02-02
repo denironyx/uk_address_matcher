@@ -6,7 +6,7 @@ import duckdb
 
 from uk_address_matcher import (
     clean_data_on_the_fly,
-    clean_data_with_term_frequencies,
+    prepare_data_for_matching,
 )
 
 overall_start_time = time.time()
@@ -34,7 +34,7 @@ df_os
 
 
 df_os_clean = clean_data_on_the_fly(df_os, con=con)
-df_os_clean = clean_data_with_term_frequencies(df_os, con=con)
+df_os_clean = prepare_data_for_matching(df_os, con=con)
 df_os_clean.write_parquet("secret_data/ord_surv/os_clean.parquet")
 df_os_clean_from_file = duckdb.read_parquet("secret_data/ord_surv/os_clean.parquet")
 df_os_clean_from_file.show(max_width=50000)

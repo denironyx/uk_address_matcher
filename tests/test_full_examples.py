@@ -4,7 +4,7 @@ import subprocess
 import duckdb
 import pytest
 
-from uk_address_matcher import clean_data_with_term_frequencies
+from uk_address_matcher import prepare_data_for_matching
 
 
 def test_full_example():
@@ -54,7 +54,7 @@ def test_match_one(path, postcode):
         '{postcode}' as postcode
     """
     )
-    canon_data = clean_data_with_term_frequencies(canon_data, con=con)
+    canon_data = prepare_data_for_matching(canon_data, con=con)
     con.sql(
         f"COPY ({canon_data.sql_query()}) TO '{os.path.abspath(path)}' (FORMAT 'parquet')"
     )

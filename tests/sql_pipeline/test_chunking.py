@@ -2,9 +2,9 @@ from unittest.mock import patch
 
 import pytest
 
-from uk_address_matcher import clean_data_with_minimal_steps
+from uk_address_matcher import clean_data_pre_term_frequencies
 from uk_address_matcher.cleaning.chunking_strategies import (
-    clean_data_with_term_frequencies,
+    prepare_data_for_matching,
 )
 
 
@@ -38,11 +38,11 @@ def test_chunking_yields_same_result_as_no_chunking(
     num_chunks = 5
 
     # Process without chunking (baseline)
-    baseline = clean_data_with_minimal_steps(fhrs_data, con=duck_con)
+    baseline = clean_data_pre_term_frequencies(fhrs_data, con=duck_con)
     baseline.to_table("baseline_rel")
 
     # Process with chunking
-    chunked = clean_data_with_minimal_steps(
+    chunked = clean_data_pre_term_frequencies(
         fhrs_data, con=duck_con, num_of_chunks=num_chunks
     )
     chunked.to_table("chunked_rel")
@@ -112,12 +112,10 @@ def test_chunking_yields_same_result_as_no_chunking(
 def test_clean_data_using_precomputed_rel_tok_freq(
     duck_con, fhrs_data, mock_chunk_size_1k
 ):
-    no_chunk_rel = clean_data_with_term_frequencies(fhrs_data, con=duck_con)
+    no_chunk_rel = prepare_data_for_matching(fhrs_data, con=duck_con)
     no_chunk_count = no_chunk_rel.count("*").fetchone()[0]
 
-    chunked_rel = clean_data_with_term_frequencies(
-        fhrs_data, con=duck_con, num_of_chunks=5
-    )
+    chunked_rel = prepare_data_for_matching(fhrs_data, con=duck_con, num_of_chunks=5)
     chunked_count = chunked_rel.count("*").fetchone()[0]
 
     # Confirm we get the expected number of records out
@@ -139,7 +137,7 @@ def test_token_rel_freq_arr_hist_consistent_across_chunks(
 ):
     """Verify token_rel_freq_arr_hist is identical irrespective of chunking strategy."""
     # Process without chunking (baseline)
-    no_chunk = clean_data_with_term_frequencies(
+    no_chunk = prepare_data_for_matching(
         fhrs_data,
         con=duck_con,
         num_of_chunks=1,
@@ -150,7 +148,7 @@ def test_token_rel_freq_arr_hist_consistent_across_chunks(
     )
 
     # Process with 5 chunks
-    chunked = clean_data_with_term_frequencies(
+    chunked = prepare_data_for_matching(
         fhrs_data,
         con=duck_con,
         num_of_chunks=5,
@@ -177,7 +175,7 @@ def test_numeric_term_frequency_columns_present_when_using_precomputed_tfs(
     - When use_data_specific_tfs=True: numeric TFs are computed from input data
     - When use_data_specific_tfs=False: numeric TFs are loaded from precomputed files
     """
-    result = clean_data_with_term_frequencies(
+    result = prepare_data_for_matching(
         fhrs_data,
         con=duck_con,
         num_of_chunks=1,

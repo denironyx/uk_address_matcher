@@ -1,4 +1,4 @@
-from uk_address_matcher import clean_data_with_minimal_steps
+from uk_address_matcher import clean_data_pre_term_frequencies
 
 
 def test_duplicate_records_get_unique_ukam_address_id(duck_con):
@@ -17,7 +17,7 @@ def test_duplicate_records_get_unique_ukam_address_id(duck_con):
     test_data = duck_con.table("test_data")
 
     # Clean the data (single chunk to isolate the ID generation logic)
-    cleaned = clean_data_with_minimal_steps(test_data, con=duck_con, num_of_chunks=1)
+    cleaned = clean_data_pre_term_frequencies(test_data, con=duck_con, num_of_chunks=1)
 
     # Check that ukam_address_id column exists
     assert "ukam_address_id" in cleaned.columns, (
@@ -69,7 +69,7 @@ def test_chunking_with_duplicates_across_chunk_boundaries(duck_con):
     test_data = duck_con.table("test_data")
 
     # Process with 4 chunks (5 records each)
-    cleaned = clean_data_with_minimal_steps(test_data, con=duck_con, num_of_chunks=4)
+    cleaned = clean_data_pre_term_frequencies(test_data, con=duck_con, num_of_chunks=4)
 
     # Get all ukam_address_id values
     result = cleaned.select("ukam_address_id").fetchall()
