@@ -416,31 +416,20 @@ def _generalised_token_aliases():
     The idea is to guide matches away from implausible matches and towards
     possible matches
 
-    The real tokens always take precidence over genearlised
+    The real tokens always take precedence over generalised tokens.
 
     For example sometimes a 2nd floor flat will match to top floor.  Whilst 'top floor'
     is often ambiguous (is the 2nd floor the top floor), we know that
     'top floor' cannot match to 'ground' or 'basement'
 
-    This function applies the following mappings:
+    This stage expands each token in `distinguishing_adj_start_tokens` into a small list of
+    aliases, then flattens the result into `distinguishing_adj_token_aliases`.
 
-    [FIRST, SECOND, THIRD, TOP] -> [UPPERFLOOR, LEVEL]
-
-    [GARDEN, GROUND] -> [GROUNDFLOOR, LEVEL]
-
-
-    This function applies the following mappings:
-    - Single letters (A-E) -> UNIT_NUM_LET
-    - Single digits (1-5) -> UNIT_NUM_LET
-    - Floor indicators (FIRST, SECOND, THIRD) -> LEVEL
-    - Position indicators (TOP, FIRST, SECOND, THIRD) -> TOP
-    The following tokens are filtered out completely:
-    - FLAT, APARTMENT, UNIT
-    Args:
-        ddb_pyrel (DuckDBPyRelation): The input relation with unique_tokens field
-        con (DuckDBPyConnection): The DuckDB connection
-    Returns:
-        DuckDBPyRelation: The modified table with generalised_unique_tokens field
+    Mappings applied:
+    - FIRST, SECOND, THIRD, TOP -> UPPERFLOOR, LEVEL
+    - GARDEN, GROUND -> GROUNDFLOOR, LEVEL
+    - BASEMENT -> LEVEL
+    - Everything else is kept as-is (the original token is retained).
     """
     sql = f"""
     SELECT
