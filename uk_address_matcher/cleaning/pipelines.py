@@ -29,7 +29,6 @@ from uk_address_matcher.cleaning.steps import (
     _use_first_unusual_token_if_no_numeric_token,
 )
 from uk_address_matcher.cleaning.steps.term_frequencies import (
-    _attach_numeric_term_frequencies,
     _create_histograms_from_token_frequencies,
 )
 from uk_address_matcher.cleaning.steps.tokenisation import (
@@ -109,7 +108,6 @@ QUEUE_POST_TF = [
     _use_first_unusual_token_if_no_numeric_token,
     _separate_unusual_tokens,
     _create_histograms_from_token_frequencies,
-    _attach_numeric_term_frequencies,
 ]
 
 # Minimal pipeline for TF derivation: just clean address + tokenise
@@ -273,7 +271,14 @@ def _create_term_frequency_tables(
     con: DuckDBPyConnection,
     term_frequency_lookup: Optional[DuckDBPyRelation] = None,
 ) -> DuckDBPyRelation:
-    """Register address and numeric term frequency tables.
+    """Register address token  and numeric term frequency tables.
+
+    - Numeric term frequencies are always loaded from pre-baked data. 'Numeric' meaning e.g. 'how often
+        does the token '1' appear relative to the token '7' in UK addresses.
+        They are used implicitly in the linking model by loading them into
+        linker.table_management.register_term_frequency_lookup
+    - Token term frequencies are usually derived from the data itself, but if not provided by
+         the user a pre-baked table is used
 
     Args:
         con: DuckDB connection.
@@ -284,7 +289,7 @@ def _create_term_frequency_tables(
     Returns:
         The registered term frequency table.
     """
-    # Use provided term frequencies or load pre-baked
+    # Use provided TOKEN term frequencies or load pre-baked
     if term_frequency_lookup is not None:
         address_token_frequencies_rel = term_frequency_lookup
     else:
@@ -293,7 +298,13 @@ def _create_term_frequency_tables(
         )
         address_token_frequencies_rel = con.sql(read_tf_sql)
 
-    # Always load pre-baked numeric term frequencies
+    # Materialise the term frequency table to avoid lazy evaluation issues
+    # when the underlying data is modified or dropped
+    con.sql("DROP TABLE IF EXISTS __ukam_rel_tok_freq")
+    address_token_frequencies_rel.create("__ukam_rel_tok_freq")
+    con.register("rel_tok_freq", con.table("__ukam_rel_tok_freq"))
+
+    # Always load pre-baked NUMERIC term frequencies (see docstring)
     read_numeric_tf_sql = package_resource_read_sql(
         "uk_address_matcher.data", "numeric_token_frequencies.parquet"
     )
@@ -301,9 +312,4 @@ def _create_term_frequency_tables(
     con.sql("DROP TABLE IF EXISTS __ukam_numeric_term_frequencies")
     numeric_term_frequencies_rel.create("__ukam_numeric_term_frequencies")
 
-    # Materialise the term frequency table to avoid lazy evaluation issues
-    # when the underlying data is modified or dropped
-    con.sql("DROP TABLE IF EXISTS __ukam_rel_tok_freq")
-    address_token_frequencies_rel.create("__ukam_rel_tok_freq")
-    con.register("rel_tok_freq", con.table("__ukam_rel_tok_freq"))
     return con.table("__ukam_rel_tok_freq")
