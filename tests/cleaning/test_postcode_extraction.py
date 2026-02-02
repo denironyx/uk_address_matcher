@@ -37,8 +37,8 @@ def test_postcode_extraction_no_column_provided():
                 f"Expected postcode '{expected_postcode}', got '{extracted_postcode}'"
             )
         else:
-            assert extracted_postcode is None or extracted_postcode == "", (
-                f"Expected no postcode, got '{extracted_postcode}'"
+            assert extracted_postcode is None, (
+                f"Expected NULL postcode, got '{extracted_postcode}'"
             )
 
         # Check postcode removal from address
@@ -104,9 +104,15 @@ def test_postcode_extraction_empty_column():
 
     test_cases = [
         # (input_address, provided_postcode, expected_extracted_postcode)
-        ("10 HIGH STREET LONDON SW1A 1AA", "", "SW1A 1AA"),  # Empty string
-        ("FLAT 5 ACACIA AVENUE M1 2AB", None, "M1 2AB"),  # NULL
-        ("123 MAIN ROAD B12 3CD", "   ", "B12 3CD"),  # Whitespace only
+        (
+            "10 HIGH STREET LONDON SW1A 1AA",
+            "",
+            "SW1A 1AA",
+        ),  # Empty string, postcode in address
+        ("FLAT 5 ACACIA AVENUE M1 2AB", None, "M1 2AB"),  # NULL, postcode in address
+        ("123 MAIN ROAD B12 3CD", "   ", "B12 3CD"),  # Whitespace, postcode in address
+        ("10 HIGH STREET LONDON", "", None),  # Empty string, no postcode in address
+        ("FLAT 5 ACACIA AVENUE MANCHESTER", None, None),  # NULL, no postcode in address
     ]
 
     for input_address, provided_postcode, expected_postcode in test_cases:
