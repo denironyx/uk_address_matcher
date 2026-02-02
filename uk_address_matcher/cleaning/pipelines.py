@@ -66,7 +66,7 @@ def _ensure_postcode_column(rel: DuckDBPyRelation) -> DuckDBPyRelation:
         return rel.select("*, CAST(NULL AS VARCHAR) AS postcode")
 
 
-QUEUE_PRE_TF = [
+QUEUE_CLEAN_FULL_ADDRESS = [
     _add_ukam_address_id,
     _extract_postcode_from_address,
     _rename_and_select_columns,
@@ -76,6 +76,10 @@ QUEUE_PRE_TF = [
     _clean_address_string_first_pass,
     _normalise_abbreviations_and_units,
     _remove_duplicate_end_tokens,  # clean_full_address now completed
+]
+
+
+QUEUE_DERIVE_NON_TF_FEATURES = [
     _create_tokenised_address_concat,  # based on clean_full_address
     _parse_out_flat_position_and_letter,
     _parse_out_business_unit,
@@ -85,15 +89,18 @@ QUEUE_PRE_TF = [
     _tokenise_address_without_numbers,
 ]
 
-COMMON_AND_UNIQUE = [
-    _separate_distinguishing_start_tokens_from_with_respect_to_adjacent_records,
-    _generalised_token_aliases,
-    *QUEUE_PRE_TF[QUEUE_PRE_TF.index(_remove_duplicate_end_tokens) + 1 :],
+
+QUEUE_PRE_TF = [
+    *QUEUE_CLEAN_FULL_ADDRESS,
+    *QUEUE_DERIVE_NON_TF_FEATURES,
 ]
 
-QUEUE_PRE_TF_WITH_UNIQUE_AND_COMMON = [
-    *QUEUE_PRE_TF[: QUEUE_PRE_TF.index(_remove_duplicate_end_tokens) + 1],
-    *COMMON_AND_UNIQUE,
+
+QUEUE_PRE_TF_WITH_DISTINGUISHING_WRT_ADJACENT = [
+    *QUEUE_CLEAN_FULL_ADDRESS,
+    _separate_distinguishing_start_tokens_from_with_respect_to_adjacent_records,
+    _generalised_token_aliases,
+    *QUEUE_DERIVE_NON_TF_FEATURES,
 ]
 
 QUEUE_POST_TF = [
@@ -146,7 +153,7 @@ def _clean_data_using_precomputed_rel_tok_freq(
     if not pre_cleaned_addresses:
         address_table = _ensure_postcode_column(address_table)
     pre_queue = (
-        QUEUE_PRE_TF_WITH_UNIQUE_AND_COMMON
+        QUEUE_PRE_TF_WITH_DISTINGUISHING_WRT_ADJACENT
         if derive_distinguishing_wrt_adjacent_records
         else QUEUE_PRE_TF
     )
