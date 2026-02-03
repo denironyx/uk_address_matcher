@@ -160,21 +160,21 @@ incorrect_count = (
     .fetchone()[0]
 )
 
-# if incorrect_count > 0:
-#     print(
-#         f"\n📊 Found {incorrect_count:,} incorrect matches. Analysing mismatches...\n"
-#     )
-#     mismatch_results = analyse_mismatches(
-#         ukam_matches=match_candidates,
-#         ukam_canonical=df_os_clean,
-#         ukam_messy=df_messy_clean,
-#         samples_per_reason=MISMATCH_SAMPLES_PER_REASON,
-#         top_worst=TOP_WORST_MISMATCHES,
-#     )
-#     print_mismatch_analysis(mismatch_results)
-# else:
-#     print("\n✓ No incorrect matches found!\n")
+if incorrect_count > 0:
+    print(
+        f"\n📊 Found {incorrect_count:,} incorrect matches. Analysing mismatches...\n"
+    )
+    mismatch_results = analyse_mismatches(
+        ukam_matches=match_candidates,
+        ukam_canonical=df_os_clean,
+        ukam_messy=df_messy_clean,
+        samples_per_reason=MISMATCH_SAMPLES_PER_REASON,
+        top_worst=TOP_WORST_MISMATCHES,
+    )
+    print_mismatch_analysis(mismatch_results)
+else:
+    print("\n✓ No incorrect matches found!\n")
 
-# print("\nTiming summary:")
-# for line in format_timing_summary(variant_timings):
-#     print(line)
+print("\nTiming summary:")
+for line in format_timing_summary(variant_timings):
+    print(line)
