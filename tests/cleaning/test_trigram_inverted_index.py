@@ -174,21 +174,30 @@ class TestDeriveInvertedIndexFunction:
     """Integration tests for derive_inverted_index function."""
 
     def test_derive_inverted_index_basic(self, duck_con):
-        """Test derive_inverted_index with simple address data."""
-        from uk_address_matcher.cleaning.chunking_strategies import derive_inverted_index
+        """Test derive_inverted_index with pre-cleaned address data."""
+        from uk_address_matcher.cleaning.chunking_strategies import (
+            derive_inverted_index,
+            prepare_data_for_matching,
+        )
 
         # Create test canonical addresses
-        canonical = duck_con.sql("""
+        canonical_raw = duck_con.sql("""
             SELECT * FROM (VALUES
-                (1, '9 LOVE LANE LONDON', 'SW1A 1AA'),
-                (2, '9 LOVE LANE BRIGHTON', 'BN1 1AA'),
-                (3, '8 LOVE LANE LONDON', 'SW1A 1AB'),
-                (4, '10 HIGH STREET OXFORD', 'OX1 1AA')
+                ('1', '9 LOVE LANE LONDON', 'SW1A 1AA'),
+                ('2', '9 LOVE LANE BRIGHTON', 'BN1 1AA'),
+                ('3', '8 LOVE LANE LONDON', 'SW1A 1AB'),
+                ('4', '10 HIGH STREET OXFORD', 'OX1 1AA')
             ) AS t(unique_id, address_concat, postcode)
         """)
 
+        # First clean the canonical data
+        canonical_clean = prepare_data_for_matching(
+            canonical_raw, duck_con, num_of_chunks=1
+        )
+
+        # Now derive inverted index from cleaned data
         inverted_idx = derive_inverted_index(
-            canonical, duck_con, num_of_chunks=1, max_unique_ids_per_trigram=20
+            canonical_clean, duck_con, max_unique_ids_per_trigram=20
         )
 
         # Check structure
@@ -205,25 +214,33 @@ class TestDeriveInvertedIndexFunction:
 
         # '9 LOVE LANE' should map to records 1 and 2
         assert "9 LOVE LANE" in result_dict
-        assert sorted(result_dict["9 LOVE LANE"]) == [1, 2]
+        assert sorted(result_dict["9 LOVE LANE"]) == ["1", "2"]
 
     def test_derive_inverted_index_filters_common_trigrams(self, duck_con):
         """Test that trigrams appearing in too many records are filtered out."""
-        from uk_address_matcher.cleaning.chunking_strategies import derive_inverted_index
+        from uk_address_matcher.cleaning.chunking_strategies import (
+            derive_inverted_index,
+            prepare_data_for_matching,
+        )
 
         # Create data where one trigram is very common
-        canonical = duck_con.sql("""
+        canonical_raw = duck_con.sql("""
             SELECT * FROM (VALUES
-                (1, 'COMMON STREET NAME LONDON', 'SW1A 1AA'),
-                (2, 'COMMON STREET NAME BRIGHTON', 'BN1 1AA'),
-                (3, 'COMMON STREET NAME OXFORD', 'OX1 1AA'),
-                (4, 'UNIQUE ROAD HERE MANCHESTER', 'M1 1AA')
+                ('1', 'COMMON STREET NAME LONDON', 'SW1A 1AA'),
+                ('2', 'COMMON STREET NAME BRIGHTON', 'BN1 1AA'),
+                ('3', 'COMMON STREET NAME OXFORD', 'OX1 1AA'),
+                ('4', 'UNIQUE ROAD HERE MANCHESTER', 'M1 1AA')
             ) AS t(unique_id, address_concat, postcode)
         """)
 
+        # First clean the canonical data
+        canonical_clean = prepare_data_for_matching(
+            canonical_raw, duck_con, num_of_chunks=1
+        )
+
         # Set max_unique_ids_per_trigram to 2 to filter out common trigrams
         inverted_idx = derive_inverted_index(
-            canonical, duck_con, num_of_chunks=1, max_unique_ids_per_trigram=2
+            canonical_clean, duck_con, max_unique_ids_per_trigram=2
         )
 
         result = inverted_idx.fetchall()
@@ -244,22 +261,27 @@ class TestPrepareDataForMatchingWithInvertedIndex:
         )
 
         # Create canonical addresses
-        canonical = duck_con.sql("""
+        canonical_raw = duck_con.sql("""
             SELECT * FROM (VALUES
-                (1, '9 LOVE LANE LONDON', 'SW1A 1AA'),
-                (2, '10 HIGH STREET OXFORD', 'OX1 1AA')
+                ('1', '9 LOVE LANE LONDON', 'SW1A 1AA'),
+                ('2', '10 HIGH STREET OXFORD', 'OX1 1AA')
             ) AS t(unique_id, address_concat, postcode)
         """)
 
         # Create messy addresses
         messy = duck_con.sql("""
             SELECT * FROM (VALUES
-                (100, '9 LOVE LANE LONDON SW1A 1AA', 'SW1A 1AA')
+                ('100', '9 LOVE LANE LONDON SW1A 1AA', 'SW1A 1AA')
             ) AS t(unique_id, address_concat, postcode)
         """)
 
-        # Derive inverted index from canonical
-        inverted_idx = derive_inverted_index(canonical, duck_con, num_of_chunks=1)
+        # First clean canonical data (no inverted index)
+        canonical_clean = prepare_data_for_matching(
+            canonical_raw, duck_con, num_of_chunks=1
+        )
+
+        # Derive inverted index from cleaned canonical
+        inverted_idx = derive_inverted_index(canonical_clean, duck_con)
 
         # Prepare messy data with inverted index
         prepared_messy = prepare_data_for_matching(
@@ -272,8 +294,8 @@ class TestPrepareDataForMatchingWithInvertedIndex:
         # Get the exploding_unique_ids for the messy record
         result = prepared_messy.select("exploding_unique_ids").fetchone()[0]
 
-        # Should contain canonical unique_id 1 (matching trigrams)
-        assert 1 in result
+        # Should contain canonical unique_id '1' (matching trigrams)
+        assert "1" in result
 
     def test_prepare_data_without_inverted_index(self, duck_con):
         """Test that data without inverted index gets [unique_id] as exploding_unique_ids."""
@@ -282,8 +304,8 @@ class TestPrepareDataForMatchingWithInvertedIndex:
         # Create canonical addresses
         canonical = duck_con.sql("""
             SELECT * FROM (VALUES
-                (1, '9 LOVE LANE LONDON', 'SW1A 1AA'),
-                (2, '10 HIGH STREET OXFORD', 'OX1 1AA')
+                ('1', '9 LOVE LANE LONDON', 'SW1A 1AA'),
+                ('2', '10 HIGH STREET OXFORD', 'OX1 1AA')
             ) AS t(unique_id, address_concat, postcode)
         """)
 
@@ -306,21 +328,26 @@ class TestPrepareDataForMatchingWithInvertedIndex:
         )
 
         # Create canonical addresses
-        canonical = duck_con.sql("""
+        canonical_raw = duck_con.sql("""
             SELECT * FROM (VALUES
-                (1, '9 LOVE LANE LONDON', 'SW1A 1AA')
+                ('1', '9 LOVE LANE LONDON', 'SW1A 1AA')
             ) AS t(unique_id, address_concat, postcode)
         """)
 
         # Create messy address with completely different content
         messy = duck_con.sql("""
             SELECT * FROM (VALUES
-                (100, 'COMPLETELY DIFFERENT ADDRESS HERE', 'M1 1AA')
+                ('100', 'COMPLETELY DIFFERENT ADDRESS HERE', 'M1 1AA')
             ) AS t(unique_id, address_concat, postcode)
         """)
 
-        # Derive inverted index from canonical
-        inverted_idx = derive_inverted_index(canonical, duck_con, num_of_chunks=1)
+        # First clean canonical data
+        canonical_clean = prepare_data_for_matching(
+            canonical_raw, duck_con, num_of_chunks=1
+        )
+
+        # Derive inverted index from cleaned canonical
+        inverted_idx = derive_inverted_index(canonical_clean, duck_con)
 
         # Prepare messy data with inverted index
         prepared_messy = prepare_data_for_matching(

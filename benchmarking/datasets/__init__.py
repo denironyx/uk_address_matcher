@@ -109,52 +109,43 @@ def load_benchmark_data(
             """
         )
 
+    # Step 1: Clean or use pre-cleaned canonical data
+    tf_table = None
     if clean_canonical_on_the_fly:
-        # Clean canonical data on the fly
         print("Cleaning canonical data on the fly...")
 
-        # Optionally derive term frequencies from canonical data
-        tf_table = None
+        # Optionally derive term frequencies from raw canonical data
         if derive_term_frequencies_on_the_fly:
             print("Deriving term frequencies from canonical data...")
             tf_table = derive_term_frequencies_table(df_canonical_loaded, con=con)
 
-        # Derive inverted index from canonical data
-        print("Deriving inverted index from canonical data...")
-        inverted_index = derive_inverted_index(
-            df_canonical_loaded,
-            con=con,
-            num_of_chunks=5,
-        )
-
-        # Clean canonical data (no inverted index needed for canonical)
+        # Clean canonical data (no inverted index → exploding_unique_ids = [unique_id])
         print("Preparing canonical data for matching...")
         df_canonical = prepare_data_for_matching(
             df_canonical_loaded,
             con=con,
             term_frequency_lookup=tf_table,
         )
-
-        # Clean messy data with inverted index from canonical
-        print("Preparing messy data for matching...")
-        if include_term_frequencies:
-            df_messy = prepare_data_for_matching(
-                df_messy_raw,
-                con=con,
-                term_frequency_lookup=tf_table,
-                inverted_index=inverted_index,
-            )
-        else:
-            df_messy = clean_data_pre_term_frequencies(df_messy_raw, con)
     else:
-        # Use pre-cleaned canonical data (original behavior)
+        # Use pre-cleaned canonical data directly
         df_canonical = df_canonical_loaded
 
-        # Apply cleaning logic to messy data
-        if include_term_frequencies:
-            df_messy = prepare_data_for_matching(df_messy_raw, con)
-        else:
-            df_messy = clean_data_pre_term_frequencies(df_messy_raw, con)
+    # Step 2: Derive inverted index from cleaned canonical data
+    # (works whether canonical was cleaned on-the-fly or loaded pre-cleaned)
+    print("Deriving inverted index from canonical data...")
+    inverted_index = derive_inverted_index(df_canonical, con=con)
+
+    # Step 3: Clean messy data using the inverted index
+    print("Preparing messy data for matching...")
+    if include_term_frequencies:
+        df_messy = prepare_data_for_matching(
+            df_messy_raw,
+            con=con,
+            term_frequency_lookup=tf_table,
+            inverted_index=inverted_index,
+        )
+    else:
+        df_messy = clean_data_pre_term_frequencies(df_messy_raw, con)
 
     # Show dataset info
     info = get_dataset_info(dataset_name)

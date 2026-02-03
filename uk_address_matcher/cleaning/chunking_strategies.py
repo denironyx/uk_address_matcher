@@ -243,31 +243,36 @@ def derive_term_frequencies_table(
 
 
 def derive_inverted_index(
-    address_table: DuckDBPyRelation,
+    cleaned_address_table: DuckDBPyRelation,
     con: DuckDBPyConnection,
-    num_of_chunks: int = 10,
     max_unique_ids_per_trigram: int = 20,
     *,
     debug_options: Optional["DebugOptions"] = None,
 ) -> DuckDBPyRelation:
-    """Derive a trigram-based inverted index from canonical address data.
+    """Derive a trigram-based inverted index from already-cleaned canonical data.
 
-    This function cleans and tokenises addresses in chunks, then computes
-    trigrams (consecutive 3-token sequences) and builds an inverted index
-    mapping each trigram to a list of unique_ids. Trigrams appearing in
-    more than `max_unique_ids_per_trigram` records are filtered out as
-    they provide poor blocking selectivity.
+    This function expects pre-cleaned address data (output of prepare_data_for_matching)
+    with `address_tokens` and `unique_id` columns already present. It computes trigrams
+    (consecutive 3-token sequences) and builds an inverted index mapping each trigram
+    to a list of unique_ids. Trigrams appearing in more than `max_unique_ids_per_trigram`
+    records are filtered out as they provide poor blocking selectivity.
 
     Example usage:
-        inverted_idx = derive_inverted_index(df_canonical, con)
-        df_messy = prepare_data_for_matching(df_messy, con, inverted_index=inverted_idx)
-        df_canonical = prepare_data_for_matching(df_canonical, con)
+        # First clean canonical data (no inverted index needed)
+        df_canonical_clean = prepare_data_for_matching(df_canonical, con)
+
+        # Derive inverted index from cleaned canonical data
+        inverted_idx = derive_inverted_index(df_canonical_clean, con)
+
+        # Clean messy data using the inverted index
+        df_messy_clean = prepare_data_for_matching(
+            df_messy, con, inverted_index=inverted_idx
+        )
 
     Args:
-        address_table: Input address relation with address_concat and unique_id columns.
+        cleaned_address_table: Pre-cleaned address relation with `address_tokens`
+            and `unique_id` columns (output of prepare_data_for_matching).
         con: DuckDB connection.
-        num_of_chunks: Number of chunks to split the data into for cleaning.
-            Set to 1 for no chunking.
         max_unique_ids_per_trigram: Maximum number of unique_ids a trigram can
             reference before being filtered out. Default 20.
         debug_options: Optional debug configuration for pipeline execution.
@@ -277,56 +282,10 @@ def derive_inverted_index(
     """
     uid = _uid()
 
-    # Ensure postcode column exists
-    address_table = _ensure_postcode_column(address_table)
-
-    # Register input for chunked access
-    input_name = f"__ukam_inv_idx_input_{uid}"
-    con.register(input_name, address_table)
-
-    total_rows = address_table.count("*").fetchone()[0]
-    chunk_size = _calculate_chunk_size(total_rows, num_of_chunks)
-    total_chunks = (total_rows + chunk_size - 1) // chunk_size
-
-    cleaned_table = f"__ukam_inv_idx_cleaned_{uid}"
-    con.execute(f"DROP TABLE IF EXISTS {cleaned_table}")
-
-    # Process in chunks using minimal pipeline (clean + tokenise only)
-    for chunk_index in range(total_chunks):
-        chunk_started_at = time.perf_counter()
-        chunk = con.sql(f"""
-            SELECT *
-            FROM {input_name}
-            WHERE (abs(hash(address_concat)) % {total_chunks}) = {chunk_index}
-        """)
-
-        pipeline = create_sql_pipeline(
-            con,
-            input_rel=chunk,
-            stage_specs=QUEUE_FOR_TF_DERIVATION,
-            pipeline_name="Clean for inverted index derivation",
-            pipeline_description="Clean and tokenise for trigram computation",
-        )
-        processed_chunk = pipeline.run(debug_options if chunk_index == 0 else None)
-
-        if chunk_index == 0:
-            processed_chunk.create(cleaned_table)
-        else:
-            processed_chunk.insert_into(cleaned_table)
-
-        _log_progress(
-            total_rows,
-            min((chunk_index + 1) * chunk_size, total_rows),
-            stage_type="Cleaned for inverted index: ",
-            chunk_index=chunk_index,
-            total_chunks=total_chunks,
-            chunk_elapsed_seconds=time.perf_counter() - chunk_started_at,
-        )
-
     # Generate trigrams and build inverted index using pipeline stages
     trigram_pipeline = create_sql_pipeline(
         con,
-        input_rel=con.table(cleaned_table),
+        input_rel=cleaned_address_table,
         stage_specs=[
             _derive_trigrams_from_address_tokens,
             _build_inverted_index_from_trigrams(max_unique_ids_per_trigram),
@@ -340,9 +299,6 @@ def derive_inverted_index(
     result_table = f"__ukam_derived_inverted_index_{uid}"
     con.sql(f"DROP TABLE IF EXISTS {result_table}")
     inverted_index_result.create(result_table)
-
-    # Clean up intermediate table
-    con.execute(f"DROP TABLE IF EXISTS {cleaned_table}")
 
     return con.table(result_table)
 
@@ -392,14 +348,21 @@ def prepare_data_for_matching(
         and an `exploding_unique_ids` column for blocking.
 
     Example:
-        # For consistent term frequencies across datasets:
+        # Recommended workflow for matching messy data against canonical:
+        # 1. Optionally derive term frequencies from canonical
         tf_table = derive_term_frequencies_table(df_canonical, con)
-        inverted_idx = derive_inverted_index(df_canonical, con)
-        df_messy = prepare_data_for_matching(
-            df_messy, con, term_frequency_lookup=tf_table, inverted_index=inverted_idx
-        )
-        df_canonical = prepare_data_for_matching(
+
+        # 2. Clean canonical data first (no inverted index needed)
+        df_canonical_clean = prepare_data_for_matching(
             df_canonical, con, term_frequency_lookup=tf_table
+        )
+
+        # 3. Derive inverted index from cleaned canonical
+        inverted_idx = derive_inverted_index(df_canonical_clean, con)
+
+        # 4. Clean messy data using the inverted index
+        df_messy_clean = prepare_data_for_matching(
+            df_messy, con, term_frequency_lookup=tf_table, inverted_index=inverted_idx
         )
 
         # Using pre-baked term frequencies (default):
