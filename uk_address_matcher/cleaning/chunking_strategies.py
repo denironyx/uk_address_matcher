@@ -415,13 +415,25 @@ def prepare_data_for_matching(
     total_rows = cleaned_address_table.count("*").fetchone()[0]
     _create_term_frequency_tables(con, term_frequency_lookup=term_frequency_lookup)
 
+    # Register inverted index table if provided (for use in pipeline stages)
+    inv_idx_table_name = _register_inverted_index_table(con, inverted_index)
+
+    # Determine which trigram stages to use as additional pipeline stages
+    trigram_stages = (
+        list(QUEUE_TRIGRAM_WITH_INVERTED_INDEX)
+        if inv_idx_table_name is not None
+        else list(QUEUE_TRIGRAM_SELF)
+    )
+
     chunk_size = _calculate_chunk_size(total_rows, num_of_chunks)
     total_chunks = (total_rows + chunk_size - 1) // chunk_size
 
     # Get the underlying table name for direct access
     cleaned_table_name = cleaned_address_table.alias
 
-    # Apply term frequencies to cleaned chunks
+    processed_table = f"__ukam_addresses_processed_{uid}"
+
+    # Apply term frequencies and trigram blocking to cleaned chunks
     for chunk_index in range(total_chunks):
         chunk_started_at = time.perf_counter()
         chunk = con.sql(f"""
@@ -430,21 +442,21 @@ def prepare_data_for_matching(
             WHERE (abs(hash(original_address_concat)) % {total_chunks}) = {chunk_index}
         """)
 
-        # Numeric TF columns should only be attached when using precomputed TFs
-        # If we are chunking, we want to precompute rel token freqs and then use them
+        # Process chunk: apply term frequencies + trigram blocking in one pass
         processed_chunk = _clean_data_using_precomputed_rel_tok_freq(
             chunk,
             con=con,
             pre_cleaned_addresses=True,
             derive_distinguishing_wrt_adjacent_records=derive_distinguishing_wrt_adjacent_records,
+            additional_stages=trigram_stages,
             debug_options=debug_options if chunk_index == 0 else None,
         )
 
         if chunk_index == 0:
-            con.execute(f"DROP TABLE IF EXISTS __ukam_addresses_processed_{uid}")
-            processed_chunk.create(f"__ukam_addresses_processed_{uid}")
+            con.execute(f"DROP TABLE IF EXISTS {processed_table}")
+            processed_chunk.create(processed_table)
         else:
-            processed_chunk.insert_into(f"__ukam_addresses_processed_{uid}")
+            processed_chunk.insert_into(processed_table)
 
         # Delete processed rows from the intermediate cleaned table to free memory
         con.execute(f"""
@@ -472,44 +484,11 @@ def prepare_data_for_matching(
     # Drop the now-empty intermediate table
     con.execute(f"DROP TABLE IF EXISTS {cleaned_table_name}")
 
-    processed_table = f"__ukam_addresses_processed_{uid}"
-
-    # Add exploding_unique_ids column based on inverted_index
-    inv_idx_table_name = _register_inverted_index_table(con, inverted_index)
-
+    # Clean up inverted index table if it was registered
     if inv_idx_table_name is not None:
-        # Inverted index provided: derive trigrams and lookup matching unique_ids
-        pipeline = create_sql_pipeline(
-            con,
-            input_rel=con.table(processed_table),
-            stage_specs=QUEUE_TRIGRAM_WITH_INVERTED_INDEX,
-            pipeline_name="Apply trigram blocking with inverted index",
-            pipeline_description="Derive trigrams and lookup in inverted index",
-        )
-        result = pipeline.run()
-
-        final_table = f"__ukam_final_with_exploding_{uid}"
-        con.sql(f"DROP TABLE IF EXISTS {final_table}")
-        result.create(final_table)
-        con.execute(f"DROP TABLE IF EXISTS {processed_table}")
         con.execute(f"DROP TABLE IF EXISTS {inv_idx_table_name}")
-        return con.table(final_table)
-    else:
-        # No inverted index: set exploding_unique_ids to [unique_id]
-        pipeline = create_sql_pipeline(
-            con,
-            input_rel=con.table(processed_table),
-            stage_specs=QUEUE_TRIGRAM_SELF,
-            pipeline_name="Set exploding_unique_ids to self",
-            pipeline_description="Set exploding_unique_ids to [unique_id] for canonical data",
-        )
-        result = pipeline.run()
 
-        final_table = f"__ukam_final_with_exploding_{uid}"
-        con.sql(f"DROP TABLE IF EXISTS {final_table}")
-        result.create(final_table)
-        con.execute(f"DROP TABLE IF EXISTS {processed_table}")
-        return con.table(final_table)
+    return con.table(processed_table)
 
 
 __all__ = [
