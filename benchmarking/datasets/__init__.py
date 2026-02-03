@@ -65,8 +65,9 @@ def load_benchmark_data(
     include_term_frequencies:
         Whether to include term frequency information in the output.
     sample_mode:
-        If True, load 100k canonical records and 10k messy records (deterministically).
-        If False, load all records.
+        If True, load a small sample of messy records (deterministically).
+        Canonical data is always loaded in full and narrowed by any
+        dataset-specific filter. If False, load all records.
     clean_canonical_on_the_fly:
         If True, load raw canonical data and clean it on the fly using
         prepare_data_for_matching. This also derives the inverted index from
@@ -88,15 +89,13 @@ def load_benchmark_data(
     # Load raw messy data with optional sampling
     df_messy_raw = load_dataset(dataset_name, con, sample_mode=sample_mode)
 
-    # Load canonical data once with optional sampling
+    # Load canonical data
     canonical_config = (
         CanonicalConfig(local_path=os_data_path)
         if os_data_path
         else CanonicalConfig.default(use_raw=clean_canonical_on_the_fly)
     )
-    df_canonical_loaded = load_canonical_data(
-        con, canonical_config, sample_mode=sample_mode
-    )
+    df_canonical_loaded = load_canonical_data(con, canonical_config)
 
     # Apply dataset-specific canonical filter if defined
     canonical_filter_sql = _DATASET_REGISTRY[dataset_name].info.canonical_filter_sql

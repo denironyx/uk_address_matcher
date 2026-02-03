@@ -61,7 +61,7 @@ def get_hackney_council_data(
             SELECT * FROM df_messy_raw
             WHERE hash(unique_id) % 100 < 10
             ORDER BY unique_id
-            LIMIT 10000
+            LIMIT 1000
             """
         )
 
