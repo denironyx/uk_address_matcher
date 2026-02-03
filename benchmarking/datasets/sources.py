@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import glob as glob_module
 import os
 from dataclasses import dataclass
 from functools import lru_cache
@@ -66,12 +67,27 @@ def load_canonical_data(
     config.validate()
     rel = con.read_parquet(str(config.local_path))
 
-    # Apply deterministic sampling if requested (pushed down to SQL for efficiency)
-    if sample_mode:
+    if config.is_raw:
+        # Raw ABP data: map to the standard input schema expected by
+        # prepare_data_for_matching (unique_id, address_concat, postcode)
         rel = con.sql(
             """
+            SELECT
+                CAST(uprn AS VARCHAR) AS unique_id,
+                address_concat,
+                postcode,
+                classification_code,
+            FROM rel
+            """
+        )
+
+    # Apply deterministic sampling if requested (pushed down to SQL for efficiency)
+    if sample_mode:
+        order_col = "unique_id" if config.is_raw else "ukam_address_id"
+        rel = con.sql(
+            f"""
             SELECT * FROM rel
-            ORDER BY ukam_address_id
+            ORDER BY {order_col}
             LIMIT 1_000_000
             """
         )
@@ -164,20 +180,44 @@ class CanonicalConfig:
     """
 
     local_path: Path
+    is_raw: bool = False
     description: str = "Pre-cleaned Ordnance Survey addresses"
 
     @classmethod
-    def default(cls) -> CanonicalConfig:
-        configured_path = get_env_setting("UKAM_OS_CANONICAL_PATH")
-        if not configured_path:
-            raise RuntimeError(
-                "Environment variable UKAM_OS_CANONICAL_PATH must be set to the "
-                "local path of the canonical OS dataset."
+    def default(cls, use_raw: bool = False) -> CanonicalConfig:
+        if use_raw:
+            configured_path = get_env_setting("UKAM_OS_CANONICAL_RAW")
+            if not configured_path:
+                raise RuntimeError(
+                    "Environment variable UKAM_OS_CANONICAL_RAW must be set to the "
+                    "local path of the raw canonical OS dataset."
+                )
+            return cls(
+                local_path=Path(configured_path),
+                is_raw=True,
+                description="Raw Ordnance Survey addresses",
             )
-        return cls(local_path=Path(configured_path))
+        else:
+            configured_path = get_env_setting("UKAM_OS_CANONICAL_PRECLEANED")
+            if not configured_path:
+                raise RuntimeError(
+                    "Environment variable UKAM_OS_CANONICAL_PRECLEANED must be set to the "
+                    "local path of the pre-cleaned canonical OS dataset."
+                )
+            return cls(local_path=Path(configured_path))
+
+    def _is_glob_pattern(self) -> bool:
+        return any(c in str(self.local_path) for c in ("*", "?", "["))
 
     def validate(self) -> None:
-        if not self.local_path.exists():
+        if self._is_glob_pattern():
+            matched = glob_module.glob(str(self.local_path))
+            if not matched:
+                raise FileNotFoundError(
+                    f"No files matched the glob pattern {self.local_path}. "
+                    "Check the path in the configuration."
+                )
+        elif not self.local_path.exists():
             raise FileNotFoundError(
                 f"Canonical OS data not found at {self.local_path}. "
                 "Run tmp/clean_os_data.py to generate it, or update the path "
