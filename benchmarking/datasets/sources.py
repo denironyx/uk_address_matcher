@@ -60,7 +60,6 @@ def resolve_s3_path(env_var_explicit: str, env_var_relative: str) -> str:
 def load_canonical_data(
     con: duckdb.DuckDBPyConnection,
     canonical_config: CanonicalConfig | None = None,
-    sample_mode: bool = False,
 ) -> duckdb.DuckDBPyRelation:
     config = canonical_config or CanonicalConfig.default()
     print(f"Loading canonical OS data from {config.local_path}...")
@@ -78,17 +77,6 @@ def load_canonical_data(
                 postcode,
                 classification_code,
             FROM rel
-            """
-        )
-
-    # Apply deterministic sampling if requested (pushed down to SQL for efficiency)
-    if sample_mode:
-        order_col = "unique_id" if config.is_raw else "ukam_address_id"
-        rel = con.sql(
-            f"""
-            SELECT * FROM rel
-            ORDER BY {order_col}
-            LIMIT 1_000_000
             """
         )
 
