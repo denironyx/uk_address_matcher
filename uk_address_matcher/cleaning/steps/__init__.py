@@ -33,6 +33,12 @@ from uk_address_matcher.cleaning.steps.tokenisation import (
     _split_numeric_tokens_to_cols,
     _tokenise_address_without_numbers,
 )
+from uk_address_matcher.cleaning.steps.trigram_blocking import (
+    _build_inverted_index_from_trigrams,
+    _derive_trigrams_from_address_tokens,
+    _lookup_trigrams_in_inverted_index,
+    _set_exploding_unique_ids_to_self,
+)
 
 __all__ = [
     # token_parsing
@@ -64,4 +70,9 @@ __all__ = [
     "_use_first_unusual_token_if_no_numeric_token",
     "_separate_unusual_tokens",
     "_create_histograms_from_token_frequencies",
+    # trigram_blocking
+    "_build_inverted_index_from_trigrams",
+    "_derive_trigrams_from_address_tokens",
+    "_lookup_trigrams_in_inverted_index",
+    "_set_exploding_unique_ids_to_self",
 ]

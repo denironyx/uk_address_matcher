@@ -6,13 +6,16 @@ from duckdb import DuckDBPyConnection, DuckDBPyRelation
 from uk_address_matcher.cleaning.steps import (
     _add_term_frequencies_to_address_tokens_using_registered_df,
     _add_ukam_address_id,
+    _build_inverted_index_from_trigrams,
     _canonicalise_postcode,
     _clean_address_string_first_pass,
     _clean_address_string_second_pass,
+    _derive_trigrams_from_address_tokens,
     _extract_postcode_from_address,
     _first_unusual_token,
     _generalised_token_aliases,
     _get_token_frequeny_table,
+    _lookup_trigrams_in_inverted_index,
     _move_common_end_tokens_to_field,
     _normalise_abbreviations_and_units,
     _parse_out_business_unit,
@@ -22,6 +25,7 @@ from uk_address_matcher.cleaning.steps import (
     _rename_and_select_columns,
     _separate_distinguishing_start_tokens_from_with_respect_to_adjacent_records,
     _separate_unusual_tokens,
+    _set_exploding_unique_ids_to_self,
     _split_numeric_tokens_to_cols,
     _tokenise_address_without_numbers,
     _trim_whitespace_address_and_postcode,
@@ -112,6 +116,16 @@ QUEUE_POST_TF = [
 
 # Minimal pipeline for TF derivation: just clean address + tokenise
 QUEUE_FOR_TF_DERIVATION = QUEUE_CLEAN_FULL_ADDRESS + [_create_tokenised_address_concat]
+
+# Trigram blocking pipelines
+QUEUE_TRIGRAM_WITH_INVERTED_INDEX = [
+    _derive_trigrams_from_address_tokens,
+    _lookup_trigrams_in_inverted_index,
+]
+
+QUEUE_TRIGRAM_SELF = [
+    _set_exploding_unique_ids_to_self,
+]
 
 
 def _clean_data_pre_term_frequencies(
@@ -313,3 +327,26 @@ def _create_term_frequency_tables(
     numeric_term_frequencies_rel.create("__ukam_numeric_term_frequencies")
 
     return con.table("__ukam_rel_tok_freq")
+
+
+def _register_inverted_index_table(
+    con: DuckDBPyConnection,
+    inverted_index: Optional[DuckDBPyRelation] = None,
+) -> Optional[str]:
+    """Register inverted index table for trigram lookups.
+
+    Args:
+        con: DuckDB connection.
+        inverted_index: Pre-computed inverted index table with 'trigram' and
+            'unique_ids' columns. If None, no table is registered.
+
+    Returns:
+        The registered table name, or None if no inverted_index provided.
+    """
+    if inverted_index is None:
+        return None
+
+    # Materialise to avoid lazy evaluation issues
+    con.sql("DROP TABLE IF EXISTS __ukam_inverted_index")
+    inverted_index.create("__ukam_inverted_index")
+    return "__ukam_inverted_index"
