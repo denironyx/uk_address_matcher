@@ -36,6 +36,14 @@ DEBUG_OPTIONS: Optional[DebugOptions] = None
 EXPLAIN = False
 SAMPLE_MODE = False
 
+# Data cleaning configuration
+# If True, load raw canonical data and clean it on the fly (derives inverted index)
+# If False, load pre-cleaned canonical data (faster, but won't have exploding_unique_ids)
+CLEAN_CANONICAL_ON_THE_FLY = True
+# If True, derive term frequencies from canonical data on the fly
+# If False, use pre-baked term frequencies (only relevant when CLEAN_CANONICAL_ON_THE_FLY=True)
+DERIVE_TERM_FREQUENCIES_ON_THE_FLY = False
+
 # Analysis configuration
 MISMATCH_SAMPLES_PER_REASON = 10  # Random samples per match_reason
 TOP_WORST_MISMATCHES = 10  # Worst mismatches by similarity
@@ -52,6 +60,8 @@ df_messy_clean, df_os_clean = load_benchmark_data(
     OS_DATA_PATH,
     include_term_frequencies=True,
     sample_mode=SAMPLE_MODE,
+    clean_canonical_on_the_fly=CLEAN_CANONICAL_ON_THE_FLY,
+    derive_term_frequencies_on_the_fly=DERIVE_TERM_FREQUENCIES_ON_THE_FLY,
 )
 con.sql("DROP TABLE IF EXISTS df_messy")
 df_messy_clean.to_table("df_messy_clean")
@@ -150,21 +160,21 @@ incorrect_count = (
     .fetchone()[0]
 )
 
-if incorrect_count > 0:
-    print(
-        f"\n📊 Found {incorrect_count:,} incorrect matches. Analysing mismatches...\n"
-    )
-    mismatch_results = analyse_mismatches(
-        ukam_matches=match_candidates,
-        ukam_canonical=df_os_clean,
-        ukam_messy=df_messy_clean,
-        samples_per_reason=MISMATCH_SAMPLES_PER_REASON,
-        top_worst=TOP_WORST_MISMATCHES,
-    )
-    print_mismatch_analysis(mismatch_results)
-else:
-    print("\n✓ No incorrect matches found!\n")
+# if incorrect_count > 0:
+#     print(
+#         f"\n📊 Found {incorrect_count:,} incorrect matches. Analysing mismatches...\n"
+#     )
+#     mismatch_results = analyse_mismatches(
+#         ukam_matches=match_candidates,
+#         ukam_canonical=df_os_clean,
+#         ukam_messy=df_messy_clean,
+#         samples_per_reason=MISMATCH_SAMPLES_PER_REASON,
+#         top_worst=TOP_WORST_MISMATCHES,
+#     )
+#     print_mismatch_analysis(mismatch_results)
+# else:
+#     print("\n✓ No incorrect matches found!\n")
 
-print("\nTiming summary:")
-for line in format_timing_summary(variant_timings):
-    print(line)
+# print("\nTiming summary:")
+# for line in format_timing_summary(variant_timings):
+#     print(line)
