@@ -12,7 +12,7 @@ Calculate accuracy metrics by comparing ground truth identifiers with predicted 
 
 Returns accuracy statistics including:
 - Total matched records
-- Correct matches (where `unique_id == resolved_canonical_id`)
+- Correct matches (where `ukam_label == resolved_canonical_id`)
 - Incorrect matches (mismatches)
 - Accuracy percentage
 
@@ -85,11 +85,13 @@ print_mismatch_analysis(mismatch_results)
 
 ### Accuracy Calculation
 
-Accuracy compares the `unique_id` column (ground truth) with `resolved_canonical_id` (predicted match):
+Accuracy compares the `ukam_label` column (ground truth UPRN) with `resolved_canonical_id` (predicted match):
 
-- **Correct match**: `unique_id == resolved_canonical_id`
-- **Incorrect match**: `unique_id != resolved_canonical_id`
+- **Correct match**: `ukam_label == resolved_canonical_id`
+- **Incorrect match**: `ukam_label != resolved_canonical_id`
 - **Unmatched**: `match_reason IS NULL` (excluded from accuracy calculation)
+
+Note: The `unique_id` column contains the original record identifier from the messy dataset (e.g., PROPREF), while `ukam_label` contains the ground truth UPRN used for accuracy measurement.
 
 ### Jaro-Winkler Similarity
 
@@ -110,7 +112,7 @@ match_reason | total_matched | correct_matches | incorrect_matches | accuracy_pc
 ### Mismatch Analysis
 
 ```
-match_reason | unique_id | resolved_canonical_id | postcode | ground_truth_address | predicted_address | similarity_score
+match_reason | unique_id | ukam_label | resolved_canonical_id | postcode | ground_truth_address | predicted_address | similarity_score
 ```
 
 ## Design Rationale

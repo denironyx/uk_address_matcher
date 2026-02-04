@@ -69,13 +69,25 @@ def load_canonical_data(
     if config.is_raw:
         # Raw ABP data: map to the standard input schema expected by
         # prepare_data_for_matching (unique_id, address_concat, postcode)
+        # Include NULL ukam_label so Splink can create ukam_label_l/ukam_label_r
+        # when messy data has ukam_label for accuracy testing
         rel = con.sql(
             """
             SELECT
                 CAST(uprn AS VARCHAR) AS unique_id,
+                NULL::VARCHAR AS ukam_label,
                 address_concat,
                 postcode,
                 classification_code,
+            FROM rel
+            """
+        )
+    else:
+        rel = con.sql(
+            """
+            SELECT
+                *,
+                NULL::VARCHAR AS ukam_label
             FROM rel
             """
         )
@@ -89,6 +101,9 @@ class SourceConfig:
 
     Defines how to read and transform a source dataset into
     the standard schema required for matching.
+
+    If ukam_label_column is provided, the column will be output as 'ukam_label'
+    which is the convention for ground truth labels in the uk_address_matcher library.
     """
 
     name: str
@@ -96,7 +111,7 @@ class SourceConfig:
     unique_id_column: str
     postcode_column: str
     address_columns: list[str] | str
-    # Returns unique_id by default
+    ukam_label_column: str | None = None  # Ground truth UPRN column for accuracy
     optional_filter: str | None = None
     unique_id_formatter: UniqueIdFormatter = lambda x: x
     prune_postcode_from_address: bool = False
@@ -146,9 +161,18 @@ class SourceConfig:
         unique_id_expr = self.unique_id_formatter(
             f"cast({quote_identifier(self.unique_id_column)} as varchar)"
         )
+
+        ukam_label_select = ""
+        if self.ukam_label_column:
+            ukam_label_expr = self.unique_id_formatter(
+                f"cast({quote_identifier(self.ukam_label_column)} as varchar)"
+            )
+            ukam_label_select = f"{ukam_label_expr} AS ukam_label,"
+
         return f"""
             SELECT
                 {unique_id_expr} AS unique_id,
+                {ukam_label_select}
                 {address_expr} AS address_concat,
                 {quote_identifier(self.postcode_column)} AS postcode,
                 '{self.name}' AS dataset_name
