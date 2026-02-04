@@ -200,20 +200,33 @@ Distinguishability:           {distinguishability_value}
     best_match_uprn = row_dict_best_match.get("unique_id_l")
     correct_unique_id = row_dict_best_match.get("correct_unique_id")
 
+    cleaned_cols = con.sql(
+        f"SELECT {CLEANED_COLS_TO_SELECT} FROM df_messy_data_clean_in LIMIT 0"
+    ).columns
+
+    def _build_projection(table_name: str, columns: list[str]) -> str:
+        source_cols = set(con.table(table_name).columns)
+        return ",\n        ".join(
+            col if col in source_cols else f"NULL AS {col}" for col in columns
+        )
+
+    messy_projection = _build_projection("df_messy_data_clean_in", cleaned_cols)
+    canonical_projection = _build_projection("df_os_addresses_clean_in", cleaned_cols)
+
     unions = [
-        f"""SELECT 'Messy' AS record_type, {CLEANED_COLS_TO_SELECT}
+        f"""SELECT 'Messy' AS record_type, {messy_projection}
             FROM df_messy_data_clean_in
             WHERE unique_id = '{target_unique_id_r}'"""
     ]
     if best_match_uprn:
         unions.append(
-            f"""SELECT 'Best Match' AS record_type, {CLEANED_COLS_TO_SELECT}
+            f"""SELECT 'Best Match' AS record_type, {canonical_projection}
                FROM df_os_addresses_clean_in
                WHERE unique_id = '{best_match_uprn}'"""
         )
     if correct_unique_id:  # Always include true match for false positive inspection
         unions.append(
-            f"""SELECT 'True Match' AS record_type, {CLEANED_COLS_TO_SELECT}
+            f"""SELECT 'True Match' AS record_type, {canonical_projection}
                FROM df_os_addresses_clean_in
                WHERE unique_id = '{correct_unique_id}'"""
         )
