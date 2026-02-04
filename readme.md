@@ -29,8 +29,8 @@ Will match two datasets provided in this format:
 | ...       | ...                                     |
 
 
-You may also provide a separate column called `postcode`, which, if provided will trump any postcode information provided in `address_concat`.
-
+- You may also provide a separate column called `postcode`, which, if provided will trump any postcode information provided in `address_concat`.
+- If you have labelled data (you know the ground truth), you may provide a column called `ukam_label`, if provided, this will propagate through your results for accuracy analysis.
 
 
 Generally one dataset will be a dataset of 'messy addresses' which need matching, and the second will be a 'canonical dataset' of addresses to match to.

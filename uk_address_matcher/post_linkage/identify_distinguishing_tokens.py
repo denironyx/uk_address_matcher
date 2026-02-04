@@ -34,6 +34,9 @@ def improve_predictions_using_distinguishing_tokens(
         for col in additional_columns_to_retain:
             add_cols_select += f"{col}_l, {col}_r, "
 
+    if "ukam_label_r" in df_predict.columns:
+        add_cols_select += "ukam_label_r, "
+
     # Split the large SQL query into separate CTE steps
 
     # Step 1: Create good_matches CTE

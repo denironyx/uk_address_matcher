@@ -30,7 +30,8 @@ HACKNEY_COUNCIL_INFO = DatasetInfo(
 _HACKNEY_SOURCE = SourceConfig(
     name="hackney_council_tax",
     s3_key="HACKNEY_CTBANDS_ONSUD_202507.csv",
-    unique_id_column="UPRN",
+    unique_id_column="PROPREF",
+    ukam_label_column="UPRN",
     postcode_column="POSTCODE",
     address_columns=["ADDR1", "ADDR2", "ADDR3", "ADDR4"],
 )

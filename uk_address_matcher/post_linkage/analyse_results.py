@@ -88,7 +88,10 @@ def best_matches_with_distinguishability(
     add_cols_select = ""
     if additional_columns_to_retain:
         for col in additional_columns_to_retain:
-            add_cols_select += f"{col}_l, {col}_r, "
+            add_cols_select += f"t.{col}_l, t.{col}_r, "
+
+    if "ukam_label_r" in df_predict.columns:
+        add_cols_select += "t.ukam_label_r, "
 
     if 0 not in distinguishability_thresholds:
         distinguishability_thresholds.append(0)

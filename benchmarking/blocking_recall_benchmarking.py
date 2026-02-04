@@ -108,10 +108,11 @@ total_messy = df_messy_for_matching.count("*").fetchone()[0]
 
 # True-match blocking recall: does the candidate set contain the ground-truth
 # canonical UPRN for each messy record?
+# unique_id_l = canonical UPRN, ukam_label_r = messy ground truth UPRN
 true_matches_in_candidates = con.sql("""
     SELECT COUNT(DISTINCT ukam_address_id_r) AS count
     FROM df_blocked_ddb
-    WHERE unique_id_l = unique_id_r
+    WHERE unique_id_l = ukam_label_r
 """).fetchone()[0]
 
 blocking_recall = true_matches_in_candidates / total_messy if total_messy > 0 else 0.0
@@ -161,6 +162,7 @@ misses_ddb = con.sql("""
 WITH messy AS (
     SELECT
         unique_id,
+        ukam_label,
         ukam_address_id,
         original_address_concat,
         clean_full_address
@@ -186,14 +188,15 @@ truth AS (
 ),
 combined AS (
     SELECT
-        m.unique_id AS uprn,
+        m.unique_id,
+        m.ukam_label AS uprn,
         m.original_address_concat AS messy_original_address,
         t.true_original_address_concat,
         m.clean_full_address AS messy_clean_full_address,
         t.true_clean_full_address
     FROM messy_without_candidates m
     LEFT JOIN truth t
-        ON m.unique_id = t.unique_id
+        ON m.ukam_label = t.unique_id
         AND t.rn = 1
 )
 SELECT *
@@ -213,6 +216,7 @@ else:
     examples = misses_df.sample(n=min(n_show, len(misses_df)), random_state=42)
     examples = examples[
         [
+            "unique_id",
             "uprn",
             "messy_original_address",
             "true_original_address_concat",

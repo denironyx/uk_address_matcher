@@ -72,7 +72,11 @@ for pipeline_variant in pipeline_variants:
             explain=EXPLAIN,
         ).join(
             df_messy_clean.select(
-                "ukam_address_id", "unique_id", "original_address_concat", "postcode"
+                "ukam_address_id",
+                "unique_id",
+                "ukam_label",
+                "original_address_concat",
+                "postcode",
             ),
             condition="ukam_address_id",
             how="left",
@@ -96,7 +100,7 @@ for pipeline_variant in pipeline_variants:
     # Mismatch analysis (only if there are incorrect matches)
     incorrect_count = (
         matches.filter(
-            "match_reason IS NOT NULL AND unique_id != resolved_canonical_id"
+            "match_reason IS NOT NULL AND ukam_label != resolved_canonical_id"
         )
         .count("*")
         .fetchone()[0]
@@ -109,6 +113,7 @@ for pipeline_variant in pipeline_variants:
         mismatch_results = analyse_mismatches(
             ukam_matches=matches,
             ukam_canonical=df_os_clean,
+            ukam_messy=df_messy_clean,
             samples_per_reason=MISMATCH_SAMPLES_PER_REASON,
             top_worst=TOP_WORST_MISMATCHES,
         )

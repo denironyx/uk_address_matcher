@@ -114,7 +114,7 @@ for label, variant_spec in pipeline_variants.items():
     # Mismatch analysis (only if there are incorrect matches)
     incorrect_count = (
         matches.filter(
-            "match_reason IS NOT NULL AND unique_id != resolved_canonical_id"
+            "match_reason IS NOT NULL AND ukam_label != resolved_canonical_id"
         )
         .count("*")
         .fetchone()[0]
