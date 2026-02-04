@@ -66,7 +66,7 @@ By providing multiple addresses representations of each canonical address to `uk
 
 We provide a recommendation for automated build scripts for how to build such a file from Addressbase Premium and the NGD datasets here:
 - [AddressBase Premium build script](https://github.com/moj-analytical-services/prepare_addressbase_for_address_matching)
-- TODO: NGD build script
+- [NGD build script](https://github.com/moj-analytical-services/prepare_ngd_for_address_matching)
 
 
 ### Basic Matching
