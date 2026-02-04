@@ -18,7 +18,7 @@ def analyse_mismatches(
 ) -> dict[str, duckdb.DuckDBPyRelation]:
     """Analyse mismatches from multiple angles to identify failure patterns.
 
-    For incorrect matches (where unique_id != resolved_canonical_id), this provides:
+    For incorrect matches (where ukam_label != resolved_canonical_id), this provides:
     1. Random samples for each match_reason
     2. Worst mismatches (lowest similarity scores) - completely wrong predictions
     3. High-confidence wrong matches (highest similarity) - subtle differences
@@ -45,7 +45,7 @@ def analyse_mismatches(
     top_same_building:
         Number of same-building mismatches (similarity > 0.9) to return.
     exclude_unmatchable:
-        If True (default), excludes records where the ground truth unique_id
+        If True (default), excludes records where the ground truth ukam_label
         doesn't exist in the canonical dataset from the mismatch analysis.
         These records are instead summarised separately.
 
@@ -64,16 +64,17 @@ def analyse_mismatches(
         WITH unmatchable_records AS (
             SELECT
                 matches_input.unique_id,
+                matches_input.ukam_label,
                 matches_input.resolved_canonical_id,
                 matches_input.match_reason,
                 matches_input.original_address_concat,
                 matches_input.postcode
             FROM matches_input
             WHERE matches_input.match_reason IS NOT NULL
-              AND matches_input.unique_id != matches_input.resolved_canonical_id
+              AND matches_input.ukam_label != matches_input.resolved_canonical_id
               AND NOT EXISTS (
                   SELECT 1 FROM ukam_canonical AS c_check
-                  WHERE c_check.unique_id = matches_input.unique_id
+                  WHERE c_check.unique_id = matches_input.ukam_label
               )
         )
         SELECT
@@ -92,7 +93,7 @@ def analyse_mismatches(
         """
           AND EXISTS (
               SELECT 1 FROM ukam_canonical AS c_check
-              WHERE c_check.unique_id = matches_input.unique_id
+              WHERE c_check.unique_id = matches_input.ukam_label
           )"""
         if exclude_unmatchable
         else ""
@@ -103,6 +104,7 @@ def analyse_mismatches(
     base_mismatches_sql = f"""
     SELECT
         im.unique_id,
+        im.ukam_label,
         im.resolved_canonical_id,
         im.ukam_address_id,
         im.canonical_ukam_address_id,
@@ -120,6 +122,7 @@ def analyse_mismatches(
     FROM (
         SELECT
             matches_input.unique_id,
+            matches_input.ukam_label,
             matches_input.resolved_canonical_id,
             matches_input.ukam_address_id,
             matches_input.canonical_ukam_address_id,
@@ -128,7 +131,7 @@ def analyse_mismatches(
             matches_input.postcode
         FROM matches_input
         WHERE matches_input.match_reason IS NOT NULL
-          AND matches_input.unique_id != matches_input.resolved_canonical_id{unmatchable_filter}
+          AND matches_input.ukam_label != matches_input.resolved_canonical_id{unmatchable_filter}
     ) AS im
     LEFT JOIN ukam_canonical AS c
       ON im.canonical_ukam_address_id = c.ukam_address_id
@@ -155,6 +158,7 @@ def analyse_mismatches(
         SELECT
             match_reason,
             unique_id,
+            ukam_label,
             ukam_address_id,
             resolved_canonical_id,
             postcode_messy,
@@ -173,6 +177,7 @@ def analyse_mismatches(
     SELECT
         match_reason,
         unique_id,
+        ukam_label,
         resolved_canonical_id,
         ukam_address_id,
         postcode_messy,
@@ -193,6 +198,7 @@ def analyse_mismatches(
     worst_mismatches_sql = f"""
     SELECT
         unique_id,
+        ukam_label,
         ukam_address_id,
         resolved_canonical_id,
         postcode_messy,
@@ -215,6 +221,7 @@ def analyse_mismatches(
     high_confidence_wrong_sql = f"""
     SELECT
         unique_id,
+        ukam_label,
         ukam_address_id,
         resolved_canonical_id,
         postcode_messy,
@@ -240,6 +247,7 @@ def analyse_mismatches(
     same_building_sql = f"""
     SELECT
         unique_id,
+        ukam_label,
         ukam_address_id,
         resolved_canonical_id,
         postcode_messy,
@@ -342,6 +350,7 @@ def print_mismatch_analysis(
         reason_samples = random_samples.filter(f"match_reason = '{reason}'")
         reason_samples.select(
             "unique_id",
+            "ukam_label",
             "resolved_canonical_id",
             "postcode_messy",
             "postcode_canonical",

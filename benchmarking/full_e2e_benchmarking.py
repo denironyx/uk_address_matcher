@@ -65,7 +65,6 @@ df_messy_clean, df_os_clean = load_benchmark_data(
 )
 con.sql("DROP TABLE IF EXISTS df_messy")
 df_messy_clean.to_table("df_messy_clean")
-df_os_clean.show(max_width=100000)
 # Get dataset info for reporting
 dataset_info = get_dataset_info(DATASET_NAME)
 
@@ -154,7 +153,7 @@ accuracy.show(max_width=10000)
 
 incorrect_count = (
     match_candidates.filter(
-        "match_reason IS NOT NULL AND unique_id != resolved_canonical_id"
+        "match_reason IS NOT NULL AND ukam_label != resolved_canonical_id"
     )
     .count("*")
     .fetchone()[0]

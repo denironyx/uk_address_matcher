@@ -15,18 +15,32 @@ def calculate_accuracy_metrics(
     Parameters
     ----------
     ukam_matches:
-        Match results containing unique_id (ground truth), resolved_canonical_id,
-        and match_reason columns.
+        Match results containing ukam_label (ground truth), resolved_canonical_id,
+        and match_reason columns. The ukam_label column must be present for
+        accuracy calculation.
     ukam_canonical:
         Optional canonical dataset. If provided, records where the ground truth
-        unique_id doesn't exist in the canonical data will be separately reported
+        ukam_label doesn't exist in the canonical data will be separately reported
         as 'unmatchable' rather than counted as incorrect matches.
 
     Returns
     -------
     duckdb.DuckDBPyRelation
         Accuracy metrics broken down by match_reason (and dataset if present).
+
+    Raises
+    ------
+    ValueError
+        If ukam_label column is not present in the input data.
     """
+    # Check if ukam_label exists - required for accuracy calculation
+    if "ukam_label" not in ukam_matches.columns:
+        raise ValueError(
+            "Cannot calculate accuracy metrics: 'ukam_label' column not found in match results. "
+            "Accuracy calculation requires ground truth labels. If you're running in inference "
+            "mode without labels, skip the accuracy calculation step."
+        )
+
     dataset_column: str | None = None
     if "dataset_name" in ukam_matches.columns:
         dataset_column = "dataset_name"
@@ -34,10 +48,11 @@ def calculate_accuracy_metrics(
         dataset_column = "source_dataset"
 
     # Build the canonical availability check if canonical data is provided
+    # Use ukam_label column (ground truth UPRN) to check if record is matchable
     if ukam_canonical is not None:
         canonical_join = """
         LEFT JOIN ukam_canonical AS c
-          ON m.unique_id = c.unique_id
+          ON m.ukam_label = c.unique_id
         """
         matchable_case = (
             "CASE WHEN c.unique_id IS NOT NULL THEN 1 ELSE 0 END AS is_matchable,"
@@ -51,10 +66,11 @@ def calculate_accuracy_metrics(
         WITH matched_records AS (
             SELECT
                 m.unique_id,
+                m.ukam_label,
                 m.resolved_canonical_id,
                 m.match_reason,
                 {matchable_case}
-                CASE WHEN m.unique_id = m.resolved_canonical_id THEN 1 ELSE 0 END AS is_correct
+                CASE WHEN m.ukam_label = m.resolved_canonical_id THEN 1 ELSE 0 END AS is_correct
             FROM ukam_matches AS m
             {canonical_join}
             WHERE m.match_reason IS NOT NULL
@@ -79,11 +95,12 @@ def calculate_accuracy_metrics(
     WITH matched_records AS (
         SELECT
             m.unique_id,
+            m.ukam_label,
             m.resolved_canonical_id,
             m.match_reason,
             COALESCE(m.{dataset_column}, 'UNKNOWN_DATASET') AS dataset_name,
             {matchable_case}
-            CASE WHEN m.unique_id = m.resolved_canonical_id THEN 1 ELSE 0 END AS is_correct
+            CASE WHEN m.ukam_label = m.resolved_canonical_id THEN 1 ELSE 0 END AS is_correct
         FROM ukam_matches AS m
         {canonical_join}
         WHERE m.match_reason IS NOT NULL
