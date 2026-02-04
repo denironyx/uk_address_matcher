@@ -35,6 +35,40 @@ Will match two datasets provided in this format:
 
 Generally one dataset will be a dataset of 'messy addresses' which need matching, and the second will be a 'canonical dataset' of addresses to match to.
 
+## Preparing AddressBase for use in `uk_address_matcher`
+
+`uk_address_matcher` can be used to any canonical list of addresses provided in the format above.
+
+Many users will wish to link to Ordnance Survey address products.
+
+
+### Simplest route (lower accuracy)
+
+The simplest Ordnance Survey product to use for this purpose is [NGD Built Address](https://docs.os.uk/osngd/data-structure/address/gb-address/built-address).
+
+You can use this 'out of the box' as your canonical list of addresses by selecting data from BuiltAddress as follows:
+
+```
+select uprn as unique_id, fulladdress as address_concat
+from builtaddress
+where {your_filter_here}
+```
+
+And providing the result output to `uk_address_matcher`.  You will generally improve accuracy if you filter the data down to the geographical region of interest, and filter the addresses down as much as possible to include only those of interest (e.g. residential only, if you're matching residential addresses)
+
+### Full prep (higher accuracy)
+
+Higher accuracy can be achieve by processing Ornance Survey data in a more sophisticated way.
+
+For instance, Ordnance Survey provides multiple representations of a single address in Addressbase Premium and also in [NGD Address](https://docs.os.uk/osngd/data-structure/address/related-components/alternate-address).
+
+By providing multiple addresses representations of each canonical address to `uk_adress_matcher`, you will have a better chance of higher precisison matching.
+
+We provide a recommendation for automated build scripts for how to build such a file from Addressbase Premium and the NGD datasets here:
+- [AddressBase Premium build script](https://github.com/moj-analytical-services/prepare_addressbase_for_address_matching)
+- TODO: NGD build script
+
+
 ### Basic Matching
 
 Match them with:
