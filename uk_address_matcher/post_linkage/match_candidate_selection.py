@@ -24,6 +24,7 @@ def _prepare_splink_candidates(
     *,
     match_weight_threshold: float,
     distinguishability_threshold: Optional[float],
+    include_ukam_label: bool = False,
 ) -> list[CTEStep]:
     """Filter Splink matches and retain the best candidate for each fuzzy ID."""
 
@@ -40,11 +41,14 @@ def _prepare_splink_candidates(
             f"OR distinguishability >= {distinguishability_threshold})"
         )
 
+    ukam_label_select = "ukam_label_r AS ukam_label," if include_ukam_label else ""
+
     # _r = record from addresses to match (fuzzy)
     # _l = record from addresses to search within (canonical)
     top_sql = f"""
         SELECT
             unique_id_r AS unique_id,
+            {ukam_label_select}
             ukam_address_id_r as ukam_address_id,
             unique_id_l AS resolved_canonical_id,
             ukam_address_id_l as canonical_ukam_address_id,
@@ -77,7 +81,9 @@ def _prepare_splink_candidates(
     tags=["post_linkage", "matching"],
     stage_output="match_candidates",
 )
-def _combine_exact_and_splink_matches(*, include_unmatched: bool) -> list[CTEStep]:
+def _combine_exact_and_splink_matches(
+    *, include_unmatched: bool, include_ukam_label: bool = False
+) -> list[CTEStep]:
     """Join exact and Splink matches with canonical address details."""
 
     canonical_sql = """
@@ -88,8 +94,10 @@ def _combine_exact_and_splink_matches(*, include_unmatched: bool) -> list[CTESte
         FROM {canonical_addresses__ukam}
     """
 
-    common_fields = """
+    ukam_label_field = "ukam_label," if include_ukam_label else ""
+    common_fields = f"""
         unique_id,
+        {ukam_label_field}
         resolved_canonical_id,
         ukam_address_id,
         canonical_ukam_address_id,
@@ -134,9 +142,12 @@ def _combine_exact_and_splink_matches(*, include_unmatched: bool) -> list[CTESte
     """
 
     # Join with canonical addresses to get canonical address details
-    final_sql = """
+
+    ukam_label_final = "combined.ukam_label," if include_ukam_label else ""
+    final_sql = f"""
         SELECT
             combined.unique_id,
+            {ukam_label_final}
             combined.resolved_canonical_id,
             combined.original_address_concat,
             canon.original_address_concat_canonical,
@@ -148,8 +159,8 @@ def _combine_exact_and_splink_matches(*, include_unmatched: bool) -> list[CTESte
             combined.match_reason,
             combined.ukam_address_id,
             combined.canonical_ukam_address_id
-        FROM {combined_matches__ukam} AS combined
-        LEFT JOIN {canonical_projection__ukam} AS canon
+        FROM {{combined_matches__ukam}} AS combined
+        LEFT JOIN {{canonical_projection__ukam}} AS canon
             ON canon.ukam_address_id = combined.canonical_ukam_address_id
         ORDER BY combined.unique_id
     """
@@ -185,6 +196,8 @@ def select_top_match_candidates(
         debug_options: Debug options for pipeline execution
     """
 
+    include_ukam_label = "ukam_label_r" in df_splink_matches.columns
+
     pipeline = create_sql_pipeline(
         con,
         [
@@ -196,8 +209,12 @@ def select_top_match_candidates(
             _prepare_splink_candidates(
                 match_weight_threshold=match_weight_threshold,
                 distinguishability_threshold=distinguishability_threshold,
+                include_ukam_label=include_ukam_label,
             ),
-            _combine_exact_and_splink_matches(include_unmatched=include_unmatched),
+            _combine_exact_and_splink_matches(
+                include_unmatched=include_unmatched,
+                include_ukam_label=include_ukam_label,
+            ),
         ],
         pipeline_name="Match candidate selection",
         pipeline_description="Filter Splink matches and merge with deterministic outputs.",
