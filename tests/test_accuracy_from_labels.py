@@ -11,10 +11,14 @@ from uk_address_matcher import (
     evaluate_predictions_against_labels,
     get_linker,
     inspect_match_results_vs_labels,
+    run_deterministic_match_pass,
 )
 from uk_address_matcher.linking_model.training import get_settings_for_training
 from uk_address_matcher.post_linkage.analyse_results import (
     best_matches_with_distinguishability,
+)
+from uk_address_matcher.post_linkage.match_candidate_selection import (
+    select_top_match_candidates,
 )
 from uk_address_matcher.post_linkage.identify_distinguishing_tokens import (
     improve_predictions_using_distinguishing_tokens,
@@ -46,16 +50,20 @@ def test_address_matching_workflow_runs():
     """
     )
 
-    df_os_rel = canonical_addresses_raw
-    messy_data_rel = messy_addresses_raw
+    df_os_rel = canonical_addresses_raw.select(
+        "unique_id, address_concat, postcode"
+    )
+    messy_data_rel = messy_addresses_raw.select(
+        "unique_id, address_concat, postcode, true_match_id::VARCHAR AS ukam_label"
+    )
 
     df_messy_data_clean_rel = prepare_data_for_matching(
-        messy_data_rel.project("unique_id, source_dataset, address_concat, postcode"),
+        messy_data_rel,
         con=duckdb_con,
     )
 
     df_os_clean_rel = prepare_data_for_matching(
-        df_os_rel.project("unique_id, source_dataset, address_concat, postcode"),
+        df_os_rel,
         con=duckdb_con,
     )
 
@@ -88,9 +96,24 @@ def test_address_matching_workflow_runs():
         con=duckdb_con,
     )
 
+    df_exact_matches_rel = run_deterministic_match_pass(
+        con=duckdb_con,
+        df_addresses_to_match=df_messy_data_clean_rel,
+        df_addresses_to_search_within=df_os_clean_rel,
+    )
+
+    match_candidates_rel = select_top_match_candidates(
+        con=duckdb_con,
+        df_exact_matches=df_exact_matches_rel,
+        df_splink_matches=df_predict_with_distinguishability_rel,
+        df_canonical=df_os_clean_rel,
+        match_weight_threshold=-10,
+        distinguishability_threshold=None,
+        include_unmatched=True,
+    )
+
     evaluation_results_rel = evaluate_predictions_against_labels(
-        labels=labels_rel,
-        df_predict_with_distinguishability=df_predict_with_distinguishability_rel,
+        match_candidates=match_candidates_rel,
         con=duckdb_con,
     )
     logger.info("Evaluation Results:")

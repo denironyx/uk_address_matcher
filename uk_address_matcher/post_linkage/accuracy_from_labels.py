@@ -200,20 +200,33 @@ Distinguishability:           {distinguishability_value}
     best_match_uprn = row_dict_best_match.get("unique_id_l")
     correct_unique_id = row_dict_best_match.get("correct_unique_id")
 
+    cleaned_cols = con.sql(
+        f"SELECT {CLEANED_COLS_TO_SELECT} FROM df_messy_data_clean_in LIMIT 0"
+    ).columns
+
+    def _build_projection(table_name: str, columns: list[str]) -> str:
+        source_cols = set(con.table(table_name).columns)
+        return ",\n        ".join(
+            col if col in source_cols else f"NULL AS {col}" for col in columns
+        )
+
+    messy_projection = _build_projection("df_messy_data_clean_in", cleaned_cols)
+    canonical_projection = _build_projection("df_os_addresses_clean_in", cleaned_cols)
+
     unions = [
-        f"""SELECT 'Messy' AS record_type, {CLEANED_COLS_TO_SELECT}
+        f"""SELECT 'Messy' AS record_type, {messy_projection}
             FROM df_messy_data_clean_in
             WHERE unique_id = '{target_unique_id_r}'"""
     ]
     if best_match_uprn:
         unions.append(
-            f"""SELECT 'Best Match' AS record_type, {CLEANED_COLS_TO_SELECT}
+            f"""SELECT 'Best Match' AS record_type, {canonical_projection}
                FROM df_os_addresses_clean_in
                WHERE unique_id = '{best_match_uprn}'"""
         )
     if correct_unique_id:  # Always include true match for false positive inspection
         unions.append(
-            f"""SELECT 'True Match' AS record_type, {CLEANED_COLS_TO_SELECT}
+            f"""SELECT 'True Match' AS record_type, {canonical_projection}
                FROM df_os_addresses_clean_in
                WHERE unique_id = '{correct_unique_id}'"""
         )
@@ -299,25 +312,19 @@ Waterfall chart for messy address vs true match:
 
 def evaluate_predictions_against_labels(
     *,
-    labels: DuckDBPyRelation,
-    df_predict_with_distinguishability: DuckDBPyRelation,
+    match_candidates: DuckDBPyRelation,
     con: DuckDBPyConnection,
 ) -> DuckDBPyRelation:
     """
-    Calculates the accuracy of the best match predictions against provided labels
-    and returns the results as a DuckDB DataFrame.
+    Calculates the accuracy of match candidates against provided labels.
 
-    Accuracy is defined as the percentage of labeled messy records where the
-    top predicted match (from df_predict_with_distinguishability) corresponds
-    to the correct_unique_id specified in the labels table.
+    Accuracy is defined as the percentage of labelled records where the resolved
+    canonical identifier matches the provided ukam_label.
 
     Args:
-        labels: DuckDB relation containing the ground truth labels.
-            Expected columns: `unique_id` (messy record ID), `correct_unique_id`.
-        df_predict_with_distinguishability: DuckDB relation containing the best
-            match for each messy record, typically the output of
-            `best_matches_with_distinguishability`. Expected columns: `unique_id_r`
-            (messy record ID), `unique_id_l` (predicted canonical ID), `match_weight`.
+        match_candidates: DuckDB relation containing the resolved match for each
+            messy record, typically the output of `select_top_match_candidates`.
+            Expected columns: `ukam_label`, `resolved_canonical_id`.
         con: Active DuckDB connection.
 
     Returns:
@@ -325,47 +332,46 @@ def evaluate_predictions_against_labels(
                           and rows ('Correctly Predicted', 'Incorrectly Predicted', 'Total').
                           Returns an empty relation if evaluation cannot be performed.
     """
-    labels_reg_name = "__labels_eval"
-    preds_reg_name = "__preds_dist_eval"
-
-    con.register(labels_reg_name, labels)
-    con.register(preds_reg_name, df_predict_with_distinguishability)
+    candidates_reg_name = "__match_candidates_eval"
+    con.register(candidates_reg_name, match_candidates)
 
     sql = f"""
-    WITH top_predictions AS (
+    WITH labeled_candidates AS (
         SELECT
-            unique_id_r,
-            unique_id_l AS predicted_unique_id
-        FROM {preds_reg_name}
-        QUALIFY ROW_NUMBER() OVER (PARTITION BY unique_id_r ORDER BY match_weight DESC, unique_id_l) = 1
-        order by unique_id_r, unique_id_l
+            ukam_label::VARCHAR AS ukam_label,
+            resolved_canonical_id::VARCHAR AS resolved_canonical_id
+        FROM {candidates_reg_name}
+        WHERE ukam_label IS NOT NULL
     ),
-    comparison AS (
+        comparison AS (
+            SELECT
+                CASE
+                    WHEN resolved_canonical_id = ukam_label THEN 'Correctly Predicted'
+                    WHEN resolved_canonical_id IS NULL THEN 'Incorrectly Predicted (No match found)'
+                    ELSE 'Incorrectly Predicted (Wrong prediction)'
+                END AS status
+            FROM labeled_candidates
+        ),
+        status_counts AS (
+            SELECT
+                status,
+                COUNT(*) AS count
+            FROM comparison
+            GROUP BY CUBE(status) -- Use CUBE to get individual statuses and the total (NULL)
+        ),
+        total_count_cte AS (
+            SELECT count FROM status_counts WHERE status IS NULL
+        )
         SELECT
-            CASE
-                WHEN tp.predicted_unique_id = l.correct_unique_id::VARCHAR THEN 'Correctly Predicted'
-                ELSE 'Incorrectly Predicted'
-            END AS status
-        FROM {labels_reg_name} AS l
-        INNER JOIN top_predictions AS tp ON l.unique_id = tp.unique_id_r
-    ),
-    status_counts AS (
-        SELECT
-        status,
-        COUNT(*) AS count
-        FROM comparison
-        GROUP BY CUBE(status) -- Use CUBE to get individual statuses and the total (NULL)
-    ),
-    total_count_cte AS (
-        SELECT count FROM status_counts WHERE status IS NULL
-    )
-    SELECT
-        COALESCE(status, 'Total') AS status,
-        count,
-        100.0 * count / (SELECT count FROM total_count_cte) AS percentage,
-        FORMAT('{{:.2f}}%%', 100.0 * count / (SELECT count FROM total_count_cte)) AS percentage_fmt
-    FROM status_counts
-    ORDER BY status = 'Total', status; -- Sort Total last, then alphabetically
+            COALESCE(status, 'Total') AS status,
+            count,
+            100.0 * count / NULLIF((SELECT count FROM total_count_cte), 0) AS percentage,
+            FORMAT(
+                '{{:.2f}}%%',
+                100.0 * count / NULLIF((SELECT count FROM total_count_cte), 0)
+            ) AS percentage_fmt
+        FROM status_counts
+        ORDER BY status = 'Total', status; -- Sort Total last, then alphabetically
     """
 
     return con.sql(sql)
