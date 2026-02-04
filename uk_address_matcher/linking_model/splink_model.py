@@ -79,10 +79,19 @@ def get_linker(
     # Use ukam_address_id as unique_id column name (created as part of our cleaning process)
     settings_as_dict["unique_id_column_name"] = "ukam_address_id"
     # Also make sure we now retain unique_id from both datasets...
+
     settings_as_dict["additional_columns_to_retain"] += [
         "unique_id",
         "original_address_concat",
     ]
+
+    # Auto-detect ukam_label: if present in messy data, retain it for accuracy testing.
+    if "ukam_label" in df_addresses_to_match.columns:
+        settings_as_dict["additional_columns_to_retain"].append("ukam_label")
+        if "ukam_label" not in df_addresses_to_search_within.columns:
+            df_addresses_to_search_within = df_addresses_to_search_within.select(
+                "*, NULL::VARCHAR AS ukam_label"
+            )
 
     settings_as_dict["retain_intermediate_calculation_columns"] = (
         retain_intermediate_calculation_columns

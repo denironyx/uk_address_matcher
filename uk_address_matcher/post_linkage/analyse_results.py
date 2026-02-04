@@ -90,6 +90,9 @@ def best_matches_with_distinguishability(
         for col in additional_columns_to_retain:
             add_cols_select += f"{col}_l, {col}_r, "
 
+    if "ukam_label_r" in df_predict.columns:
+        add_cols_select += "ukam_label_l, ukam_label_r, "
+
     if 0 not in distinguishability_thresholds:
         distinguishability_thresholds.append(0)
     thres_sorted = sorted(distinguishability_thresholds, reverse=True)
