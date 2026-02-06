@@ -26,9 +26,9 @@ The package supports four distinct but complementary stages. Each stage has a cl
    - Implementation: [`steps/normalisation.py`](./steps/normalisation.py)
 
 2) Tokenisation - canonical strings → tokens
-   - Goal: create deterministic token arrays (`VARCHAR[]`) suitable for downstream exact/trie searches and weighting.
+   - Goal: create deterministic token arrays (`VARCHAR[]`) suitable for downstream exact searches and weighting.
      - Split on spaces after normalisation; collapse duplicate whitespace.
-     - Apply a consistent policy on punctuation, hyphens, and separators (documented in code comments). Keep order stable for trie‑based look‑ups.
+     - Apply a consistent policy on punctuation, hyphens, and separators (documented in code comments).
    - Implementation: [`steps/tokenisation.py`](./steps/tokenisation.py)
 
 3) Token parsing (feature extraction) - tokens/strings → structured features

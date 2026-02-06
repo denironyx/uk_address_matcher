@@ -60,7 +60,7 @@ def test_calculate_exact_match_metrics_accepts_match_reason_column():
         SELECT *
         FROM (VALUES
             ('exact: postcode'),
-            ('trie: fallback'),
+            ('splink: probabilistic'),
             ('exact: postcode')
         ) AS t(match_reason)
         """
@@ -70,10 +70,10 @@ def test_calculate_exact_match_metrics_accepts_match_reason_column():
 
     assert set(result_df["match_reason"]) == {
         "exact: postcode",
-        "trie: fallback",
+        "splink: probabilistic",
     }
     counts = dict(zip(result_df["match_reason"], result_df["match_count"]))
-    assert counts == {"exact: postcode": 2, "trie: fallback": 1}
+    assert counts == {"exact: postcode": 2, "splink: probabilistic": 1}
 
 
 def test_calculate_exact_match_metrics_requires_column():

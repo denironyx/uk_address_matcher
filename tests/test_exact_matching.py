@@ -133,40 +133,6 @@ def test_data(duck_con):
     return df_fuzzy, df_canonical
 
 
-# When a non-unique unique_id field exists in our fuzzy addresses,
-# the trie stage will inflate our row count (due to the output and required
-# joins). This test checks confirms that this issue does not occur.
-# We've resolved this issue by implementing a ukam_address_id surrogate key
-# to guarantee uniqueness of the input records.
-@pytest.mark.skip(reason="Temporarily skipped during refactoring")
-@pytest.mark.parametrize(
-    "enabled_stages",
-    [
-        None,  # Exact only
-    ],
-)
-def test_trie_stage_does_not_inflate_row_count(duck_con, enabled_stages, test_data):
-    df_fuzzy, df_canonical = test_data
-
-    results = run_deterministic_match_pass(
-        duck_con,
-        df_fuzzy,
-        df_canonical,
-        enabled_stage_names=enabled_stages,
-    )
-
-    input_row_count = df_fuzzy.count("*").fetchone()[0]
-    total_rows = results.count("*").fetchone()[0]
-    output_ids = results.order("ukam_address_id").project("ukam_address_id").fetchall()
-    input_ids = df_fuzzy.order("ukam_address_id").project("ukam_address_id").fetchall()
-
-    assert total_rows == input_row_count, (
-        "Deterministic pipeline should not change row count; "
-        f"expected {input_row_count}, got {total_rows}"
-    )
-    assert output_ids == input_ids, "Pipeline must preserve ukam_address_id coverage"
-
-
 # -----------------------------------------------------------------------------
 # Peeled address matching tests
 # -----------------------------------------------------------------------------
