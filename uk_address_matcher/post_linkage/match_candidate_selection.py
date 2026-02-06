@@ -14,11 +14,57 @@ from uk_address_matcher.sql_pipeline.steps import CTEStep, pipeline_stage
 
 
 @pipeline_stage(
+    name="prepare_match_candidates",
+    description="Attach canonical address details to match candidates.",
+    tags=["post_linkage", "matching"],
+    stage_output="match_candidates",
+)
+def _prepare_match_candidates(
+    *, source_cte: str, include_ukam_label: bool = False
+) -> list[CTEStep]:
+    """Join selected matches with canonical address details."""
+
+    canonical_sql = """
+        SELECT
+            ukam_address_id,
+            original_address_concat AS original_address_concat_canonical,
+            postcode AS postcode_canonical
+        FROM {canonical_addresses__ukam}
+    """
+
+    ukam_label_final = "selected.ukam_label," if include_ukam_label else ""
+    final_sql = f"""
+        SELECT
+            selected.unique_id,
+            {ukam_label_final}
+            selected.resolved_canonical_id,
+            selected.original_address_concat,
+            canon.original_address_concat_canonical,
+            selected.postcode,
+            canon.postcode_canonical,
+            selected.match_weight,
+            selected.distinguishability,
+            selected.distinguishability_category,
+            selected.match_reason,
+            selected.ukam_address_id,
+            selected.canonical_ukam_address_id
+        FROM {{{source_cte}}} AS selected
+        LEFT JOIN {{canonical_projection__ukam}} AS canon
+            ON canon.ukam_address_id = selected.canonical_ukam_address_id
+        ORDER BY selected.unique_id
+    """
+
+    return [
+        CTEStep("canonical_projection__ukam", canonical_sql),
+        CTEStep("match_candidates__ukam", final_sql),
+    ]
+
+
+@pipeline_stage(
     name="prepare_splink_candidates",
     description="Filter Splink matches to the top-ranked candidate per fuzzy address.",
     tags=["post_linkage", "splink"],
     stage_output="splink_top__ukam",
-    checkpoint=True,
 )
 def _prepare_splink_candidates(
     *,
@@ -49,15 +95,15 @@ def _prepare_splink_candidates(
         SELECT
             unique_id_r AS unique_id,
             {ukam_label_select}
-            ukam_address_id_r as ukam_address_id,
             unique_id_l AS resolved_canonical_id,
+            ukam_address_id_r as ukam_address_id,
             ukam_address_id_l as canonical_ukam_address_id,
             address_concat_r as original_address_concat,
             postcode_r as postcode,
+            '{splink_label}'::ENUM({enum_literal}) AS match_reason,
             match_weight,
             distinguishability,
-            distinguishability_category,
-            '{splink_label}'::ENUM({enum_literal}) AS match_reason
+            distinguishability_category
         FROM (
             SELECT
                 *,
@@ -72,27 +118,19 @@ def _prepare_splink_candidates(
         WHERE match_rank = 1
     """
 
-    return [CTEStep("splink_top", top_sql)]
+    return [CTEStep("splink_top__ukam", top_sql)]
 
 
 @pipeline_stage(
     name="combine_exact_and_splink_matches",
-    description="Merge deterministic and Splink matches with canonical context.",
+    description="Merge deterministic and Splink matches into a single relation.",
     tags=["post_linkage", "matching"],
-    stage_output="match_candidates",
+    stage_output="combined_matches",
 )
 def _combine_exact_and_splink_matches(
-    *, include_unmatched: bool, include_ukam_label: bool = False
+    *, include_ukam_label: bool = False
 ) -> list[CTEStep]:
-    """Join exact and Splink matches with canonical address details."""
-
-    canonical_sql = """
-        SELECT
-            ukam_address_id,
-            original_address_concat AS original_address_concat_canonical,
-            postcode AS postcode_canonical
-        FROM {canonical_addresses__ukam}
-    """
+    """Union exact and Splink matches into a single relation."""
 
     ukam_label_field = "ukam_label," if include_ukam_label else ""
     common_fields = f"""
@@ -103,80 +141,86 @@ def _combine_exact_and_splink_matches(
         canonical_ukam_address_id,
         original_address_concat,
         postcode,
-        match_reason
+        match_reason,
+        match_weight,
+        distinguishability,
+        distinguishability_category
     """
 
-    # When include_unmatched=True, we need to exclude unmatched records that got a Splink match
-    # When include_unmatched=False, we exclude all unmatched records
+    union_sql = f"""
+        SELECT
+            {common_fields}
+        FROM {{exact_top__ukam}}
+
+        UNION ALL
+
+        SELECT
+            {common_fields}
+        FROM {{splink_top__ukam}}
+        -- Ensures we don't duplicate exact matches if they also appear in Splink
+        WHERE ukam_address_id NOT IN (
+            SELECT ukam_address_id FROM {{exact_top__ukam}} WHERE match_reason IS NOT NULL
+        )
+    """
+
+    return [
+        CTEStep("combined_matches__ukam", union_sql),
+    ]
+
+
+@pipeline_stage(
+    name="prepare_exact_candidates",
+    description="Filter deterministic matches and shape columns for matching output.",
+    tags=["post_linkage", "matching"],
+    stage_output="exact_top__ukam",
+)
+def _prepare_exact_candidates(
+    *,
+    include_unmatched: bool,
+    exclude_splink_matches: bool,
+    include_ukam_label: bool = False,
+) -> list[CTEStep]:
+    """Filter exact matches and align fields with Splink outputs."""
+
+    ukam_label_field = "ukam_label," if include_ukam_label else ""
+
     if include_unmatched:
-        exact_filter = """
-            WHERE match_reason IS NOT NULL
-            OR (match_reason IS NULL AND ukam_address_id NOT IN
-                (SELECT ukam_address_id FROM {splink_top__ukam}))
-        """
+        if exclude_splink_matches:
+            exact_filter = """
+                WHERE match_reason IS NOT NULL
+                OR (match_reason IS NULL AND ukam_address_id NOT IN
+                    (SELECT ukam_address_id FROM {splink_top__ukam}))
+            """
+        else:
+            exact_filter = ""
     else:
         exact_filter = "WHERE match_reason IS NOT NULL"
 
-    # Union exact matches and Splink matches
-    union_sql = f"""
+    exact_sql = f"""
         SELECT
-            {common_fields},
+            unique_id,
+            {ukam_label_field}
+            resolved_canonical_id,
+            ukam_address_id,
+            canonical_ukam_address_id,
+            original_address_concat,
+            postcode,
+            match_reason,
             NULL AS match_weight,
             NULL AS distinguishability,
             NULL AS distinguishability_category
         FROM {{exact_matches__ukam}}
         {exact_filter}
-
-        UNION ALL
-
-        SELECT
-            {common_fields},
-            match_weight,
-            distinguishability,
-            distinguishability_category
-        FROM {{splink_top__ukam}}
-        -- Ensures we don't duplicate exact matches if they also appear in Splink
-        WHERE ukam_address_id NOT IN (
-            SELECT ukam_address_id FROM {{exact_matches__ukam}} WHERE match_reason IS NOT NULL
-        )
     """
 
-    # Join with canonical addresses to get canonical address details
-
-    ukam_label_final = "combined.ukam_label," if include_ukam_label else ""
-    final_sql = f"""
-        SELECT
-            combined.unique_id,
-            {ukam_label_final}
-            combined.resolved_canonical_id,
-            combined.original_address_concat,
-            canon.original_address_concat_canonical,
-            combined.postcode,
-            canon.postcode_canonical,
-            combined.match_weight,
-            combined.distinguishability,
-            combined.distinguishability_category,
-            combined.match_reason,
-            combined.ukam_address_id,
-            combined.canonical_ukam_address_id
-        FROM {{combined_matches__ukam}} AS combined
-        LEFT JOIN {{canonical_projection__ukam}} AS canon
-            ON canon.ukam_address_id = combined.canonical_ukam_address_id
-        ORDER BY combined.unique_id
-    """
-
-    return [
-        CTEStep("canonical_projection__ukam", canonical_sql),
-        CTEStep("combined_matches__ukam", union_sql),
-        CTEStep("match_candidates__ukam", final_sql),
-    ]
+    return [CTEStep("exact_top__ukam", exact_sql)]
 
 
 def select_top_match_candidates(
     *,
     con: duckdb.DuckDBPyConnection,
-    df_exact_matches: duckdb.DuckDBPyRelation,
-    df_splink_matches: duckdb.DuckDBPyRelation,
+    df_exact_matches: Optional[duckdb.DuckDBPyRelation] = None,
+    df_splink_matches: Optional[duckdb.DuckDBPyRelation] = None,
     df_canonical: duckdb.DuckDBPyRelation,
     match_weight_threshold: float = 10.0,
     distinguishability_threshold: Optional[float] = 5.0,
@@ -187,37 +231,97 @@ def select_top_match_candidates(
 
     Args:
         con: DuckDB connection
-        df_exact_matches: Exact match results
-        df_splink_matches: Splink match candidates
+        df_exact_matches: Exact match results (optional)
+        df_splink_matches: Splink match candidates (optional)
         df_canonical: Canonical addresses
         match_weight_threshold: Minimum match weight for Splink matches
         distinguishability_threshold: Minimum distinguishability for Splink matches
         include_unmatched: If True, include unmatched records from exact_matches
         debug_options: Debug options for pipeline execution
+
+    Raises:
+        ValueError: When both df_exact_matches and df_splink_matches are omitted.
     """
 
-    include_ukam_label = "ukam_label_r" in df_splink_matches.columns
+    if df_exact_matches is None and df_splink_matches is None:
+        raise ValueError(
+            "Provide at least one of df_exact_matches or df_splink_matches."
+        )
 
-    pipeline = create_sql_pipeline(
-        con,
-        [
-            InputBinding("exact_matches__ukam", df_exact_matches),
-            InputBinding("splink_matches__ukam", df_splink_matches),
-            InputBinding("canonical_addresses__ukam", df_canonical),
-        ],
-        [
+    include_ukam_label = False
+    if df_splink_matches is not None and "ukam_label_r" in df_splink_matches.columns:
+        include_ukam_label = True
+    if df_exact_matches is not None and "ukam_label" in df_exact_matches.columns:
+        include_ukam_label = True
+
+    if (
+        df_exact_matches is not None
+        and include_ukam_label
+        and "ukam_label" not in df_exact_matches.columns
+    ):
+        df_exact_matches = df_exact_matches.select("*, NULL::VARCHAR AS ukam_label")
+
+    if (
+        df_splink_matches is not None
+        and include_ukam_label
+        and "ukam_label_r" not in df_splink_matches.columns
+    ):
+        df_splink_matches = df_splink_matches.select("*, NULL::VARCHAR AS ukam_label_r")
+
+    input_rel = [InputBinding("canonical_addresses__ukam", df_canonical)]
+    stage_specs = []
+
+    if df_splink_matches is not None:
+        input_rel.append(InputBinding("splink_matches__ukam", df_splink_matches))
+        stage_specs.append(
             _prepare_splink_candidates(
                 match_weight_threshold=match_weight_threshold,
                 distinguishability_threshold=distinguishability_threshold,
                 include_ukam_label=include_ukam_label,
-            ),
-            _combine_exact_and_splink_matches(
+            )
+        )
+
+    if df_exact_matches is not None:
+        input_rel.append(InputBinding("exact_matches__ukam", df_exact_matches))
+        stage_specs.append(
+            _prepare_exact_candidates(
                 include_unmatched=include_unmatched,
+                exclude_splink_matches=df_splink_matches is not None,
                 include_ukam_label=include_ukam_label,
-            ),
-        ],
+            )
+        )
+
+    if df_exact_matches is not None and df_splink_matches is not None:
+        stage_specs.append(
+            _combine_exact_and_splink_matches(include_ukam_label=include_ukam_label)
+        )
+        stage_specs.append(
+            _prepare_match_candidates(
+                source_cte="combined_matches__ukam",
+                include_ukam_label=include_ukam_label,
+            )
+        )
+    elif df_exact_matches is not None:
+        stage_specs.append(
+            _prepare_match_candidates(
+                source_cte="exact_top__ukam",
+                include_ukam_label=include_ukam_label,
+            )
+        )
+    else:
+        stage_specs.append(
+            _prepare_match_candidates(
+                source_cte="splink_top__ukam",
+                include_ukam_label=include_ukam_label,
+            )
+        )
+
+    pipeline = create_sql_pipeline(
+        con,
+        input_rel,
+        stage_specs,
         pipeline_name="Match candidate selection",
-        pipeline_description="Filter Splink matches and merge with deterministic outputs.",
+        pipeline_description="Filter matches and merge with deterministic outputs.",
     )
 
     if debug_options is not None and debug_options.debug_mode:
