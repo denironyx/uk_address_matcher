@@ -139,9 +139,9 @@ class Stage:
         This is used by the pipeline plan view to present each queued SQL stage
         in a human-friendly way.
 
-        For example, a `Stage` titled "build_trie" might render as:
-        1. build_trie [trie]
-            ↳ Test building a trie
+        For example, a `Stage` titled "exact_match" might render as:
+        1. exact_match [exact]
+            ↳ Test exact matching
             ├─ depends on:
             │  • test1
             └─ CTEs:

@@ -60,8 +60,8 @@ from benchmarking.analysis.mismatches import print_mismatch_analysis
 # Print header
 print_benchmark_header(
     dataset_name="Lambeth Council",
-    variant_name="exact_match_then_trie",
-    enabled_stages=[StageName.TRIE]
+    variant_name="exact_match_only",
+    enabled_stages=[]
 )
 
 # Run pipeline

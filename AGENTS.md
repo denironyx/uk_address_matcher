@@ -68,8 +68,6 @@ This document acts as your onboarding pack when working in the `uk_address_match
 - Match reasons use the `MatchReason` enum. Ensure any new enum values are registered through the helper so DuckDB knows about the ENUM type.
 - For free form SQL, prefer `register_step` with the pipeline queuer utilities in `uk_address_matcher.sql_pipeline`. This queues CTE fragments, keeps the plan inspectable, and supports stepwise debugging.
 
-> [! WARNING]
-> DuckDB macros or functions must be registered before running pipelines that reference them. Tests often stub `build_suffix_trie` and `find_address` for this reason.
 
 ## Python coding style preferences
 
@@ -113,7 +111,7 @@ This document acts as your onboarding pack when working in the `uk_address_match
 This project marries deterministic SQL stages with probabilistic Splink linkage to achieve rapid UK address matching. Core responsibilities:
 
 - `cleaning`: create standardised tokens and representations of addresses.
-- `linking_model.exact_matching`: deterministic postcode plus address concat matching, followed by trie based fallbacks.
+- `linking_model.exact_matching`: deterministic postcode plus address concat matching.
 - `linking_model.post_linkage`: evaluate match quality and derive metrics.
 - `sql_pipeline`: orchestrate staged DuckDB execution with dependency management and match reason enums.
 
