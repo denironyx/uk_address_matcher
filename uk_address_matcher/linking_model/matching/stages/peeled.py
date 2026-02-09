@@ -174,7 +174,7 @@ def _peeled_address_matches() -> list[CTEStep]:
             messy_ukam_address_id AS ukam_address_id,
             canonical_ukam_address_id,
             canonical_unique_id AS resolved_canonical_id,
-            '{match_reason_value}'::ENUM {enum_values} AS match_reason
+            '{MatchReason.PEELED_ADDRESS.value}'::ENUM {enum_values} AS match_reason
         FROM (
             SELECT
                 *,
