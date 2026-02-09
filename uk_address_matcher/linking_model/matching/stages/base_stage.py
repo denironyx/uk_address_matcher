@@ -64,6 +64,11 @@ class MatchingStage(ABC):
     The relation should contain at most one row per `ukam_address_id`. If multiple
     rows are returned for the same record then the update semantics are undefined.
 
+    Note that find_matches always requires df_unmatched and df_canonical to be passed,
+    but it considers these tables immutable i.e. it doesn't changes them,
+    it just uses them to find matches, and then the matches are updated in the
+    results table
+
     """
 
     @abstractmethod
