@@ -79,9 +79,9 @@ def _peeled_address_matches() -> list[CTEStep]:
         3. At least one side must have peeled something (to avoid duplicating
            exact match results)
     """
-    # NOTE: PEELED_ADDRESS match reason not yet in MatchReason enum
-    # Using placeholder for now since peeling logic removed from cleaning steps
-    match_reason_value = "peeled_address: match after removing common UK end tokens"
+    # Use the dedicated enum value for peeled-address matches so that any SQL
+    # cast to the MatchReason ENUM remains valid.
+    match_reason_value = MatchReason.PEELED_ADDRESS.value
     enum_values = str(MatchReason.enum_values())
 
     messy_peeled_sql = """
