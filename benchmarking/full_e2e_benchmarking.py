@@ -88,7 +88,7 @@ with time_phase(variant_timings, variant_label, "pipeline"):
                 improve_threshold_match_weight=-20,
                 final_match_weight_threshold=10,
                 final_distinguishability_threshold=5,
-                include_full_postcode_block=True,
+                include_full_postcode_block=False,
                 retain_intermediate_calculation_columns=True,
             ),
         ],
