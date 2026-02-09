@@ -1,15 +1,9 @@
 from __future__ import annotations
 
 import logging
-from enum import Enum
-from typing import TYPE_CHECKING, Iterable, Optional, Union
+from typing import TYPE_CHECKING, Optional
 
-from uk_address_matcher.linking_model.matching.stages import (
-    ExactMatchStage,
-    MatchingStage,
-    PeeledAddressStage,
-    UniqueTrigramStage,
-)
+from uk_address_matcher.linking_model.matching.stages.base_stage import MatchingStage
 from uk_address_matcher.sql_pipeline.helpers import _uid
 from uk_address_matcher.sql_pipeline.match_reasons import MatchReason
 from uk_address_matcher.sql_pipeline.validation import ColumnSpec, validate_tables
@@ -20,85 +14,6 @@ if TYPE_CHECKING:
     from uk_address_matcher.sql_pipeline.runner import DebugOptions
 
 logger = logging.getLogger("uk_address_matcher")
-
-
-class StageName(str, Enum):
-    """Available deterministic matching stages."""
-
-    EXACT_MATCHES = "exact_matches"
-    UNIQUE_TRIGRAM = "unique_trigram"
-    PEELED_ADDRESS = "peeled_address"
-
-
-StageInput = Union[StageName, str, MatchingStage]
-
-_STAGE_REGISTRY: dict[StageName, MatchingStage] = {
-    StageName.EXACT_MATCHES: ExactMatchStage(),
-    StageName.UNIQUE_TRIGRAM: UniqueTrigramStage(),
-    StageName.PEELED_ADDRESS: PeeledAddressStage(),
-}
-
-_ALWAYS_ON: tuple[StageName, ...] = (StageName.EXACT_MATCHES,)
-
-
-def available_deterministic_stages() -> list[StageName]:
-    """Get stages that can be enabled via ``enabled_stage_names``."""
-    return [stage for stage in _STAGE_REGISTRY if stage not in _ALWAYS_ON]
-
-
-def _stage_name_for_instance(stage: MatchingStage) -> str:
-    if isinstance(stage, ExactMatchStage):
-        return StageName.EXACT_MATCHES.value
-    if isinstance(stage, UniqueTrigramStage):
-        return StageName.UNIQUE_TRIGRAM.value
-    if isinstance(stage, PeeledAddressStage):
-        return StageName.PEELED_ADDRESS.value
-    return stage.__class__.__name__.lower()
-
-
-def _normalise_enabled_stages(
-    enabled: Optional[Iterable[StageInput]],
-) -> list[tuple[str, MatchingStage]]:
-    """Validate and normalise configured stage inputs while preserving order."""
-    if enabled is None:
-        return []
-
-    out: list[tuple[str, MatchingStage]] = []
-    seen: set[str] = set()
-
-    for item in enabled:
-        if isinstance(item, MatchingStage):
-            stage_name = _stage_name_for_instance(item)
-            if stage_name in {s.value for s in _ALWAYS_ON}:
-                raise ValueError(
-                    f"{stage_name} is always enabled and should not be provided."
-                )
-            if stage_name in seen:
-                raise ValueError(f"Duplicate exact matching stage specified: {stage_name}")
-            seen.add(stage_name)
-            out.append((stage_name, item))
-            continue
-
-        try:
-            name = item if isinstance(item, StageName) else StageName(item)
-        except ValueError as e:
-            allowed = ", ".join(stage.value for stage in available_deterministic_stages())
-            raise ValueError(
-                f"Unknown exact matching stage: {item!r}. Available stages: {allowed}"
-            ) from e
-
-        if name in _ALWAYS_ON:
-            raise ValueError(
-                f"{name.value} is always enabled and should not be provided."
-            )
-
-        if name.value in seen:
-            raise ValueError(f"Duplicate exact matching stage specified: {name.value}")
-
-        seen.add(name.value)
-        out.append((name.value, _STAGE_REGISTRY[name]))
-
-    return out
 
 
 def _duckdb_column_type(
@@ -178,7 +93,8 @@ def _build_final_output(
     results_table: str,
 ) -> duckdb.DuckDBPyRelation:
     results_columns = [
-        row[1] for row in con.execute(f"PRAGMA table_info('{results_table}')").fetchall()
+        row[1]
+        for row in con.execute(f"PRAGMA table_info('{results_table}')").fetchall()
     ]
 
     excluded = {
@@ -189,7 +105,9 @@ def _build_final_output(
         "canonical_ukam_address_id",
         "match_reason",
     }
-    additional_columns = [column for column in results_columns if column not in excluded]
+    additional_columns = [
+        column for column in results_columns if column not in excluded
+    ]
     additional_projection = "".join(
         f",\n            results.{column}" for column in additional_columns
     )
@@ -215,20 +133,36 @@ def _build_final_output(
     )
 
 
-def run_deterministic_match_pass(
+def run_matching(
     con: duckdb.DuckDBPyConnection,
-    df_addresses_to_match: duckdb.DuckDBPyRelation,
-    df_addresses_to_search_within: duckdb.DuckDBPyRelation,
+    df_messy_clean: duckdb.DuckDBPyRelation,
+    df_canonical_clean: duckdb.DuckDBPyRelation,
     *,
-    enabled_stage_names: Optional[Iterable[StageInput]] = None,
+    stages: list[MatchingStage],
     debug_options: Optional[DebugOptions] = None,
     explain: bool = False,
 ) -> Optional[duckdb.DuckDBPyRelation]:
-    """Run deterministic matching stages sequentially and return unified results."""
+    """Run matching stages sequentially and return unified results.
+
+    Each stage receives only the still-unmatched messy records. Matches found
+    by earlier stages are never revisited.
+
+    Args:
+        con: DuckDB connection.
+        df_messy_clean: Cleaned messy addresses to match.
+        df_canonical_clean: Cleaned canonical addresses to match against.
+        stages: Ordered list of ``MatchingStage`` instances to execute.
+        debug_options: Optional debug/trace settings.
+        explain: If ``True``, run stages in explain-only mode.
+
+    Returns:
+        A DuckDB relation containing all messy records with match results
+        joined to canonical address details, or ``None`` when ``explain=True``.
+    """
     validate_tables(
         relations={
-            "messy_addresses": df_addresses_to_match,
-            "canonical_addresses": df_addresses_to_search_within,
+            "messy_addresses": df_messy_clean,
+            "canonical_addresses": df_canonical_clean,
         },
         required=[
             ColumnSpec("unique_id"),
@@ -238,21 +172,18 @@ def run_deterministic_match_pass(
         ],
     )
 
-    ordered_stages: list[tuple[str, MatchingStage]] = [
-        (StageName.EXACT_MATCHES.value, _STAGE_REGISTRY[StageName.EXACT_MATCHES])
-    ]
-    ordered_stages.extend(_normalise_enabled_stages(enabled_stage_names))
-
     uid = _uid()
     results_table = f"__ukam_results_{uid}"
     _create_results_table(
         con=con,
-        df_messy_clean=df_addresses_to_match,
-        df_canonical_clean=df_addresses_to_search_within,
+        df_messy_clean=df_messy_clean,
+        df_canonical_clean=df_canonical_clean,
         results_table=results_table,
     )
 
-    for stage_name, stage in ordered_stages:
+    for stage in stages:
+        stage_name = _stage_name_for_instance(stage)
+
         unmatched_count = con.execute(
             f"SELECT COUNT(*) FROM {results_table} WHERE resolved_canonical_id IS NULL"
         ).fetchone()[0]
@@ -270,14 +201,14 @@ def run_deterministic_match_pass(
             unmatched_count,
         )
 
-        df_unmatched = _get_unmatched(con, df_addresses_to_match, results_table)
+        df_unmatched = _get_unmatched(con, df_messy_clean, results_table)
 
         stage.run(
             con=con,
             stage_name=stage_name,
             results_table=results_table,
             df_unmatched=df_unmatched,
-            df_canonical=df_addresses_to_search_within,
+            df_canonical=df_canonical_clean,
             debug_options=debug_options,
             explain=explain,
         )
@@ -302,8 +233,8 @@ def run_deterministic_match_pass(
 
     result = _build_final_output(
         con=con,
-        df_messy_clean=df_addresses_to_match,
-        df_canonical_clean=df_addresses_to_search_within,
+        df_messy_clean=df_messy_clean,
+        df_canonical_clean=df_canonical_clean,
         results_table=results_table,
     )
 
@@ -315,3 +246,21 @@ def run_deterministic_match_pass(
     con.execute(f"DROP TABLE IF EXISTS {results_table}")
 
     return final_result
+
+
+def _stage_name_for_instance(stage: MatchingStage) -> str:
+    """Derive a human-readable stage name from a stage instance."""
+    from uk_address_matcher.linking_model.matching.stages import (
+        ExactMatchStage,
+        PeeledAddressStage,
+        UniqueTrigramStage,
+    )
+    from uk_address_matcher.linking_model.matching.stages.splink import SplinkStage
+
+    _names = {
+        ExactMatchStage: "exact_matches",
+        UniqueTrigramStage: "unique_trigram",
+        PeeledAddressStage: "peeled_address",
+        SplinkStage: "splink",
+    }
+    return _names.get(type(stage), stage.__class__.__name__.lower())

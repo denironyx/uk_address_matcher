@@ -19,7 +19,57 @@ _REQUIRED_COLUMNS = {
 
 
 class MatchingStage(ABC):
-    """Base class for deterministic matching stages."""
+    """Base class for matching stages.
+
+    Each stage
+    maintains a shared DuckDB table (`results_table`) with one row per *messy*
+    address record. Stages update
+    existing rows keyed by `ukam_address_id`.
+
+    **Results table contract**
+    The `results_table` contains at minimum:
+
+    - `ukam_address_id` — internal identifier for the messy record (the update key)
+    - `resolved_canonical_id` — the matched canonical record's user-facing ID
+        (NULL until matched)
+    - `canonical_ukam_address_id` — internal identifier for the matched canonical
+        record (NULL until matched)
+    - `match_reason` — label describing how the match was obtained (NULL until
+        matched; typically a DuckDB `ENUM` backed by
+        :class:`uk_address_matcher.sql_pipeline.match_reasons.MatchReason`)
+
+    The table may also contain messy record columns (for example `unique_id` and
+    optional `ukam_label`) plus any stage-specific columns added by earlier
+    stages.
+
+    **Stage output contract**
+    Subclasses implement the method `find_matches` and return a
+    `duckdb.DuckDBPyRelation` containing any new matches found
+
+    The returned relation must contain at minimum:
+
+    - `ukam_address_id`
+    - `canonical_ukam_address_id`
+    - `resolved_canonical_id`
+
+    It may also contain:
+
+    - `match_reason` — if absent, :meth:`run` populates it with `stage_name`.
+        (Any value written must be compatible with the type of
+        `results_table.match_reason`.)
+    - Any additional columns (e.g. `match_weight`, `distinguishability`). The
+        base implementation will add these columns to `results_table` on first use
+        and then populate them for rows updated by this stage.
+
+    The relation should contain at most one row per `ukam_address_id`. If multiple
+    rows are returned for the same record then the update semantics are undefined.
+
+    Note that find_matches always requires df_unmatched and df_canonical to be passed,
+    but it considers these tables immutable i.e. it doesn't changes them,
+    it just uses them to find matches, and then the matches are updated in the
+    results table
+
+    """
 
     @abstractmethod
     def find_matches(
@@ -108,7 +158,8 @@ class MatchingStage(ABC):
         temp_column_types = {row[0]: row[1] for row in temp_columns}
 
         results_columns = {
-            row[1] for row in con.execute(f"PRAGMA table_info('{results_table}')").fetchall()
+            row[1]
+            for row in con.execute(f"PRAGMA table_info('{results_table}')").fetchall()
         }
 
         additional_columns = [
