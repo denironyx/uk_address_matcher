@@ -11,7 +11,7 @@ from uk_address_matcher.sql_pipeline.steps import CTEStep, pipeline_stage
         "(cities, counties, boroughs) and performing exact match on the peeled addresses."
     ),
     tags=["phase_1", "exact_matching"],
-    depends_on=["restrict_canonical_to_fuzzy_postcodes"],
+    depends_on=["restrict_canonical_to_messy_postcodes"],
 )
 def _peeled_address_matches() -> list[CTEStep]:
     """Find matches using peeled addresses (after removing common UK end tokens).
@@ -45,9 +45,9 @@ def _peeled_address_matches() -> list[CTEStep]:
     match_reason_value = MatchReason.PEELED_ADDRESS.value
     enum_values = str(MatchReason.enum_values())
 
-    # Step 1: Compute peeled address for fuzzy addresses
+    # Step 1: Compute peeled address for messy addresses
     # We tokenise each peeled entry, flatten to get total word count, then slice
-    fuzzy_peeled_sql = """
+    messy_peeled_sql = """
         SELECT
             ukam_address_id,
             postcode,
@@ -77,7 +77,7 @@ def _peeled_address_matches() -> list[CTEStep]:
                     ' '
                 )
             END AS peeled_address
-        FROM {fuzzy_addresses}
+        FROM {messy_addresses}
     """
 
     # Step 2: Compute peeled address for canonical addresses
@@ -118,32 +118,32 @@ def _peeled_address_matches() -> list[CTEStep]:
     # Step 3: Join on postcode + peeled address (exact match)
     candidates_sql = """
         SELECT
-            fuzzy.ukam_address_id AS fuzzy_ukam_address_id,
-            fuzzy.clean_full_address AS fuzzy_clean_full_address,
-            fuzzy.peeled_address AS fuzzy_peeled_address,
-            fuzzy.peeled_tokens_list AS fuzzy_peeled_tokens,
-            fuzzy.peeled_word_count AS fuzzy_peeled_word_count,
+            messy.ukam_address_id AS messy_ukam_address_id,
+            messy.clean_full_address AS messy_clean_full_address,
+            messy.peeled_address AS messy_peeled_address,
+            messy.peeled_tokens_list AS messy_peeled_tokens,
+            messy.peeled_word_count AS messy_peeled_word_count,
             canon.canonical_ukam_address_id,
             canon.canonical_unique_id,
             canon.canonical_clean_full_address,
             canon.peeled_address AS canonical_peeled_address,
             canon.canonical_peeled_tokens_list AS canonical_peeled_tokens,
             canon.canonical_peeled_word_count
-        FROM {fuzzy_peeled} AS fuzzy
+        FROM {messy_peeled} AS messy
         INNER JOIN {canonical_peeled} AS canon
-            ON fuzzy.postcode = canon.postcode
-            AND fuzzy.peeled_address = canon.peeled_address
+            ON messy.postcode = canon.postcode
+            AND messy.peeled_address = canon.peeled_address
         WHERE
             -- Require at least one side to have peeled something
             -- (otherwise this duplicates exact match results)
-            fuzzy.peeled_word_count > 0
+            messy.peeled_word_count > 0
             OR canon.canonical_peeled_word_count > 0
     """
 
-    # Step 4: Annotate matches with match reason, dedupe by fuzzy_ukam_address_id
+    # Step 4: Annotate matches with match reason, dedupe by messy_ukam_address_id
     annotated_sql = f"""
         SELECT
-            fuzzy_ukam_address_id AS ukam_address_id,
+            messy_ukam_address_id AS ukam_address_id,
             canonical_ukam_address_id,
             canonical_unique_id AS resolved_canonical_id,
             '{match_reason_value}'::ENUM {enum_values} AS match_reason
@@ -151,7 +151,7 @@ def _peeled_address_matches() -> list[CTEStep]:
             SELECT
                 *,
                 ROW_NUMBER() OVER (
-                    PARTITION BY fuzzy_ukam_address_id
+                    PARTITION BY messy_ukam_address_id
                     ORDER BY canonical_ukam_address_id
                 ) AS rn
             FROM {{peeled_address_candidates}}
@@ -160,7 +160,7 @@ def _peeled_address_matches() -> list[CTEStep]:
     """
 
     return [
-        CTEStep("fuzzy_peeled", fuzzy_peeled_sql),
+        CTEStep("messy_peeled", messy_peeled_sql),
         CTEStep("canonical_peeled", canonical_peeled_sql),
         CTEStep("peeled_address_candidates", candidates_sql),
         CTEStep("peeled_address_matches", annotated_sql),
