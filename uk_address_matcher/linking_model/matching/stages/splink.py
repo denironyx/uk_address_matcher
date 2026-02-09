@@ -13,8 +13,6 @@ if TYPE_CHECKING:
 
     from uk_address_matcher.sql_pipeline.runner import DebugOptions
 
-logger = logging.getLogger("uk_address_matcher")
-
 
 @dataclass(frozen=True)
 class SplinkStage(MatchingStage):

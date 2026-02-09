@@ -19,7 +19,7 @@ _REQUIRED_COLUMNS = {
 
 
 class MatchingStage(ABC):
-    """Base class for deterministic matching stages.
+    """Base class for matching stages.
 
     Each stage
     maintains a shared DuckDB table (`results_table`) with one row per *messy*
