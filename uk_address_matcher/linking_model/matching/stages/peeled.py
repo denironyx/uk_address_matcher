@@ -53,7 +53,7 @@ class PeeledAddressStage(MatchingStage):
         "Find matches by comparing addresses after peeling common UK end tokens "
         "(cities, counties, boroughs) and performing exact match on the peeled addresses."
     ),
-    tags=["phase_1", "exact_matching"],
+    tags=["phase_1", "matching"],
     depends_on=["restrict_canonical_to_messy_postcodes"],
 )
 def _peeled_address_matches() -> list[CTEStep]:

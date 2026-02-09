@@ -77,7 +77,7 @@ def _trigram_hash_expression(alias: str = "tri") -> str:
 @pipeline_stage(
     name="resolve_with_trigrams",
     description="Resolve records using unique trigram matches",
-    tags=["phase_1", "trigram", "exact_matching"],
+    tags=["phase_1", "trigram", "matching"],
 )
 def _resolve_with_trigrams(
     ngram_size: int = 3,

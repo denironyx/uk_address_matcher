@@ -8,12 +8,8 @@ from benchmarking.analysis.accuracy import calculate_accuracy_metrics
 from benchmarking.analysis.mismatches import analyse_mismatches, print_mismatch_analysis
 from benchmarking.datasets import get_dataset_info, load_benchmark_data
 from benchmarking.utils.io import setup_connection
-from benchmarking.utils.pipelines import run_deterministic_pipeline
 from benchmarking.utils.timing import format_timing_summary, time_phase
 from uk_address_matcher import (
-    best_matches_with_distinguishability,
-    get_linker,
-    improve_predictions_using_distinguishing_tokens,
     run_matching,
     ExactMatchStage,
     UniqueTrigramStage,
@@ -63,6 +59,7 @@ df_messy_clean, df_os_clean = load_benchmark_data(
     clean_canonical_on_the_fly=CLEAN_CANONICAL_ON_THE_FLY,
     derive_term_frequencies_on_the_fly=DERIVE_TERM_FREQUENCIES_ON_THE_FLY,
 )
+
 con.sql("DROP TABLE IF EXISTS df_messy")
 df_messy_clean.to_table("df_messy_clean")
 # Get dataset info for reporting
@@ -77,50 +74,10 @@ print_stages_benchmark_header(
 )
 
 with time_phase(variant_timings, variant_label, "pipeline"):
-    deterministic_matches = run_deterministic_pipeline(
+    match_candidates = run_matching(
         con=con,
         # For benchmarking, we want to load the messy data in with the column `dataset_name`.
         # This needs to be removed for matching, but is joined back on later.
-        df_to_match=df_messy_clean.select("* EXCLUDE (dataset_name)").execute(),
-        df_canonical=df_os_clean,
-        pipeline_name=f"Exact benchmark - {variant_label}",
-        debug_options=DEBUG_OPTIONS,
-        explain=EXPLAIN,
-        enabled_stage_names=["unique_trigram"],
-    )
-
-pipeline_duration = variant_timings[variant_label]["pipeline"]
-print(f"⏱  Pipeline completed in {pipeline_duration:.2f} seconds.\n")
-
-with time_phase(variant_timings, variant_label, "splink_linking"):
-    linker = get_linker(
-        df_addresses_to_match=deterministic_matches,
-        df_addresses_to_search_within=df_os_clean,
-        con=con,
-        include_full_postcode_block=True,
-        retain_intermediate_calculation_columns=True,
-    )
-    df_predict = linker.inference.predict(threshold_match_weight=10)
-    df_predict_ddb = df_predict.as_duckdbpyrelation()
-
-splink_duration = variant_timings[variant_label]["splink_linking"]
-print(f"⏱  Splink linking completed in {splink_duration:.2f} seconds.\n")
-
-with time_phase(variant_timings, variant_label, "distinguishing_tokens"):
-    df_predict_improved = improve_predictions_using_distinguishing_tokens(
-        df_predict=df_predict_ddb,
-        con=con,
-        match_weight_threshold=-20,
-    )
-
-distinguishing_duration = variant_timings[variant_label]["distinguishing_tokens"]
-print(
-    f"⏱  Distinguishing token adjustment completed in {distinguishing_duration:.2f} seconds.\n"
-)
-
-with time_phase(variant_timings, variant_label, "candidate_selection"):
-    match_candidates = run_matching(
-        con=con,
         df_messy_clean=df_messy_clean.select("* EXCLUDE (dataset_name)").execute(),
         df_canonical_clean=df_os_clean,
         stages=[
@@ -135,10 +92,12 @@ with time_phase(variant_timings, variant_label, "candidate_selection"):
                 retain_intermediate_calculation_columns=True,
             ),
         ],
+        debug_options=DEBUG_OPTIONS,
+        explain=EXPLAIN,
     )
 
-candidate_duration = variant_timings[variant_label]["candidate_selection"]
-print(f"⏱  Candidate selection completed in {candidate_duration:.2f} seconds.\n")
+pipeline_duration = variant_timings[variant_label]["pipeline"]
+print(f"⏱  Pipeline completed in {pipeline_duration:.2f} seconds.\n")
 
 # Bring `dataset_name` back for analysis
 match_candidates = match_candidates.join(

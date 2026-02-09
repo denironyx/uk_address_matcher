@@ -14,7 +14,7 @@ POSTCODE_STRATEGIES: tuple[PostcodeStrategy, PostcodeStrategy] = (
 @pipeline_stage(
     name="restrict_canonical_to_messy_postcodes",
     description="Restrict canonical addresses to postcodes observed in the messy input.",
-    tags=["phase_1", "exact_matching", "utility"],
+    tags=["phase_1", "matching", "utility"],
     stage_output="canonical_addresses_restricted",
 )
 def _restrict_canonical_to_messy_postcodes(

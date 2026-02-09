@@ -52,7 +52,7 @@ class ExactMatchStage(MatchingStage):
 @pipeline_stage(
     name="exact_matches",
     description="Match using exact hash-join on clean_full_address + postcode",
-    tags=["phase_1", "exact_matching"],
+    tags=["phase_1", "matching"],
     depends_on=["restrict_canonical_to_messy_postcodes"],
 )
 def _exact_matches(
