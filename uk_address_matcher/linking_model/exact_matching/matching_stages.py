@@ -1,115 +1,88 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import logging
 from enum import Enum
-from typing import TYPE_CHECKING, Callable, Iterable, Literal, Optional, Union
+from typing import TYPE_CHECKING, Iterable, Optional, Union
 
-from uk_address_matcher.linking_model.exact_matching.annotate_exact_matches import (
-    _annotate_exact_matches,
-)
-from uk_address_matcher.linking_model.exact_matching.input_filters import (
-    _restrict_canonical_to_fuzzy_postcodes,
-)
-from uk_address_matcher.linking_model.exact_matching.resolve_with_trigrams import (
-    _resolve_with_trigrams,
+from uk_address_matcher.linking_model.matching.stages import (
+    ExactMatchStage,
+    MatchingStage,
+    PeeledAddressStage,
+    UniqueTrigramStage,
 )
 from uk_address_matcher.sql_pipeline.helpers import _uid
-from uk_address_matcher.sql_pipeline.runner import InputBinding, create_sql_pipeline
+from uk_address_matcher.sql_pipeline.match_reasons import MatchReason
 from uk_address_matcher.sql_pipeline.validation import ColumnSpec, validate_tables
 
 if TYPE_CHECKING:
     import duckdb
 
     from uk_address_matcher.sql_pipeline.runner import DebugOptions
-    from uk_address_matcher.sql_pipeline.steps import Stage
 
-
-FuzzyInputName = Literal["fuzzy_addresses", "unmatched_records"]
-StageFactory = Callable[[FuzzyInputName], "Stage"]
+logger = logging.getLogger("uk_address_matcher")
 
 
 class StageName(str, Enum):
-    """Available exact matching stages."""
+    """Available deterministic matching stages."""
 
     EXACT_MATCHES = "exact_matches"
     UNIQUE_TRIGRAM = "unique_trigram"
+    PEELED_ADDRESS = "peeled_address"
 
 
-@dataclass(frozen=True)
-class ExactMatchStageConfig:
-    """A basic stage configuration for exact matching pipeline stages.
+StageInput = Union[StageName, str, MatchingStage]
 
-    Parameters
-    ----------
-    factory:
-        The primary factory function that produces the stage. Accepts a `fuzzy_input_name`
-        parameter to specify which input table the stage should read from.
-    pre_filter_canonical:
-        The strategy to determine what canonical addresses are considered for
-        matching. See `PostcodeStrategy` for details.
-    fuzzy_input_name:
-        The placeholder name for the fuzzy input table. Defaults to "fuzzy_addresses".
-        Should be set to "unmatched_records" for stages that run after filtering.
-    """
-
-    factory: StageFactory
-    pre_filter_canonical: Optional[Stage] = None
-
-    def to_stages(self) -> list[Stage]:
-        """Build the stage queue for this exact matching stage."""
-        stages: list[Stage] = []
-        if self.pre_filter_canonical is not None:
-            stages.append(self.pre_filter_canonical)
-        stages.append(self.factory)
-        return stages
-
-
-_STAGE_REGISTRY: dict[StageName, ExactMatchStageConfig] = {
-    StageName.EXACT_MATCHES: ExactMatchStageConfig(
-        factory=_annotate_exact_matches,
-        pre_filter_canonical=_restrict_canonical_to_fuzzy_postcodes("exact"),
-    ),
-    StageName.UNIQUE_TRIGRAM: ExactMatchStageConfig(
-        factory=_resolve_with_trigrams(
-            ngram_size=3,
-            min_unique_hits=1,
-            include_conflicts=False,
-            include_trigram_text=True,
-        ),
-        pre_filter_canonical=_restrict_canonical_to_fuzzy_postcodes("exact"),
-    ),
+_STAGE_REGISTRY: dict[StageName, MatchingStage] = {
+    StageName.EXACT_MATCHES: ExactMatchStage(),
+    StageName.UNIQUE_TRIGRAM: UniqueTrigramStage(),
+    StageName.PEELED_ADDRESS: PeeledAddressStage(),
 }
 
 _ALWAYS_ON: tuple[StageName, ...] = (StageName.EXACT_MATCHES,)
 
 
 def available_deterministic_stages() -> list[StageName]:
-    """Get a list of available deterministic matching stage names that can be enabled.
-
-    Returns stages that can be enabled via enabled_stage_names.
-    EXACT_MATCHES is always on and excluded from this list.
-    """
-    return [s for s in _STAGE_REGISTRY if s not in _ALWAYS_ON]
+    """Get stages that can be enabled via ``enabled_stage_names``."""
+    return [stage for stage in _STAGE_REGISTRY if stage not in _ALWAYS_ON]
 
 
-StageInput = Union[StageName, str]
+def _stage_name_for_instance(stage: MatchingStage) -> str:
+    if isinstance(stage, ExactMatchStage):
+        return StageName.EXACT_MATCHES.value
+    if isinstance(stage, UniqueTrigramStage):
+        return StageName.UNIQUE_TRIGRAM.value
+    if isinstance(stage, PeeledAddressStage):
+        return StageName.PEELED_ADDRESS.value
+    return stage.__class__.__name__.lower()
 
 
 def _normalise_enabled_stages(
     enabled: Optional[Iterable[StageInput]],
-) -> list[StageName]:
-    """Validate optional stage configuration while preserving order."""
+) -> list[tuple[str, MatchingStage]]:
+    """Validate and normalise configured stage inputs while preserving order."""
     if enabled is None:
         return []
 
-    out: list[StageName] = []
-    seen: set[StageName] = set()
+    out: list[tuple[str, MatchingStage]] = []
+    seen: set[str] = set()
 
     for item in enabled:
+        if isinstance(item, MatchingStage):
+            stage_name = _stage_name_for_instance(item)
+            if stage_name in {s.value for s in _ALWAYS_ON}:
+                raise ValueError(
+                    f"{stage_name} is always enabled and should not be provided."
+                )
+            if stage_name in seen:
+                raise ValueError(f"Duplicate exact matching stage specified: {stage_name}")
+            seen.add(stage_name)
+            out.append((stage_name, item))
+            continue
+
         try:
             name = item if isinstance(item, StageName) else StageName(item)
         except ValueError as e:
-            allowed = ", ".join(s.value for s in available_deterministic_stages())
+            allowed = ", ".join(stage.value for stage in available_deterministic_stages())
             raise ValueError(
                 f"Unknown exact matching stage: {item!r}. Available stages: {allowed}"
             ) from e
@@ -119,94 +92,139 @@ def _normalise_enabled_stages(
                 f"{name.value} is always enabled and should not be provided."
             )
 
-        if name in seen:
+        if name.value in seen:
             raise ValueError(f"Duplicate exact matching stage specified: {name.value}")
 
-        seen.add(name)
-        out.append(name)
+        seen.add(name.value)
+        out.append((name.value, _STAGE_REGISTRY[name]))
 
     return out
 
 
-def _finalise_results(
-    df_addresses_to_match: duckdb.DuckDBPyRelation,
-    matches_union: duckdb.DuckDBPyRelation,
+def _duckdb_column_type(
+    con: duckdb.DuckDBPyConnection,
+    relation: duckdb.DuckDBPyRelation,
+    column_name: str,
+    fallback_type: str,
+) -> str:
+    rows = con.execute(
+        f"DESCRIBE SELECT {column_name} FROM ({relation.sql_query()})"
+    ).fetchall()
+    if not rows:
+        return fallback_type
+    return str(rows[0][1])
+
+
+def _create_results_table(
+    con: duckdb.DuckDBPyConnection,
+    df_messy_clean: duckdb.DuckDBPyRelation,
+    df_canonical_clean: duckdb.DuckDBPyRelation,
+    results_table: str,
+) -> None:
+    has_ukam_label = "ukam_label" in df_messy_clean.columns
+    ukam_label_projection = ", messy.ukam_label" if has_ukam_label else ""
+
+    resolved_canonical_type = _duckdb_column_type(
+        con=con,
+        relation=df_canonical_clean,
+        column_name="unique_id",
+        fallback_type="VARCHAR",
+    )
+    canonical_ukam_type = _duckdb_column_type(
+        con=con,
+        relation=df_canonical_clean,
+        column_name="ukam_address_id",
+        fallback_type="BIGINT",
+    )
+
+    enum_values = str(MatchReason.enum_values())
+
+    con.execute(f"DROP TABLE IF EXISTS {results_table}")
+    con.execute(
+        f"""
+        CREATE TABLE {results_table} AS
+        SELECT
+            messy.ukam_address_id,
+            messy.unique_id
+            {ukam_label_projection},
+            NULL::{resolved_canonical_type} AS resolved_canonical_id,
+            NULL::{canonical_ukam_type} AS canonical_ukam_address_id,
+            NULL::ENUM {enum_values} AS match_reason
+        FROM ({df_messy_clean.sql_query()}) AS messy
+        """
+    )
+
+
+def _get_unmatched(
+    con: duckdb.DuckDBPyConnection,
+    df_messy_clean: duckdb.DuckDBPyRelation,
+    results_table: str,
 ) -> duckdb.DuckDBPyRelation:
-    """Join matches back to original fuzzy table to produce final annotated output.
+    return con.sql(
+        f"""
+        SELECT messy.*
+        FROM ({df_messy_clean.sql_query()}) AS messy
+        INNER JOIN {results_table} AS results
+            ON results.ukam_address_id = messy.ukam_address_id
+        WHERE results.resolved_canonical_id IS NULL
+        """
+    )
 
-    Handles precedence if multiple stages matched the same ID (first stage wins).
-    """
-    # Prepare match results with renamed columns to avoid conflicts
-    matched_records = matches_union.select("""
-        ukam_address_id,
-        resolved_canonical_id,
-        canonical_ukam_address_id,
-        match_reason
-    """)
 
-    # Join matches back to original fuzzy addresses
-    fuzzy_with_matches = df_addresses_to_match.join(
-        matched_records,
+def _build_final_output(
+    con: duckdb.DuckDBPyConnection,
+    df_messy_clean: duckdb.DuckDBPyRelation,
+    df_canonical_clean: duckdb.DuckDBPyRelation,
+    results_table: str,
+) -> duckdb.DuckDBPyRelation:
+    results_columns = [
+        row[1] for row in con.execute(f"PRAGMA table_info('{results_table}')").fetchall()
+    ]
+
+    excluded = {
         "ukam_address_id",
-        how="left",
+        "unique_id",
+        "ukam_label",
+        "resolved_canonical_id",
+        "canonical_ukam_address_id",
+        "match_reason",
+    }
+    additional_columns = [column for column in results_columns if column not in excluded]
+    additional_projection = "".join(
+        f",\n            results.{column}" for column in additional_columns
     )
 
-    # Reorder our columns to enhance readability
-    return fuzzy_with_matches.select("""
-        unique_id,
-        resolved_canonical_id,
-        * EXCLUDE (unique_id, resolved_canonical_id, canonical_ukam_address_id, match_reason),
-        canonical_ukam_address_id,
-        match_reason
-    """)
-
-
-def _get_unmatched_subset(
-    con: duckdb.DuckDBPyConnection,
-    df_addresses_to_match: duckdb.DuckDBPyRelation,
-    matches_table_name: str,
-    has_matches: bool,
-) -> duckdb.DuckDBPyRelation:
-    """Filter to records not yet matched using anti-join against materialised table."""
-    if not has_matches:
-        return df_addresses_to_match
-    # Use SQL anti-join against the materialised matches table for efficiency
-    return con.sql(f"""
-        SELECT f.*
-        FROM ({df_addresses_to_match.sql_query()}) AS f
-        WHERE f.ukam_address_id NOT IN (
-            SELECT ukam_address_id FROM {matches_table_name}
+    canonical_projection = []
+    if "original_address_concat" in df_canonical_clean.columns:
+        canonical_projection.append(
+            "canonical.original_address_concat AS original_address_concat_canonical"
         )
-    """)
+    if "postcode" in df_canonical_clean.columns:
+        canonical_projection.append("canonical.postcode AS postcode_canonical")
 
+    canonical_projection_sql = ""
+    if canonical_projection:
+        canonical_projection_sql = ",\n            " + ",\n            ".join(
+            canonical_projection
+        )
 
-def _run_stage(
-    con: duckdb.DuckDBPyConnection,
-    stage_name: StageName,
-    df_fuzzy_unmatched: duckdb.DuckDBPyRelation,
-    df_addresses_to_search_within: duckdb.DuckDBPyRelation,
-    debug_options: Optional[DebugOptions] = None,
-    explain: bool = False,
-) -> Optional[duckdb.DuckDBPyRelation]:
-    """Execute a single matching stage and return results."""
-
-    config = _STAGE_REGISTRY[stage_name]
-
-    pipeline = create_sql_pipeline(
-        con,
-        [
-            InputBinding("fuzzy_addresses", df_fuzzy_unmatched),
-            InputBinding("canonical_addresses", df_addresses_to_search_within),
-        ],
-        config.to_stages(),
-        pipeline_name=f"Deterministic Exact Match Stage: {stage_name.value}",
-        pipeline_description=f"Deterministic exact matching stage: {stage_name.value}",
+    return con.sql(
+        f"""
+        SELECT
+            messy.unique_id,
+            results.resolved_canonical_id,
+            messy.* EXCLUDE(unique_id),
+            results.canonical_ukam_address_id,
+            results.match_reason
+            {additional_projection}
+            {canonical_projection_sql}
+        FROM ({df_messy_clean.sql_query()}) AS messy
+        INNER JOIN {results_table} AS results
+            ON results.ukam_address_id = messy.ukam_address_id
+        LEFT JOIN ({df_canonical_clean.sql_query()}) AS canonical
+            ON canonical.ukam_address_id = results.canonical_ukam_address_id
+        """
     )
-
-    if debug_options is not None or explain:
-        pipeline.show_plan()
-
-    return pipeline.run(options=debug_options, explain=explain)
 
 
 def run_deterministic_match_pass(
@@ -217,43 +235,11 @@ def run_deterministic_match_pass(
     enabled_stage_names: Optional[Iterable[StageInput]] = None,
     debug_options: Optional[DebugOptions] = None,
     explain: bool = False,
-) -> duckdb.DuckDBPyRelation:
-    """Run the deterministic matching pipeline with the configured exact stages.
-
-    Strategy:
-    1. For each stage, filter fuzzy to only unmatched IDs (anti-join on accumulated matches)
-    2. Run matching stage on filtered subset
-    3. Extract matched records (match_reason != 'UNMATCHED') with narrow projection
-    4. Accumulate all matched relations
-    5. Union all matches and join back to original fuzzy table
-
-    Parameters
-    ----------
-    con:
-        Active DuckDB connection.
-    df_addresses_to_match:
-        Relation holding the fuzzy records we want to resolve.
-    df_addresses_to_search_within:
-        Relation providing the canonical search space.
-    enabled_stage_names:
-        Optional iterable of stage names to enable. Pass as Iterable[StageName] (preferred)
-        or Iterable[str] for backward compatibility. exact_matches is always enabled.
-        Use available_deterministic_stages() to discover available stages that can be enabled.
-    debug_options:
-        Optional `DebugOptions` to forward to the pipeline runner.
-    explain:
-        If True, show the execution plan for each stage without running.
-
-    Returns
-    -------
-    duckdb.DuckDBPyRelation
-        Relation containing all fuzzy input rows annotated with any matches discovered
-        by the configured deterministic stages.
-    """
-
+) -> Optional[duckdb.DuckDBPyRelation]:
+    """Run deterministic matching stages sequentially and return unified results."""
     validate_tables(
         relations={
-            "fuzzy_addresses": df_addresses_to_match,
+            "messy_addresses": df_addresses_to_match,
             "canonical_addresses": df_addresses_to_search_within,
         },
         required=[
@@ -264,67 +250,80 @@ def run_deterministic_match_pass(
         ],
     )
 
-    # Build ordered stage list: always-on first, then optional user-specified
-    ordered: list[StageName] = list(_ALWAYS_ON)
-    for stage in _normalise_enabled_stages(enabled_stage_names):
-        if stage not in ordered:
-            ordered.append(stage)
+    ordered_stages: list[tuple[str, MatchingStage]] = [
+        (StageName.EXACT_MATCHES.value, _STAGE_REGISTRY[StageName.EXACT_MATCHES])
+    ]
+    ordered_stages.extend(_normalise_enabled_stages(enabled_stage_names))
 
-    # Use a materialised table for accumulated matches to avoid lazy relation chains
-    # which cause exponential slowdown as stages are added
     uid = _uid()
-    matches_table = f"__ukam_exact_matches_{uid}"
-    has_matches = False
+    results_table = f"__ukam_results_{uid}"
+    _create_results_table(
+        con=con,
+        df_messy_clean=df_addresses_to_match,
+        df_canonical_clean=df_addresses_to_search_within,
+        results_table=results_table,
+    )
 
-    for stage_index, stage_name in enumerate(ordered):
-        df_fuzzy_unmatched = _get_unmatched_subset(
-            con, df_addresses_to_match, matches_table, has_matches
-        )
+    for stage_name, stage in ordered_stages:
+        unmatched_count = con.execute(
+            f"SELECT COUNT(*) FROM {results_table} WHERE resolved_canonical_id IS NULL"
+        ).fetchone()[0]
 
-        # Early exit if nothing left to match
-        if df_fuzzy_unmatched.count("*").fetchone()[0] == 0:
+        if unmatched_count == 0:
+            logger.info(
+                "All records matched; skipping stage '%s' and remaining stages.",
+                stage_name,
+            )
             break
 
-        # Stages can return any number of columns, but MUST include:
-        # - ukam_address_id
-        # - canonical_ukam_address_id
-        # - resolved_canonical_id
-        # - match_reason
-        stage_result = _run_stage(
-            con,
+        logger.info(
+            "Running stage '%s' with %d unmatched records...",
             stage_name,
-            df_fuzzy_unmatched,
-            df_addresses_to_search_within,
-            debug_options,
-            explain,
-        ).select(
-            "ukam_address_id, canonical_ukam_address_id, resolved_canonical_id, match_reason"
+            unmatched_count,
+        )
+
+        df_unmatched = _get_unmatched(con, df_addresses_to_match, results_table)
+
+        stage.run(
+            con=con,
+            stage_name=stage_name,
+            results_table=results_table,
+            df_unmatched=df_unmatched,
+            df_canonical=df_addresses_to_search_within,
+            debug_options=debug_options,
+            explain=explain,
         )
 
         if explain:
             continue
 
-        # Materialise results into the accumulator table
-        if stage_index == 0:
-            con.execute(f"DROP TABLE IF EXISTS {matches_table}")
-            stage_result.create(matches_table)
-        else:
-            stage_result.insert_into(matches_table)
-        has_matches = True
+        remaining = con.execute(
+            f"SELECT COUNT(*) FROM {results_table} WHERE resolved_canonical_id IS NULL"
+        ).fetchone()[0]
+        matched_this_stage = unmatched_count - remaining
+        logger.info(
+            "Stage '%s' matched %d records (%d remaining).",
+            stage_name,
+            matched_this_stage,
+            remaining,
+        )
 
     if explain:
+        con.execute(f"DROP TABLE IF EXISTS {results_table}")
         return None
 
-    if not has_matches:
-        return df_addresses_to_match
+    result = _build_final_output(
+        con=con,
+        df_messy_clean=df_addresses_to_match,
+        df_canonical_clean=df_addresses_to_search_within,
+        results_table=results_table,
+    )
 
-    # Materialise the final result before cleaning up the temporary table
-    # This is necessary because DuckDB uses lazy evaluation
-    result = _finalise_results(df_addresses_to_match, con.table(matches_table))
-    result.to_table(f"__ukam_final_matches_{uid}")
-    final_result = con.table(f"__ukam_final_matches_{uid}")
+    final_table = f"__ukam_final_matches_{uid}"
+    con.execute(f"DROP TABLE IF EXISTS {final_table}")
+    result.to_table(final_table)
+    final_result = con.table(final_table)
 
-    # Clean up temporary tables
-    con.execute(f"DROP TABLE IF EXISTS {matches_table}")
+    con.execute(f"DROP TABLE IF EXISTS {results_table}")
 
     return final_result
