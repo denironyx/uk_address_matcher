@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
 
-from uk_address_matcher.linking_model.exact_matching import run_deterministic_match_pass
+from uk_address_matcher import run_matching, ExactMatchStage, UniqueTrigramStage
 
 if TYPE_CHECKING:
     import duckdb
@@ -20,15 +20,29 @@ def run_deterministic_pipeline(
     debug_options: Optional[DebugOptions] = None,
     explain: bool = False,
 ) -> duckdb.DuckDBPyRelation:
-    """Run deterministic matching pipeline using run_deterministic_match_pass."""
+    """Run deterministic matching pipeline using run_matching."""
+    from uk_address_matcher.linking_model.matching.stages import (
+        PeeledAddressStage,
+    )
+
+    _name_to_stage = {
+        "unique_trigram": UniqueTrigramStage(),
+        "peeled_address": PeeledAddressStage(),
+    }
+
+    stages = [ExactMatchStage()]
     if enabled_stage_names:
         print(f"Running with additional enabled stages: {enabled_stage_names}")
+        for name in enabled_stage_names:
+            stage_key = name.value if hasattr(name, "value") else name
+            if stage_key in _name_to_stage:
+                stages.append(_name_to_stage[stage_key])
 
-    relation = run_deterministic_match_pass(
-        con,
-        df_to_match,
-        df_canonical,
-        enabled_stage_names=enabled_stage_names,
+    relation = run_matching(
+        con=con,
+        df_messy_clean=df_to_match,
+        df_canonical_clean=df_canonical,
+        stages=stages,
         debug_options=debug_options,
         explain=explain,
     )

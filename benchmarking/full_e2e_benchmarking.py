@@ -14,12 +14,12 @@ from uk_address_matcher import (
     best_matches_with_distinguishability,
     get_linker,
     improve_predictions_using_distinguishing_tokens,
+    run_matching,
+    ExactMatchStage,
+    UniqueTrigramStage,
+    SplinkStage,
 )
-from uk_address_matcher.linking_model.exact_matching.matching_stages import StageName
 from uk_address_matcher.post_linkage.analyse_results import calculate_match_metrics
-from uk_address_matcher.post_linkage.match_candidate_selection import (
-    select_top_match_candidates,
-)
 from uk_address_matcher.sql_pipeline.runner import DebugOptions
 
 # ============================================================================
@@ -86,7 +86,7 @@ with time_phase(variant_timings, variant_label, "pipeline"):
         pipeline_name=f"Exact benchmark - {variant_label}",
         debug_options=DEBUG_OPTIONS,
         explain=EXPLAIN,
-        enabled_stage_names=[StageName.UNIQUE_TRIGRAM],
+        enabled_stage_names=["unique_trigram"],
     )
 
 pipeline_duration = variant_timings[variant_label]["pipeline"]
@@ -119,20 +119,22 @@ print(
 )
 
 with time_phase(variant_timings, variant_label, "candidate_selection"):
-    best_matches = best_matches_with_distinguishability(
-        df_predict=df_predict_improved,
-        df_addresses_to_match=deterministic_matches,
+    match_candidates = run_matching(
         con=con,
-    )
-    match_candidates = select_top_match_candidates(
-        con=con,
-        df_exact_matches=deterministic_matches,
-        df_splink_matches=best_matches,
-        df_canonical=df_os_clean,
-        match_weight_threshold=10,
-        distinguishability_threshold=5,
-        # include_unmatched=True,
-        include_unmatched=False,
+        df_messy_clean=df_messy_clean.select("* EXCLUDE (dataset_name)").execute(),
+        df_canonical_clean=df_os_clean,
+        stages=[
+            ExactMatchStage(),
+            UniqueTrigramStage(),
+            SplinkStage(
+                predict_threshold_match_weight=10,
+                improve_threshold_match_weight=-20,
+                final_match_weight_threshold=10,
+                final_distinguishability_threshold=5,
+                include_full_postcode_block=True,
+                retain_intermediate_calculation_columns=True,
+            ),
+        ],
     )
 
 candidate_duration = variant_timings[variant_label]["candidate_selection"]
