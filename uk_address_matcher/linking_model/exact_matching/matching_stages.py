@@ -194,19 +194,16 @@ def _build_final_output(
         f",\n            results.{column}" for column in additional_columns
     )
 
-    canonical_projection = []
-    if "original_address_concat" in df_canonical_clean.columns:
-        canonical_projection.append(
-            "canonical.original_address_concat AS original_address_concat_canonical"
-        )
-    if "postcode" in df_canonical_clean.columns:
-        canonical_projection.append("canonical.postcode AS postcode_canonical")
-
-    canonical_projection_sql = ""
-    if canonical_projection:
-        canonical_projection_sql = ",\n            " + ",\n            ".join(
-            canonical_projection
-        )
+    original_address_concat_projection = (
+        "canonical.original_address_concat AS original_address_concat_canonical"
+        if "original_address_concat" in df_canonical_clean.columns
+        else "NULL::VARCHAR AS original_address_concat_canonical"
+    )
+    postcode_projection = (
+        "canonical.postcode AS postcode_canonical"
+        if "postcode" in df_canonical_clean.columns
+        else "NULL::VARCHAR AS postcode_canonical"
+    )
 
     return con.sql(
         f"""
@@ -217,7 +214,9 @@ def _build_final_output(
             results.canonical_ukam_address_id,
             results.match_reason
             {additional_projection}
-            {canonical_projection_sql}
+            ,
+            {original_address_concat_projection},
+            {postcode_projection}
         FROM ({df_messy_clean.sql_query()}) AS messy
         INNER JOIN {results_table} AS results
             ON results.ukam_address_id = messy.ukam_address_id
