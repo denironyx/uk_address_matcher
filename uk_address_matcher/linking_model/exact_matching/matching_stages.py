@@ -194,17 +194,6 @@ def _build_final_output(
         f",\n            results.{column}" for column in additional_columns
     )
 
-    original_address_concat_projection = (
-        "canonical.original_address_concat AS original_address_concat_canonical"
-        if "original_address_concat" in df_canonical_clean.columns
-        else "NULL::VARCHAR AS original_address_concat_canonical"
-    )
-    postcode_projection = (
-        "canonical.postcode AS postcode_canonical"
-        if "postcode" in df_canonical_clean.columns
-        else "NULL::VARCHAR AS postcode_canonical"
-    )
-
     return con.sql(
         f"""
         SELECT
@@ -215,8 +204,8 @@ def _build_final_output(
             results.match_reason
             {additional_projection}
             ,
-            {original_address_concat_projection},
-            {postcode_projection}
+            canonical.original_address_concat AS original_address_concat_canonical,
+            canonical.postcode AS postcode_canonical
         FROM ({df_messy_clean.sql_query()}) AS messy
         INNER JOIN {results_table} AS results
             ON results.ukam_address_id = messy.ukam_address_id
