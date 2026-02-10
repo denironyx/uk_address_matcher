@@ -154,7 +154,7 @@ def _resolve_with_trigrams(
     SELECT
         postcode,
         trigram_hash,
-        COUNT(DISTINCT canonical_ukam_address_id) AS canonical_count
+        COUNT(DISTINCT canonical_unique_id) AS canonical_unique_id_count
     FROM {canonical_trigrams_exploded}
     GROUP BY
         postcode,
@@ -179,7 +179,7 @@ def _resolve_with_trigrams(
     JOIN {trigram_postcode_counts} AS tpc
         ON ct.postcode = tpc.postcode
     AND ct.trigram_hash = tpc.trigram_hash
-    WHERE tpc.canonical_count = 1
+    WHERE tpc.canonical_unique_id_count = 1
     """
 
     messy_trigrams_sql = f"""
@@ -234,13 +234,13 @@ def _resolve_with_trigrams(
             MIN(links.canonical_ukam_address_id) AS canonical_ukam_address_id,
             MIN(links.canonical_unique_id) AS resolved_canonical_id,
             links.postcode,
-            COUNT(*) AS trigram_hit_count,
+            COUNT(DISTINCT links.trigram_hash) AS trigram_hit_count,
             LIST(DISTINCT links.trigram_hash) AS supporting_trigram_hashes
             {supporting_text_projection}
         FROM {{trigram_candidate_links}} AS links
         GROUP BY links.messy_ukam_address_id, links.postcode
-        HAVING COUNT(DISTINCT links.canonical_ukam_address_id) = 1
-           AND COUNT(*) >= {min_unique_hits}
+        HAVING COUNT(DISTINCT links.canonical_unique_id) = 1
+           AND COUNT(DISTINCT links.trigram_hash) >= {min_unique_hits}
     """
 
     trigram_matches_sql = f"""
@@ -272,13 +272,13 @@ def _resolve_with_trigrams(
             SELECT
                 links.messy_ukam_address_id,
                 links.postcode,
-                COUNT(DISTINCT links.canonical_ukam_address_id) AS candidate_canonical_count,
+                COUNT(DISTINCT links.canonical_unique_id) AS candidate_canonical_count,
                 LIST(DISTINCT links.canonical_ukam_address_id) AS candidate_canonical_ukam_address_ids,
                 LIST(DISTINCT links.trigram_hash) AS conflicting_trigram_hashes
                 {conflicts_text_projection}
             FROM {{trigram_candidate_links}} AS links
             GROUP BY links.messy_ukam_address_id, links.postcode
-            HAVING COUNT(DISTINCT links.canonical_ukam_address_id) > 1
+            HAVING COUNT(DISTINCT links.canonical_unique_id) > 1
         """
         steps.append(CTEStep("trigram_conflicts", trigram_conflicts_sql))
 
