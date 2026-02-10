@@ -150,25 +150,36 @@ def _resolve_with_trigrams(
         WHERE tri IS NOT NULL
     """
 
+    trigram_postcode_counts_sql = """
+    SELECT
+        postcode,
+        trigram_hash,
+        COUNT(DISTINCT canonical_ukam_address_id) AS canonical_count
+    FROM {canonical_trigrams_exploded}
+    GROUP BY
+        postcode,
+        trigram_hash
+    """
+
     unique_trigram_index_sql = """
-        SELECT
-            postcode,
-            trigram_hash,
-            MIN(canonical_ukam_address_id) AS canonical_ukam_address_id,
-            MIN(canonical_unique_id) AS canonical_unique_id,
-            MIN(numeric_tokens) AS numeric_tokens,
-            MIN(has_flat_indicator) AS has_flat_indicator,
-            MIN(flat_positional) AS flat_positional,
-            MIN(flat_letter) AS flat_letter,
-            MIN(flat_number) AS flat_number,
-            MIN(has_business_unit) AS has_business_unit,
-            MIN(business_unit_type) AS business_unit_type,
-            MIN(business_unit_id) AS business_unit_id
-        FROM {canonical_trigrams_exploded}
-        GROUP BY
-            postcode,
-            trigram_hash
-        HAVING COUNT(DISTINCT canonical_ukam_address_id) = 1
+    SELECT
+        ct.postcode,
+        ct.trigram_hash,
+        ct.canonical_ukam_address_id,
+        ct.canonical_unique_id,
+        ct.numeric_tokens,
+        ct.has_flat_indicator,
+        ct.flat_positional,
+        ct.flat_letter,
+        ct.flat_number,
+        ct.has_business_unit,
+        ct.business_unit_type,
+        ct.business_unit_id
+    FROM {canonical_trigrams_exploded} AS ct
+    JOIN {trigram_postcode_counts} AS tpc
+        ON ct.postcode = tpc.postcode
+    AND ct.trigram_hash = tpc.trigram_hash
+    WHERE tpc.canonical_count = 1
     """
 
     messy_trigrams_sql = f"""
@@ -247,6 +258,7 @@ def _resolve_with_trigrams(
     steps: list[CTEStep] = [
         CTEStep("canonical_trigrams", canonical_trigrams_sql),
         CTEStep("canonical_trigrams_exploded", canonical_trigrams_exploded_sql),
+        CTEStep("trigram_postcode_counts", trigram_postcode_counts_sql),
         CTEStep("unique_trigram_index", unique_trigram_index_sql),
         CTEStep("messy_trigrams", messy_trigrams_sql),
         CTEStep("messy_trigrams_exploded", messy_trigrams_exploded_sql),
