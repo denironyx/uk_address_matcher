@@ -104,10 +104,10 @@ def analyse_mismatches(
     base_mismatches_sql = f"""
     WITH label_canonical AS (
         SELECT
+            ukam_address_id,
             unique_id,
             original_address_concat,
-            postcode,
-            ROW_NUMBER() OVER (PARTITION BY unique_id ORDER BY ukam_address_id) AS rn
+            postcode
         FROM ukam_canonical
     )
     SELECT
@@ -148,9 +148,8 @@ def analyse_mismatches(
     ) AS im
     LEFT JOIN ukam_canonical AS c
       ON im.canonical_ukam_address_id = c.ukam_address_id
-        LEFT JOIN label_canonical AS label_c
-            ON im.ukam_label = label_c.unique_id
-         AND label_c.rn = 1
+    LEFT JOIN label_canonical AS label_c
+      ON im.canonical_ukam_address_id = label_c.ukam_address_id
     LEFT JOIN ukam_messy AS messy
       ON im.ukam_address_id = messy.ukam_address_id
     """
