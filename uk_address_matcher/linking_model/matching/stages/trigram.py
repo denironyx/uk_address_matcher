@@ -89,7 +89,10 @@ def _resolve_with_trigrams(
 
     This stage generates trigrams (3-token sequences) from both messy and canonical
     addresses, then matches based on trigrams that uniquely identify a single
-    canonical address within the same postcode and numeric token group.
+    canonical address within the same postcode.
+
+    Numeric/unit tokens are only used as a verification step after a trigram has been
+    confirmed unique within the postcode.
     """
     trigram_value = MatchReason.UNIQUE_TRIGRAM.value
     enum_values = str(MatchReason.enum_values())
@@ -150,28 +153,20 @@ def _resolve_with_trigrams(
     unique_trigram_index_sql = """
         SELECT
             postcode,
-            numeric_tokens,
-            has_flat_indicator,
-            flat_positional,
-            flat_letter,
-            flat_number,
-            has_business_unit,
-            business_unit_type,
-            business_unit_id,
             trigram_hash,
             MIN(canonical_ukam_address_id) AS canonical_ukam_address_id,
-            MIN(canonical_unique_id) AS canonical_unique_id
+            MIN(canonical_unique_id) AS canonical_unique_id,
+            MIN(numeric_tokens) AS numeric_tokens,
+            MIN(has_flat_indicator) AS has_flat_indicator,
+            MIN(flat_positional) AS flat_positional,
+            MIN(flat_letter) AS flat_letter,
+            MIN(flat_number) AS flat_number,
+            MIN(has_business_unit) AS has_business_unit,
+            MIN(business_unit_type) AS business_unit_type,
+            MIN(business_unit_id) AS business_unit_id
         FROM {canonical_trigrams_exploded}
         GROUP BY
             postcode,
-            numeric_tokens,
-            has_flat_indicator,
-            flat_positional,
-            flat_letter,
-            flat_number,
-            has_business_unit,
-            business_unit_type,
-            business_unit_id,
             trigram_hash
         HAVING COUNT(DISTINCT canonical_ukam_address_id) = 1
     """
