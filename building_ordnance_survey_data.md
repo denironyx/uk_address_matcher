@@ -10,8 +10,12 @@ Supposing we have 100,000 messy addresses to match.  The steps and their respect
 |------|-------------------------------|----------------------|
 | 1. Install Python and Astral UV and the `uk_address_matcher` package 5 minutes | 5 minutes |
 | 2. Create a data package and corresponding API key in the [Ordnance Survey Data Hub](https://osdatahub.os.uk/data/downloads/data-packages) | 5 minutes | 5 minutes |
-| 3. Provide the API key and data package ID to the build script and run | 2 minutes | 10 minutes |
-| 4. Use `uk_address_matcher` to match the data | 1 minute | 10 minutes |
+| 3. Process Ordnance Survey data into a flatfile | 5 seconds* | 4 minutes** |
+| 4. Derives indexes and other features for address matching  | Not necessary, can be done on the fly | 4 mins 50 seconds |
+| 5. Use `uk_address_matcher` to match 100,000 records | 26 seconds |  |
+
+* Plus 15 seconds to download the data
+** Plus 18 minutes to download the data
 
 Timings data from processing on a Macbook Pro M4 Max.
 
@@ -35,8 +39,7 @@ Use this URL to identify the data package ID, which in the above example is `182
 
 `https://osdatahub.os.uk/api/dataPackages/{data_package_id}/{version_id}/download?fileName=add_gb_builtaddress.zip`
 
-
-Then obtain your API key from the [API Projects](https://osdatahub.os.uk/data/apis/projects) page in Data Hub.  Create a new project if one does not already exist.
+Then obtain your API key and API secret from the [API Projects](https://osdatahub.os.uk/data/apis/projects) page in Data Hub.  Create a new project if one does not already exist.
 
 ## Step 2: Install the required software
 
