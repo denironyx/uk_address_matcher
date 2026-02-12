@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Optional
 
@@ -8,7 +7,6 @@ from uk_address_matcher.linking_model.matching.stages.base_stage import Matching
 
 if TYPE_CHECKING:
     import duckdb
-
     from splink import SettingsCreator
 
     from uk_address_matcher.sql_pipeline.runner import DebugOptions
@@ -20,7 +18,7 @@ class SplinkStage(MatchingStage):
 
     Encapsulates the full Splink pipeline:
 
-    1. ``get_linker()`` — builds the Splink Linker
+    1. ``_get_linker()`` — builds the Splink Linker
     2. ``linker.inference.predict()`` — generates pairwise predictions
     3. ``improve_predictions_using_distinguishing_tokens()`` — refines scores
     4. ``best_matches_with_distinguishability()`` — picks the best candidate
@@ -64,7 +62,7 @@ class SplinkStage(MatchingStage):
         debug_options: Optional[DebugOptions] = None,
         explain: bool = False,
     ) -> Optional[duckdb.DuckDBPyRelation]:
-        from uk_address_matcher.linking_model.splink_model import get_linker
+        from uk_address_matcher.linking_model.splink_model import _get_linker
         from uk_address_matcher.post_linkage.analyse_results import (
             best_matches_with_distinguishability,
         )
@@ -81,7 +79,7 @@ class SplinkStage(MatchingStage):
             return None
 
         # Step 1: Build linker
-        linker = get_linker(
+        linker = _get_linker(
             df_addresses_to_match=df_unmatched,
             df_addresses_to_search_within=df_canonical,
             con=con,
