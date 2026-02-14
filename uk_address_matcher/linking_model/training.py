@@ -672,11 +672,6 @@ def get_token_rel_freq_arr_comparison(
     token_rel_freq_arr_comparison = {
         "output_column_name": "token_rel_freq_arr_hist",
         "comparison_levels": [
-            {
-                "sql_condition": '"token_rel_freq_arr_hist_l" IS NULL OR "token_rel_freq_arr_hist_r" IS NULL',
-                "label_for_charts": "Null",
-                "is_null_level": True,
-            },
             *middle_conditions,
             {
                 "sql_condition": "ELSE",
