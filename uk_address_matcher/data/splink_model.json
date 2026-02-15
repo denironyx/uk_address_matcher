@@ -75,10 +75,6 @@
             "sql_dialect": "duckdb"
         },
         {
-            "blocking_rule": "l.\"postcode\" = r.\"postcode\"",
-            "sql_dialect": "duckdb"
-        },
-        {
             "blocking_rule": "l.exploding_unique_ids = r.exploding_unique_ids",
             "sql_dialect": "duckdb",
             "arrays_to_explode": [
@@ -726,11 +722,15 @@
             "output_column_name": "postcode",
             "comparison_levels": [
                 {
-                    "sql_condition": "postcode_l IS NULL OR postcode_r IS NULL",
+                    "sql_condition": "postcode_l IS NULL AND postcode_r IS NULL",
                     "label_for_charts": "Null",
-                    "fix_m_probability": false,
-                    "fix_u_probability": false,
-                    "is_null_level": true,
+                    "is_null_level": true
+                },
+                {
+                    "sql_condition": "postcode_r IS NULL",
+                    "label_for_charts": "Postcode missing from messy table",
+                    "fix_m_probability": true,
+                    "fix_u_probability": true,
                     "m_probability": 1024,
                     "u_probability": 1
                 },
