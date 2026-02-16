@@ -202,10 +202,10 @@ def _get_linker(
     select_expr = ", ".join(cols_to_select)
 
     sql = f"""
-    select {select_expr}, '_m' as source_dataset
+    select {select_expr}, 'm_' as source_dataset
     from df_addresses_to_match
     UNION ALL
-    select {select_expr}, '_c' as source_dataset
+    select {select_expr}, 'c_' as source_dataset
     from df_addresses_to_search_within
 
     """
