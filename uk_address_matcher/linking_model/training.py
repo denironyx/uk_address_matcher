@@ -90,6 +90,7 @@ def get_flat_identity_comparison(
     WEIGHT_MATCH=6.57,
     WEIGHT_SAME_POSITIONAL=-2,
     WEIGHT_CROSS_TYPE=-2,
+    WEIGHT_FUZZY_EQUIVALENT=4.0,
     WEIGHT_BOTH_POSITIONAL_DIFFER=-8,
     WEIGHT_SAME_NUMBER_LETTER_ONESIDED=-2,
     WEIGHT_SAME_NUMBER_LETTERS_DIFFER=-8,
@@ -121,22 +122,25 @@ def get_flat_identity_comparison(
        letter/number (FLAT A, FLAT 1).  These naming conventions
        are interchangeable in practice (BASEMENT = FLAT 1,
        GROUND FLOOR = FLAT A), so we treat this as near-neutral.
-    6. **Both positional differ** — both sides have a positional
+     6. **Fuzzy equivalence** — letter/number mappings (A=1, B=2)
+         or positional groups (BASEMENT/LOWER GROUND/GROUND FLOOR,
+         TOP/UPPER FLOOR).  Soft boost only.
+     7. **Both positional differ** — both sides have a positional
        descriptor but they name different floors (e.g. TOP FLOOR vs
        FIRST FLOOR, LOWER GROUND vs BASEMENT).  This is more
        penalising than cross-type but less severe than a complete
        mismatch because informal labels like TOP FLOOR can refer to
        different canonical floors.
-    7. **Same number, letter one-sided** — both sides share the
+     8. **Same number, letter one-sided** — both sides share the
        same flat number but only one side has a flat letter (e.g.
        FLAT 2 vs FLAT 2A).  Messy data commonly drops the letter,
        so this deserves a mild penalty rather than the full ELSE.
-    8. **Same number, letters both differ** — both sides share the
+     9. **Same number, letters both differ** — both sides share the
        same flat number and both have a flat letter, but the letters
        differ (e.g. FLAT 2A vs FLAT 2B).  These are genuinely
        different flats in the same building so the penalty is
        heavier than one-sided but lighter than a full mismatch.
-    9. **ELSE** — flat identities differ and no partial match
+     10. **ELSE** — flat identities differ and no partial match
        applies (e.g. FLAT 1 vs FLAT 2); very heavy penalty.
     """
     # Same positional condition: both sides share the same positional
@@ -162,133 +166,6 @@ def get_flat_identity_comparison(
     both_positional_differ_sql = """flat_positional_l IS NOT NULL
     AND flat_positional_r IS NOT NULL
     AND flat_positional_l != flat_positional_r"""
-
-    # Same flat number, letter one-sided: both sides share the same flat
-    # number but only one has a flat letter.  E.g. FLAT 2 vs FLAT 2A.
-    # Messy data commonly drops the letter, so a mild penalty applies.
-    same_number_letter_onesided_sql = """flat_number_l IS NOT NULL
-    AND flat_number_l = flat_number_r
-    AND (
-        (flat_letter_l IS NULL AND flat_letter_r IS NOT NULL)
-        OR (flat_letter_l IS NOT NULL AND flat_letter_r IS NULL)
-    )"""
-
-    # Same flat number, letters both differ: both sides share the same
-    # flat number and both have letters, but the letters are different.
-    # E.g. FLAT 2A vs FLAT 2B.  By elimination: exact match, same
-    # positional, cross-type, both positional differ, and letter
-    # one-sided levels have all been evaluated already.
-    same_number_letters_differ_sql = """flat_number_l IS NOT NULL
-    AND flat_number_l = flat_number_r"""
-
-    flat_identity_comparison = {
-        "output_column_name": "flat_identity",
-        "comparison_levels": [
-            # Early exit: one side has flat info, other does not
-            {
-                "sql_condition": "has_flat_indicator_l != has_flat_indicator_r",
-                "label_for_charts": "One has flat indicator, other does not",
-                "m_probability": match_weight_to_bayes_factor(WEIGHT_ASYMMETRIC),
-                "u_probability": 1,
-                "fix_m_probability": toggle_m_probability_fix,
-                "fix_u_probability": toggle_u_probability_fix,
-            },
-            # Both null → neutral
-            {
-                "sql_condition": '"flat_identity_l" IS NULL AND "flat_identity_r" IS NULL',
-                "label_for_charts": "Both null (no flat info)",
-                "is_null_level": True,
-            },
-            # Exact match on composite identity
-            {
-                "sql_condition": "flat_identity_l = flat_identity_r",
-                "label_for_charts": "Exact match on flat identity",
-                "m_probability": match_weight_to_bayes_factor(WEIGHT_MATCH),
-                "u_probability": 1,
-                "fix_m_probability": toggle_m_probability_fix,
-                "fix_u_probability": toggle_u_probability_fix,
-            },
-            # Same positional: both sides name the same floor but the full
-            # identity differs (extra letter/number on one side).
-            # e.g. __BASEMENT vs _A_BASEMENT, __FIRST FLOOR vs 2__FIRST FLOOR
-            {
-                "sql_condition": same_positional_sql,
-                "label_for_charts": "Same positional, different letter/number",
-                "m_probability": match_weight_to_bayes_factor(WEIGHT_SAME_POSITIONAL),
-                "u_probability": 1,
-                "fix_m_probability": toggle_m_probability_fix,
-                "fix_u_probability": toggle_u_probability_fix,
-            },
-            # Cross-type: positional on one side, letter/number on the other.
-            # e.g. BASEMENT vs FLAT 1, FIRST FLOOR vs FLAT A.
-            # Different naming conventions but could be the same flat.
-            {
-                "sql_condition": cross_type_sql,
-                "label_for_charts": "Cross-type flat (positional vs letter/number)",
-                "m_probability": match_weight_to_bayes_factor(WEIGHT_CROSS_TYPE),
-                "u_probability": 1,
-                "fix_m_probability": toggle_m_probability_fix,
-                "fix_u_probability": toggle_u_probability_fix,
-            },
-            # Both sides have a positional descriptor but for different floors.
-            # e.g. TOP FLOOR vs FIRST FLOOR, LOWER GROUND vs BASEMENT.
-            # Penalising but less severe than a plain number/letter mismatch
-            # because informal descriptors like TOP FLOOR are ambiguous.
-            {
-                "sql_condition": both_positional_differ_sql,
-                "label_for_charts": "Both positional but different floors",
-                "m_probability": match_weight_to_bayes_factor(
-                    WEIGHT_BOTH_POSITIONAL_DIFFER
-                ),
-                "u_probability": 1,
-                "fix_m_probability": toggle_m_probability_fix,
-                "fix_u_probability": toggle_u_probability_fix,
-            },
-            # Same flat number, letter one-sided: one side has a letter,
-            # other does not.  e.g. FLAT 2 vs FLAT 2A (messy dropped letter).
-            {
-                "sql_condition": same_number_letter_onesided_sql,
-                "label_for_charts": "Same number, letter one-sided",
-                "m_probability": match_weight_to_bayes_factor(
-                    WEIGHT_SAME_NUMBER_LETTER_ONESIDED
-                ),
-                "u_probability": 1,
-                "fix_m_probability": toggle_m_probability_fix,
-                "fix_u_probability": toggle_u_probability_fix,
-            },
-            # Same flat number, letters both present but different.
-            # e.g. FLAT 2A vs FLAT 2B.  Genuinely different flats but
-            # same building number so less harsh than full mismatch.
-            {
-                "sql_condition": same_number_letters_differ_sql,
-                "label_for_charts": "Same number, letters both differ",
-                "m_probability": match_weight_to_bayes_factor(
-                    WEIGHT_SAME_NUMBER_LETTERS_DIFFER
-                ),
-                "u_probability": 1,
-                "fix_m_probability": toggle_m_probability_fix,
-                "fix_u_probability": toggle_u_probability_fix,
-            },
-            # Flat identities differ with no partial match → wrong flat
-            {
-                "sql_condition": "ELSE",
-                "label_for_charts": "Flat identity differs (same type)",
-                "m_probability": match_weight_to_bayes_factor(WEIGHT_MISMATCH),
-                "u_probability": 1,
-                "fix_m_probability": toggle_m_probability_fix,
-                "fix_u_probability": toggle_u_probability_fix,
-            },
-        ],
-        "comparison_description": "Combined flat identity comparison",
-    }
-    return flat_identity_comparison
-
-
-def get_flat_equivalence_comparison(
-    WEIGHT_EQUIVALENT=1.0,
-    WEIGHT_ELSE=0.0,
-):
-    """Provide a soft boost for flat labels that are commonly interchangeable."""
 
     letter_to_number_l = """
         CASE UPPER(flat_letter_l)
@@ -407,34 +284,133 @@ def get_flat_equivalence_comparison(
         )
     """
 
-    flat_equivalence_comparison = {
-        "output_column_name": "flat_equivalence",
+    # Same flat number, letter one-sided: both sides share the same flat
+    # number but only one has a flat letter.  E.g. FLAT 2 vs FLAT 2A.
+    # Messy data commonly drops the letter, so a mild penalty applies.
+    same_number_letter_onesided_sql = """flat_number_l IS NOT NULL
+    AND flat_number_l = flat_number_r
+    AND (
+        (flat_letter_l IS NULL AND flat_letter_r IS NOT NULL)
+        OR (flat_letter_l IS NOT NULL AND flat_letter_r IS NULL)
+    )"""
+
+    # Same flat number, letters both differ: both sides share the same
+    # flat number and both have letters, but the letters are different.
+    # E.g. FLAT 2A vs FLAT 2B.  By elimination: exact match, same
+    # positional, cross-type, both positional differ, and letter
+    # one-sided levels have all been evaluated already.
+    same_number_letters_differ_sql = """flat_number_l IS NOT NULL
+    AND flat_number_l = flat_number_r"""
+
+    flat_identity_comparison = {
+        "output_column_name": "flat_identity",
         "comparison_levels": [
+            # Early exit: one side has flat info, other does not
             {
-                "sql_condition": '"flat_identity_l" IS NULL OR "flat_identity_r" IS NULL',
-                "label_for_charts": "Flat identity missing",
+                "sql_condition": "has_flat_indicator_l != has_flat_indicator_r",
+                "label_for_charts": "One has flat indicator, other does not",
+                "m_probability": match_weight_to_bayes_factor(WEIGHT_ASYMMETRIC),
+                "u_probability": 1,
+                "fix_m_probability": toggle_m_probability_fix,
+                "fix_u_probability": toggle_u_probability_fix,
+            },
+            # Both null → neutral
+            {
+                "sql_condition": '"flat_identity_l" IS NULL AND "flat_identity_r" IS NULL',
+                "label_for_charts": "Both null (no flat info)",
                 "is_null_level": True,
             },
+            # Exact match on composite identity
             {
-                "sql_condition": flat_equivalence_sql,
-                "label_for_charts": "Fuzzy flat equivalence",
-                "m_probability": match_weight_to_bayes_factor(WEIGHT_EQUIVALENT),
+                "sql_condition": "flat_identity_l = flat_identity_r",
+                "label_for_charts": "Exact match on flat identity",
+                "m_probability": match_weight_to_bayes_factor(WEIGHT_MATCH),
+                "u_probability": 1,
+                "fix_m_probability": toggle_m_probability_fix,
+                "fix_u_probability": toggle_u_probability_fix,
+            },
+            # Same positional: both sides name the same floor but the full
+            # identity differs (extra letter/number on one side).
+            # e.g. __BASEMENT vs _A_BASEMENT, __FIRST FLOOR vs 2__FIRST FLOOR
+            {
+                "sql_condition": same_positional_sql,
+                "label_for_charts": "Same positional, different letter/number",
+                "m_probability": match_weight_to_bayes_factor(WEIGHT_SAME_POSITIONAL),
+                "u_probability": 1,
+                "fix_m_probability": toggle_m_probability_fix,
+                "fix_u_probability": toggle_u_probability_fix,
+            },
+            # Cross-type: positional on one side, letter/number on the other.
+            # e.g. BASEMENT vs FLAT 1, FIRST FLOOR vs FLAT A.
+            # Different naming conventions but could be the same flat.
+            {
+                "sql_condition": cross_type_sql,
+                "label_for_charts": "Cross-type flat (positional vs letter/number)",
+                "m_probability": match_weight_to_bayes_factor(WEIGHT_CROSS_TYPE),
                 "u_probability": 1,
                 "fix_m_probability": toggle_m_probability_fix,
                 "fix_u_probability": toggle_u_probability_fix,
             },
             {
+                "sql_condition": flat_equivalence_sql,
+                "label_for_charts": "Fuzzy flat equivalence",
+                "m_probability": match_weight_to_bayes_factor(WEIGHT_FUZZY_EQUIVALENT),
+                "u_probability": 1,
+                "fix_m_probability": toggle_m_probability_fix,
+                "fix_u_probability": toggle_u_probability_fix,
+            },
+            # Both sides have a positional descriptor but for different floors.
+            # e.g. TOP FLOOR vs FIRST FLOOR, LOWER GROUND vs BASEMENT.
+            # Penalising but less severe than a plain number/letter mismatch
+            # because informal descriptors like TOP FLOOR are ambiguous.
+            {
+                "sql_condition": both_positional_differ_sql,
+                "label_for_charts": "Both positional but different floors",
+                "m_probability": match_weight_to_bayes_factor(
+                    WEIGHT_BOTH_POSITIONAL_DIFFER
+                ),
+                "u_probability": 1,
+                "fix_m_probability": toggle_m_probability_fix,
+                "fix_u_probability": toggle_u_probability_fix,
+            },
+            # Same flat number, letter one-sided: one side has a letter,
+            # other does not.  e.g. FLAT 2 vs FLAT 2A (messy dropped letter).
+            {
+                "sql_condition": same_number_letter_onesided_sql,
+                "label_for_charts": "Same number, letter one-sided",
+                "m_probability": match_weight_to_bayes_factor(
+                    WEIGHT_SAME_NUMBER_LETTER_ONESIDED
+                ),
+                "u_probability": 1,
+                "fix_m_probability": toggle_m_probability_fix,
+                "fix_u_probability": toggle_u_probability_fix,
+            },
+            # Same flat number, letters both present but different.
+            # e.g. FLAT 2A vs FLAT 2B.  Genuinely different flats but
+            # same building number so less harsh than full mismatch.
+            {
+                "sql_condition": same_number_letters_differ_sql,
+                "label_for_charts": "Same number, letters both differ",
+                "m_probability": match_weight_to_bayes_factor(
+                    WEIGHT_SAME_NUMBER_LETTERS_DIFFER
+                ),
+                "u_probability": 1,
+                "fix_m_probability": toggle_m_probability_fix,
+                "fix_u_probability": toggle_u_probability_fix,
+            },
+            # Flat identities differ with no partial match → wrong flat
+            {
                 "sql_condition": "ELSE",
-                "label_for_charts": "All other comparisons",
-                "m_probability": match_weight_to_bayes_factor(WEIGHT_ELSE),
+                "label_for_charts": "Flat identity differs (same type)",
+                "m_probability": match_weight_to_bayes_factor(WEIGHT_MISMATCH),
                 "u_probability": 1,
                 "fix_m_probability": toggle_m_probability_fix,
                 "fix_u_probability": toggle_u_probability_fix,
             },
         ],
-        "comparison_description": "Flat equivalence comparison",
+        "comparison_description": "Combined flat identity comparison",
     }
-    return flat_equivalence_comparison
+    return flat_identity_comparison
 
 
 def get_first_n_tokens_comparison(
@@ -963,7 +939,6 @@ def get_settings_for_training(
         clean_full_address_comparison,
         get_address_without_numbers_comparison(**address_without_numbers_weights),
         get_flat_identity_comparison(**flat_identity_weights),
-        get_flat_equivalence_comparison(),
         get_num_1_comparison(**num_1_weights),
         get_num_2_comparison(**num_2_weights),
         num_3_comparison,
