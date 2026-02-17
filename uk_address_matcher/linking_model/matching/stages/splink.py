@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from uk_address_matcher.linking_model.matching.stages.base_stage import MatchingStage
 
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from uk_address_matcher.sql_pipeline.runner import DebugOptions
 
 
-@dataclass(frozen=True)
+@dataclass
 class SplinkStage(MatchingStage):
     """Splink probabilistic matching stage.
 
@@ -53,6 +53,9 @@ class SplinkStage(MatchingStage):
     # Whether to retain intermediate calculation columns (for debugging)
     retain_intermediate_calculation_columns: bool = False
 
+    # Populated after find_matches runs — used by MatchResult for inspection
+    linker: Any = field(default=None, init=False, repr=False)
+
     def find_matches(
         self,
         con: duckdb.DuckDBPyConnection,
@@ -91,6 +94,8 @@ class SplinkStage(MatchingStage):
             ),
             settings=self.settings,
         )
+
+        self.linker = linker
 
         # Step 2: Predict
         df_predict = linker.inference.predict(

@@ -169,8 +169,8 @@ def _run_matching(
         ],
     )
 
-    uid = _uid()
-    results_table = f"__ukam_results_{uid}"
+    run_id = _uid()
+    results_table = f"__ukam_results_{run_id}"
     _create_results_table(
         con=con,
         df_messy_clean=df_messy_clean,
@@ -235,7 +235,7 @@ def _run_matching(
         results_table=results_table,
     )
 
-    final_table = f"__ukam_final_matches_{uid}"
+    final_table = f"__ukam_final_matches_{run_id}"
     con.execute(f"DROP TABLE IF EXISTS {final_table}")
     result.to_table(final_table)
     final_result = con.table(final_table)
