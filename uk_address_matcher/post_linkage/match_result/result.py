@@ -20,8 +20,8 @@ class MatchResult:
     Access the underlying DuckDB relation via `.matches`.
 
     Key methods:
-        matches           - the underlying DuckDB relation containing match results.
         match_metrics      - match-reason breakdown with counts and percentages.
+        match_reasons      - distinct match-reason values.
         splink_predictions - raw Splink predictions table (requires `SplinkStage`).
     """
 
@@ -38,9 +38,10 @@ class MatchResult:
             )
 
     def __repr__(self) -> str:
+        class_name = self.__class__.__name__
         return (
-            "MatchResult object.\n"
-            "Use result.matches to retrieve your raw results as a DuckDB table."
+            f"{class_name} object.\n"
+            "Use .matches to retrieve your raw results as a DuckDB table."
         )
 
     @property
