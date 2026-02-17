@@ -185,3 +185,86 @@ def test_flat_one_sided_null_penalty():
             )
 
     assert not failures, "One-sided NULL flat failures:\n" + "\n".join(failures)
+
+
+EQUIVALENCE_TEST_CASES = [
+    (
+        "m_flat_letter",
+        "FLAT B 10 KINGS ROAD LONDON",
+        "SW3 4ND",
+        "c_flat_number_equiv",
+        "c_flat_number_mismatch",
+    ),
+    (
+        "m_basement",
+        "BASEMENT FLAT 20 HIGH STREET LONDON",
+        "E1 6AA",
+        "c_lower_ground_equiv",
+        "c_first_floor_mismatch",
+    ),
+]
+
+EQUIVALENCE_CANONICAL_ADDRESSES = [
+    ("c_flat_number_equiv", "FLAT 2 10 KINGS ROAD LONDON", "SW3 4ND"),
+    ("c_flat_number_mismatch", "FLAT D 10 KINGS ROAD LONDON", "SW3 4ND"),
+    ("c_lower_ground_equiv", "LOWER GROUND FLAT 20 HIGH STREET LONDON", "E1 6AA"),
+    ("c_first_floor_mismatch", "FIRST FLOOR FLAT 20 HIGH STREET LONDON", "E1 6AA"),
+]
+
+
+def test_flat_equivalence_soft_boost():
+    """Fuzzy flat equivalence should score higher than clear mismatches."""
+    con = duckdb.connect()
+
+    messy_values = ", ".join(
+        f"('{uid}'::VARCHAR, '{addr}'::VARCHAR, '{pc}'::VARCHAR)"
+        for uid, addr, pc, _, _ in EQUIVALENCE_TEST_CASES
+    )
+    messy_rel = con.sql(f"""
+        SELECT * FROM (VALUES {messy_values})
+        AS t(unique_id, address_concat, postcode)
+    """)
+
+    canon_values = ", ".join(
+        f"('{uid}'::VARCHAR, '{addr}'::VARCHAR, '{pc}'::VARCHAR)"
+        for uid, addr, pc in EQUIVALENCE_CANONICAL_ADDRESSES
+    )
+    canon_rel = con.sql(f"""
+        SELECT * FROM (VALUES {canon_values})
+        AS t(unique_id, address_concat, postcode)
+    """)
+
+    messy_cleaned = prepare_data_for_matching(messy_rel, con=con)
+    canon_cleaned = prepare_data_for_matching(canon_rel, con=con)
+
+    linker = _get_linker(messy_cleaned, canon_cleaned, con=con)
+    predictions = linker.inference.predict(threshold_match_probability=0.00001)
+    results_df = predictions.as_pandas_dataframe()
+
+    match_weights = {}
+    for _, row in results_df.iterrows():
+        key = (row["unique_id_l"], row["unique_id_r"])
+        match_weights[key] = row["match_weight"]
+        match_weights[(row["unique_id_r"], row["unique_id_l"])] = row["match_weight"]
+
+    failures = []
+    for messy_id, _, _, equiv_id, mismatch_id in EQUIVALENCE_TEST_CASES:
+        equiv_key = (messy_id, equiv_id)
+        mismatch_key = (messy_id, mismatch_id)
+        equiv_weight = match_weights.get(equiv_key)
+        mismatch_weight = match_weights.get(mismatch_key)
+
+        if equiv_weight is None:
+            failures.append(f"{messy_id} -> {equiv_id}: no prediction found")
+            continue
+        if mismatch_weight is None:
+            failures.append(f"{messy_id} -> {mismatch_id}: no prediction found")
+            continue
+
+        if equiv_weight <= mismatch_weight:
+            failures.append(
+                f"{messy_id}: MW equiv={equiv_weight:.2f} <= "
+                f"mismatch={mismatch_weight:.2f}"
+            )
+
+    assert not failures, "Flat equivalence boost failures:\n" + "\n".join(failures)

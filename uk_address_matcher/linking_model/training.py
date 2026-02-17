@@ -284,6 +284,159 @@ def get_flat_identity_comparison(
     return flat_identity_comparison
 
 
+def get_flat_equivalence_comparison(
+    WEIGHT_EQUIVALENT=1.0,
+    WEIGHT_ELSE=0.0,
+):
+    """Provide a soft boost for flat labels that are commonly interchangeable."""
+
+    letter_to_number_l = """
+        CASE UPPER(flat_letter_l)
+            WHEN 'A' THEN 1
+            WHEN 'B' THEN 2
+            WHEN 'C' THEN 3
+            WHEN 'D' THEN 4
+            WHEN 'E' THEN 5
+            WHEN 'F' THEN 6
+            WHEN 'G' THEN 7
+            WHEN 'H' THEN 8
+            WHEN 'I' THEN 9
+            WHEN 'J' THEN 10
+            WHEN 'K' THEN 11
+            WHEN 'L' THEN 12
+            WHEN 'M' THEN 13
+            WHEN 'N' THEN 14
+            WHEN 'O' THEN 15
+            WHEN 'P' THEN 16
+            WHEN 'Q' THEN 17
+            WHEN 'R' THEN 18
+            WHEN 'S' THEN 19
+            WHEN 'T' THEN 20
+            WHEN 'U' THEN 21
+            WHEN 'V' THEN 22
+            WHEN 'W' THEN 23
+            WHEN 'X' THEN 24
+            WHEN 'Y' THEN 25
+            WHEN 'Z' THEN 26
+            ELSE NULL
+        END
+    """
+
+    letter_to_number_r = """
+        CASE UPPER(flat_letter_r)
+            WHEN 'A' THEN 1
+            WHEN 'B' THEN 2
+            WHEN 'C' THEN 3
+            WHEN 'D' THEN 4
+            WHEN 'E' THEN 5
+            WHEN 'F' THEN 6
+            WHEN 'G' THEN 7
+            WHEN 'H' THEN 8
+            WHEN 'I' THEN 9
+            WHEN 'J' THEN 10
+            WHEN 'K' THEN 11
+            WHEN 'L' THEN 12
+            WHEN 'M' THEN 13
+            WHEN 'N' THEN 14
+            WHEN 'O' THEN 15
+            WHEN 'P' THEN 16
+            WHEN 'Q' THEN 17
+            WHEN 'R' THEN 18
+            WHEN 'S' THEN 19
+            WHEN 'T' THEN 20
+            WHEN 'U' THEN 21
+            WHEN 'V' THEN 22
+            WHEN 'W' THEN 23
+            WHEN 'X' THEN 24
+            WHEN 'Y' THEN 25
+            WHEN 'Z' THEN 26
+            ELSE NULL
+        END
+    """
+
+    positional_group_l = """
+        CASE
+            WHEN flat_positional_l IN ('BASEMENT', 'LOWER GROUND', 'GROUND FLOOR')
+                THEN 'LOWER_GROUND_GROUP'
+            WHEN flat_positional_l IN ('TOP FLOOR', 'UPPER FLOOR')
+                THEN 'TOP_UPPER_GROUP'
+            ELSE flat_positional_l
+        END
+    """
+
+    positional_group_r = """
+        CASE
+            WHEN flat_positional_r IN ('BASEMENT', 'LOWER GROUND', 'GROUND FLOOR')
+                THEN 'LOWER_GROUND_GROUP'
+            WHEN flat_positional_r IN ('TOP FLOOR', 'UPPER FLOOR')
+                THEN 'TOP_UPPER_GROUP'
+            ELSE flat_positional_r
+        END
+    """
+
+    positional_equivalence_sql = f"""
+        flat_positional_l IS NOT NULL
+        AND flat_positional_r IS NOT NULL
+        AND flat_positional_l != flat_positional_r
+        AND {positional_group_l} = {positional_group_r}
+    """
+
+    letter_number_equivalence_sql = f"""
+        (
+            {letter_to_number_l} IS NOT NULL
+            AND TRY_CAST(flat_number_r AS INTEGER) IS NOT NULL
+            AND {letter_to_number_l} = TRY_CAST(flat_number_r AS INTEGER)
+        )
+        OR
+        (
+            {letter_to_number_r} IS NOT NULL
+            AND TRY_CAST(flat_number_l AS INTEGER) IS NOT NULL
+            AND {letter_to_number_r} = TRY_CAST(flat_number_l AS INTEGER)
+        )
+    """
+
+    flat_equivalence_sql = f"""
+        has_flat_indicator_l = TRUE
+        AND has_flat_indicator_r = TRUE
+        AND flat_identity_l IS NOT NULL
+        AND flat_identity_r IS NOT NULL
+        AND flat_identity_l != flat_identity_r
+        AND (
+            {letter_number_equivalence_sql}
+            OR ({positional_equivalence_sql})
+        )
+    """
+
+    flat_equivalence_comparison = {
+        "output_column_name": "flat_equivalence",
+        "comparison_levels": [
+            {
+                "sql_condition": '"flat_identity_l" IS NULL OR "flat_identity_r" IS NULL',
+                "label_for_charts": "Flat identity missing",
+                "is_null_level": True,
+            },
+            {
+                "sql_condition": flat_equivalence_sql,
+                "label_for_charts": "Fuzzy flat equivalence",
+                "m_probability": match_weight_to_bayes_factor(WEIGHT_EQUIVALENT),
+                "u_probability": 1,
+                "fix_m_probability": toggle_m_probability_fix,
+                "fix_u_probability": toggle_u_probability_fix,
+            },
+            {
+                "sql_condition": "ELSE",
+                "label_for_charts": "All other comparisons",
+                "m_probability": match_weight_to_bayes_factor(WEIGHT_ELSE),
+                "u_probability": 1,
+                "fix_m_probability": toggle_m_probability_fix,
+                "fix_u_probability": toggle_u_probability_fix,
+            },
+        ],
+        "comparison_description": "Flat equivalence comparison",
+    }
+    return flat_equivalence_comparison
+
+
 def get_first_n_tokens_comparison(
     WEIGHT_1=1,
     WEIGHT_2=0.5,
@@ -810,6 +963,7 @@ def get_settings_for_training(
         clean_full_address_comparison,
         get_address_without_numbers_comparison(**address_without_numbers_weights),
         get_flat_identity_comparison(**flat_identity_weights),
+        get_flat_equivalence_comparison(),
         get_num_1_comparison(**num_1_weights),
         get_num_2_comparison(**num_2_weights),
         num_3_comparison,
