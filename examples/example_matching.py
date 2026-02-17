@@ -1,11 +1,11 @@
 import os
 
 import duckdb
-from IPython.display import display
 
 from uk_address_matcher import (
     AddressMatcher,
     ExactMatchStage,
+    PeeledAddressStage,
     SplinkStage,
 )
 
@@ -68,6 +68,7 @@ matcher = AddressMatcher(
     con=con,
     stages=[
         ExactMatchStage(),
+        PeeledAddressStage(),
         SplinkStage(
             predict_threshold_match_weight=-20,
             final_match_weight_threshold=12,
