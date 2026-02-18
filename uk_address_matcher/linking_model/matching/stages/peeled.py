@@ -302,7 +302,8 @@ def _tokenise_sql(source_placeholder: str) -> str:
         SELECT
             *,
             string_split(clean_full_address, ' ') AS __tokens,
-            CAST([] AS VARCHAR[]) AS __peeled
+            CAST([] AS VARCHAR[]) AS __peeled,
+            TRUE AS __can_still_peel
         FROM {{{source_placeholder}}}
     """
 
@@ -313,11 +314,13 @@ def _make_peel_iteration_sql(prev_cte: str) -> str:
             SELECT
                 *,
                 len(__tokens) AS __n,
-                CASE WHEN len(__tokens) >= 1 THEN __tokens[len(__tokens)] ELSE NULL END AS end1,
-                CASE WHEN len(__tokens) >= 2
+                 CASE WHEN __can_still_peel AND len(__tokens) >= 1
+                     THEN __tokens[len(__tokens)]
+                     ELSE NULL END AS end1,
+                 CASE WHEN __can_still_peel AND len(__tokens) >= 2
                      THEN array_to_string(list_slice(__tokens, len(__tokens) - 1, len(__tokens)), ' ')
                      ELSE NULL END AS end2,
-                CASE WHEN len(__tokens) >= 3
+                 CASE WHEN __can_still_peel AND len(__tokens) >= 3
                      THEN array_to_string(list_slice(__tokens, len(__tokens) - 2, len(__tokens)), ' ')
                      ELSE NULL END AS end3
             FROM {{{prev_cte}}}
@@ -329,12 +332,26 @@ def _make_peel_iteration_sql(prev_cte: str) -> str:
                 l2.pattern AS match2,
                 l1.pattern AS match1
             FROM __with_ends e
-            LEFT JOIN {{uk_end_tokens_lookup}} l3 ON l3.token_count = 3 AND l3.lookup_key = e.end3
-            LEFT JOIN {{uk_end_tokens_lookup}} l2 ON l2.token_count = 2 AND l2.lookup_key = e.end2
-            LEFT JOIN {{uk_end_tokens_lookup}} l1 ON l1.token_count = 1 AND l1.lookup_key = e.end1
+            LEFT JOIN {{uk_end_tokens_lookup}} l3
+                ON e.__can_still_peel AND l3.token_count = 3 AND l3.lookup_key = e.end3
+            LEFT JOIN {{uk_end_tokens_lookup}} l2
+                ON e.__can_still_peel AND l2.token_count = 2 AND l2.lookup_key = e.end2
+            LEFT JOIN {{uk_end_tokens_lookup}} l1
+                ON e.__can_still_peel AND l1.token_count = 1 AND l1.lookup_key = e.end1
         )
         SELECT
-            * EXCLUDE (__n, end1, end2, end3, match1, match2, match3, __tokens, __peeled),
+            * EXCLUDE (
+                __n,
+                end1,
+                end2,
+                end3,
+                match1,
+                match2,
+                match3,
+                __tokens,
+                __peeled,
+                __can_still_peel
+            ),
             CASE
                 WHEN match3 IS NOT NULL THEN list_slice(__tokens, 1, __n - 3)
                 WHEN match2 IS NOT NULL THEN list_slice(__tokens, 1, __n - 2)
@@ -346,7 +363,13 @@ def _make_peel_iteration_sql(prev_cte: str) -> str:
                 WHEN match2 IS NOT NULL THEN list_prepend(match2, __peeled)
                 WHEN match1 IS NOT NULL THEN list_prepend(match1, __peeled)
                 ELSE __peeled
-            END AS __peeled
+            END AS __peeled,
+            CASE
+                WHEN match3 IS NOT NULL THEN __n > 3
+                WHEN match2 IS NOT NULL THEN __n > 2
+                WHEN match1 IS NOT NULL THEN __n > 1
+                ELSE FALSE
+            END AS __can_still_peel
         FROM __matched
     """
 
@@ -354,7 +377,7 @@ def _make_peel_iteration_sql(prev_cte: str) -> str:
 def _final_peel_sql(prev_cte: str) -> str:
     return f"""
         SELECT
-            * EXCLUDE (__tokens, __peeled),
+            * EXCLUDE (__tokens, __peeled, __can_still_peel),
             __peeled AS peeled_tokens_list
         FROM {{{prev_cte}}}
     """
