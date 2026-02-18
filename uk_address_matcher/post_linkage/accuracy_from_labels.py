@@ -1,8 +1,15 @@
 import logging
 
 from duckdb import DuckDBPyConnection, DuckDBPyRelation
-from IPython.display import display
 from splink import Linker
+
+try:
+    from IPython.display import display
+except ImportError:  # pragma: no cover - optional notebook dependency
+
+    def display(*_args, **_kwargs):
+        return None
+
 
 logger = logging.getLogger("uk_address_matcher")
 
