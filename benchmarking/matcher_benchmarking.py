@@ -111,7 +111,7 @@ with time_phase(variant_timings, variant_label, "pipeline"):
     )
 
     match_result = matcher.match()
-    match_candidates = match_result.relation
+    match_candidates = match_result.matches
 
 pipeline_duration = variant_timings[variant_label]["pipeline"]
 print(f"⏱  Pipeline completed in {pipeline_duration:.2f} seconds.\n")
