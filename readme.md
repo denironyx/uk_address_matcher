@@ -75,6 +75,13 @@ We provide a recommendation for automated build scripts for how to build such a 
 
 ### Basic Matching
 
+> [!NOTE]
+> Two runnable examples with live sample data are included for experimentation:
+> - [`examples/example_matching.py`](./examples/example_matching.py): End-to-end matching example, including loading data, running the matcher, and previewing results.
+> - [`examples/example_prepare_canonical.py`](./examples/example_prepare_canonical.py): Example of preparing a canonical dataset for repeated use, demonstrating how to persist prepared data to disk and load it for matching.
+>
+> Both use parquet files in [`example_data/`](./example_data/) so you can run and adapt them immediately. You will need to download the example data from the releases page to run them, or you can adapt the code to use your own data.
+
 ```python
 import duckdb
 
