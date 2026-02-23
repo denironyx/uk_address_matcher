@@ -36,6 +36,22 @@ from uk_address_matcher.prepare_canonical import load_prepared_canonical_data
 if TYPE_CHECKING:
     import duckdb
 
+
+def _materialise_relation(
+    con: duckdb.DuckDBPyConnection,
+    relation: duckdb.DuckDBPyRelation,
+    table_name: str,
+) -> duckdb.DuckDBPyRelation:
+    con.execute(
+        f"""
+        CREATE OR REPLACE TEMP TABLE {table_name} AS
+        SELECT *
+        FROM ({relation.sql_query()}) AS src
+        """
+    )
+    return con.table(table_name)
+
+
 # Register available datasets
 register_dataset("lambeth_council", LAMBETH_COUNCIL_INFO, get_lambeth_council_data)
 register_dataset("hackney_council", HACKNEY_COUNCIL_INFO, get_hackney_council_data)
@@ -124,9 +140,21 @@ def load_benchmark_data(
             )
 
         prepared = load_prepared_canonical_data(canonical_prepared_folder, con)
-        df_canonical = prepared.addresses
-        tf_table = prepared.term_frequencies
-        inverted_index = prepared.inverted_index
+        df_canonical = _materialise_relation(
+            con,
+            prepared.addresses,
+            "df_canonical_prepared",
+        )
+        tf_table = _materialise_relation(
+            con,
+            prepared.term_frequencies,
+            "df_term_frequencies_prepared",
+        )
+        inverted_index = _materialise_relation(
+            con,
+            prepared.inverted_index,
+            "df_inverted_index_prepared",
+        )
     else:
         if canonical_addresses is not None:
             df_canonical_loaded = canonical_addresses
@@ -137,6 +165,12 @@ def load_benchmark_data(
                 else CanonicalConfig.default(use_raw=clean_canonical_on_the_fly)
             )
             df_canonical_loaded = load_canonical_data(con, canonical_config)
+
+        df_canonical_loaded = _materialise_relation(
+            con,
+            df_canonical_loaded,
+            "df_canonical_loaded",
+        )
 
         # Apply dataset-specific canonical filter if defined
         canonical_filter_sql = _DATASET_REGISTRY[dataset_name].info.canonical_filter_sql
@@ -150,6 +184,11 @@ def load_benchmark_data(
                     canonical=df_canonical_loaded.sql_query(),
                     filter_sql=canonical_filter_sql.strip(),
                 )
+            )
+            df_canonical_loaded = _materialise_relation(
+                con,
+                df_canonical_loaded,
+                "df_canonical_filtered",
             )
 
         if filter_canonical_by_messy_postcodes:
@@ -168,6 +207,11 @@ def load_benchmark_data(
                     messy=df_messy_raw.sql_query(),
                 )
             )
+            df_canonical_loaded = _materialise_relation(
+                con,
+                df_canonical_loaded,
+                "df_canonical_postcode_filtered",
+            )
 
         if (
             "address_concat" not in df_canonical_loaded.columns
@@ -183,6 +227,11 @@ def load_benchmark_data(
                     canonical=df_canonical_loaded.sql_query(),
                 )
             )
+            df_canonical_loaded = _materialise_relation(
+                con,
+                df_canonical_loaded,
+                "df_canonical_with_address_concat",
+            )
 
         # Step 1: Clean or use pre-cleaned canonical data
         if clean_canonical_on_the_fly:
@@ -192,6 +241,11 @@ def load_benchmark_data(
             if derive_term_frequencies_on_the_fly:
                 print("Deriving term frequencies from canonical data...")
                 tf_table = derive_term_frequencies_table(df_canonical_loaded, con=con)
+                tf_table = _materialise_relation(
+                    con,
+                    tf_table,
+                    "df_term_frequencies_derived",
+                )
 
             # Clean canonical data (no inverted index, so
             # exploding_unique_ids will use unique_id)
@@ -200,6 +254,11 @@ def load_benchmark_data(
                 df_canonical_loaded,
                 con=con,
                 term_frequency_lookup=tf_table,
+            )
+            df_canonical = _materialise_relation(
+                con,
+                df_canonical,
+                "df_canonical_cleaned",
             )
         else:
             if (
@@ -214,11 +273,21 @@ def load_benchmark_data(
                     con=con,
                     term_frequency_lookup=tf_table,
                 )
+                df_canonical = _materialise_relation(
+                    con,
+                    df_canonical,
+                    "df_canonical_prepared_for_matching",
+                )
 
     # Step 2: Derive inverted index from cleaned canonical data when needed
     if inverted_index is None:
         print("Deriving inverted index from canonical data...")
         inverted_index = derive_inverted_index(df_canonical, con=con)
+        inverted_index = _materialise_relation(
+            con,
+            inverted_index,
+            "df_inverted_index_derived",
+        )
 
     # Step 3: Clean messy data using the inverted index
     print("Preparing messy data for matching...")
@@ -231,6 +300,12 @@ def load_benchmark_data(
         )
     else:
         df_messy = clean_data_pre_term_frequencies(df_messy_raw, con)
+
+    df_messy = _materialise_relation(
+        con,
+        df_messy,
+        "df_messy_prepared",
+    )
 
     # Show dataset info
     info = get_dataset_info(dataset_name)

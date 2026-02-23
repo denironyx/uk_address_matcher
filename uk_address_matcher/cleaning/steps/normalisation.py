@@ -210,6 +210,33 @@ def _clean_address_string_first_pass() -> str:
 
 
 @pipeline_stage(
+    name="strip_country_suffix",
+    description=(
+        "Strip trailing country/high-level denomination suffixes from clean_full_address"
+    ),
+    tags=["cleaning", "normalisation"],
+)
+def _strip_country_suffix() -> str:
+    suffix_regex = (
+        r"(?:\s+(?:UNITED KINGDOM|GREAT BRITAIN|NORTHERN IRELAND|"
+        r"UK|BRITAIN|ENGLAND|SCOTLAND|WALES))+$"
+    )
+    sql = f"""
+    SELECT
+        * EXCLUDE (clean_full_address),
+        TRIM(
+            regexp_replace(
+                ' ' || TRIM(clean_full_address),
+                '{suffix_regex}',
+                ''
+            )
+        ) AS clean_full_address
+    FROM {{input}}
+    """
+    return sql
+
+
+@pipeline_stage(
     name="remove_duplicate_end_tokens",
     description=(
         "Remove duplicated tokens at the end of addresses "

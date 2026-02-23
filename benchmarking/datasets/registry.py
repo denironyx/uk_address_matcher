@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from benchmarking.datasets.registry import DatasetInfo
 
 # Type aliases for dataset cleaning and loader functions
-DatasetLoader = Callable[[duckdb.DuckDBPyConnection], duckdb.DuckDBPyRelation]
+DatasetLoader = Callable[[duckdb.DuckDBPyConnection, bool], duckdb.DuckDBPyRelation]
 
 
 @dataclass(frozen=True)
@@ -47,6 +47,25 @@ class RegisteredDataset:
 
 
 _DATASET_REGISTRY: dict[str, RegisteredDataset] = {}
+
+
+def _normalise_identifier(value: str) -> str:
+    return "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in value).lower()
+
+
+def _materialise_relation(
+    con: duckdb.DuckDBPyConnection,
+    relation: duckdb.DuckDBPyRelation,
+    table_name: str,
+) -> duckdb.DuckDBPyRelation:
+    con.execute(
+        f"""
+        CREATE OR REPLACE TEMP TABLE {table_name} AS
+        SELECT *
+        FROM ({relation.sql_query()}) AS src
+        """
+    )
+    return con.table(table_name)
 
 
 def register_dataset(name: str, info: DatasetInfo, loader: DatasetLoader) -> None:
@@ -90,7 +109,10 @@ def load_dataset(
 
     registered = _DATASET_REGISTRY[name]
     print(f"Loading {registered.info.name}...")
-    return registered.loader(con, sample_mode=sample_mode)
+    relation = registered.loader(con, sample_mode=sample_mode)
+    sample_suffix = "sample" if sample_mode else "full"
+    table_name = f"df_messy_raw_{_normalise_identifier(name)}_{sample_suffix}"
+    return _materialise_relation(con, relation, table_name)
 
 
 def list_datasets() -> list[str]:

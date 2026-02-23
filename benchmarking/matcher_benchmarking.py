@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from time import perf_counter
 from typing import Optional
 
 from benchmarking.analysis import (
@@ -79,26 +80,37 @@ TOP_WORST_MISMATCHES = 10  # Worst mismatches by similarity
 # ============================================================================
 
 print("Initialising benchmark environment...")
-con = setup_connection()
-df_messy_clean, df_os_clean = load_benchmark_data(
-    con,
-    DATASET_NAME,
-    canonical_prepared_folder=CANONICAL_PREPARED_FOLDER,
-    os_data_path=OS_DATA_PATH,
-    include_term_frequencies=True,
-    sample_mode=SAMPLE_MODE,
-    filter_canonical_by_messy_postcodes=FILTER_CANONICAL_BY_MESSY_POSTCODES,
-    clean_canonical_on_the_fly=CLEAN_CANONICAL_ON_THE_FLY,
-    derive_term_frequencies_on_the_fly=DERIVE_TERM_FREQUENCIES_ON_THE_FLY,
-)
-
-con.sql("DROP TABLE IF EXISTS df_messy")
-df_messy_clean.to_table("df_messy_clean")
-# Get dataset info for reporting
-dataset_info = get_dataset_info(DATASET_NAME)
-
 variant_label = "configured_stages"
 variant_timings: dict[str, dict[str, float]] = {}
+
+
+def timed_phase(phase_name: str, func):
+    t0 = perf_counter()
+    result = func()
+    elapsed = perf_counter() - t0
+    variant_timings.setdefault(variant_label, {})[phase_name] = elapsed
+    print(f"  {phase_name}: {elapsed:.2f}s")
+    return result
+
+
+con = setup_connection()
+df_messy_clean, df_os_clean = timed_phase(
+    "load_benchmark_data",
+    lambda: load_benchmark_data(
+        con,
+        DATASET_NAME,
+        canonical_prepared_folder=CANONICAL_PREPARED_FOLDER,
+        os_data_path=OS_DATA_PATH,
+        include_term_frequencies=True,
+        sample_mode=SAMPLE_MODE,
+        filter_canonical_by_messy_postcodes=FILTER_CANONICAL_BY_MESSY_POSTCODES,
+        clean_canonical_on_the_fly=CLEAN_CANONICAL_ON_THE_FLY,
+        derive_term_frequencies_on_the_fly=DERIVE_TERM_FREQUENCIES_ON_THE_FLY,
+    ),
+)
+con.sql("DROP TABLE IF EXISTS df_messy")
+df_messy_clean.to_table("df_messy_clean")
+dataset_info = get_dataset_info(DATASET_NAME)
 
 print_stages_benchmark_header(
     dataset_name=dataset_info.name,
@@ -107,55 +119,78 @@ print_stages_benchmark_header(
 )
 
 with time_phase(variant_timings, variant_label, "pipeline"):
-    # For benchmarking, we want to load the messy data in with the column `dataset_name`.
-    # This needs to be removed for matching, but is joined back on later.
-    df_messy_for_matching = df_messy_clean.select("* EXCLUDE (dataset_name)")
-
-    matcher = AddressMatcher(
-        canonical_addresses=df_os_clean,
-        addresses_to_match=df_messy_for_matching,
-        con=con,
-        stages=STAGES,
-        debug_options=DEBUG_OPTIONS,
+    df_messy_for_matching = timed_phase(
+        "create_messy_for_matching",
+        lambda: df_messy_clean.select("* EXCLUDE (dataset_name)"),
     )
 
-    match_result = matcher.match()
-    match_candidates = match_result.matches
+    matcher = timed_phase(
+        "address_matcher_init",
+        lambda: AddressMatcher(
+            canonical_addresses=df_os_clean,
+            addresses_to_match=df_messy_for_matching,
+            con=con,
+            stages=STAGES,
+            debug_options=DEBUG_OPTIONS,
+        ),
+    )
+
+    match_result = timed_phase("matcher_match", matcher.match)
+    match_candidates = timed_phase(
+        "materialise_match_results", lambda: match_result.matches
+    )
 
 pipeline_duration = variant_timings[variant_label]["pipeline"]
 print(f"⏱  Pipeline completed in {pipeline_duration:.2f} seconds.\n")
 
 # Bring `dataset_name` back for analysis
-match_candidates = match_candidates.join(
-    df_messy_clean.select("ukam_address_id, dataset_name"),
-    condition="ukam_address_id",
-    how="left",
+match_candidates = timed_phase(
+    "join_dataset_name_back",
+    lambda: match_candidates.join(
+        timed_phase(
+            "create_dataset_name_lookup",
+            lambda: df_messy_clean.select("ukam_address_id, dataset_name"),
+        ),
+        condition="ukam_address_id",
+        how="left",
+    ),
 )
 print("--- Match Reason Breakdown ---\n")
-print(match_result.match_metrics())
+timed_phase("print_match_metrics", lambda: print(match_result.match_metrics()))
 
 print("\n--- Accuracy Metrics ---\n")
-accuracy = calculate_accuracy_metrics(match_candidates)
-accuracy.show(max_width=10000)
+accuracy = timed_phase(
+    "calculate_accuracy_metrics",
+    lambda: calculate_accuracy_metrics(match_candidates),
+)
+timed_phase("show_accuracy_metrics", lambda: accuracy.show(max_width=10000))
 
-incorrect_count = (
-    match_candidates.filter(
-        "match_reason IS NOT NULL AND ukam_label != resolved_canonical_id"
-    )
-    .count("*")
-    .fetchone()[0]
+incorrect_count = timed_phase(
+    "count_incorrect_matches",
+    lambda: (
+        match_candidates.filter(
+            "match_reason IS NOT NULL AND ukam_label != resolved_canonical_id"
+        )
+        .count("*")
+        .fetchone()[0]
+    ),
 )
 
 if incorrect_count > 0:
     print(f"\n📊 Found {incorrect_count:,} incorrect matches. Analysing mismatches...\n")
-    mismatch_results = analyse_mismatches(
-        ukam_matches=match_candidates,
-        ukam_canonical=df_os_clean,
-        ukam_messy=df_messy_clean,
-        samples_per_reason=MISMATCH_SAMPLES_PER_REASON,
-        top_worst=TOP_WORST_MISMATCHES,
+    mismatch_results = timed_phase(
+        "analyse_mismatches",
+        lambda: analyse_mismatches(
+            ukam_matches=match_candidates,
+            ukam_canonical=df_os_clean,
+            ukam_messy=df_messy_clean,
+            samples_per_reason=MISMATCH_SAMPLES_PER_REASON,
+            top_worst=TOP_WORST_MISMATCHES,
+        ),
     )
-    print_mismatch_analysis(mismatch_results)
+    timed_phase(
+        "print_mismatch_analysis", lambda: print_mismatch_analysis(mismatch_results)
+    )
 else:
     print("\n✓ No incorrect matches found!\n")
 
