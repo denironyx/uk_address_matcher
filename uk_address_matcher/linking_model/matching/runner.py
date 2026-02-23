@@ -65,7 +65,7 @@ def _create_results_table(
             NULL::{resolved_canonical_type} AS resolved_canonical_id,
             NULL::{canonical_ukam_type} AS canonical_ukam_address_id,
             NULL::ENUM {enum_values} AS match_reason
-        FROM ({df_messy_clean.sql_query()}) AS messy
+        FROM {df_messy_clean.alias} AS messy
         """
     )
 
@@ -78,7 +78,7 @@ def _get_unmatched(
     return con.sql(
         f"""
         SELECT messy.*
-        FROM ({df_messy_clean.sql_query()}) AS messy
+        FROM {df_messy_clean.alias} AS messy
         INNER JOIN {results_table} AS results
             ON results.ukam_address_id = messy.ukam_address_id
         WHERE results.resolved_canonical_id IS NULL
@@ -119,10 +119,10 @@ def _build_final_output(
             ,
             canonical.original_address_concat AS original_address_concat_canonical,
             canonical.postcode AS postcode_canonical
-        FROM ({df_messy_clean.sql_query()}) AS messy
+        FROM {df_messy_clean.alias} AS messy
         INNER JOIN {results_table} AS results
             ON results.ukam_address_id = messy.ukam_address_id
-        LEFT JOIN ({df_canonical_clean.sql_query()}) AS canonical
+        LEFT JOIN {df_canonical_clean.alias} AS canonical
             ON canonical.ukam_address_id = results.canonical_ukam_address_id
         """
     )
