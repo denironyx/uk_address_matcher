@@ -5,6 +5,7 @@ from typing import Optional
 
 from benchmarking.analysis import (
     print_stages_benchmark_header,
+    print_unmatched_samples,
 )
 from benchmarking.analysis.accuracy import calculate_accuracy_metrics
 from benchmarking.analysis.mismatches import (
@@ -18,14 +19,15 @@ from uk_address_matcher import (
     AddressMatcher,
     ExactMatchStage,
 )
+from uk_address_matcher.linking_model.matching.stages.splink import SplinkStage
 from uk_address_matcher.sql_pipeline.runner import DebugOptions
 
 # ============================================================================
 # Configuration
 # ============================================================================
 
-DATASET_NAME = "lambeth_council"
-# DATASET_NAME = "hackney_council"
+# DATASET_NAME = "lambeth_council"
+DATASET_NAME = "hackney_council"
 apply_env_from_private_config()
 
 OS_DATA_PATH: Path | None = None
@@ -52,14 +54,14 @@ FILTER_CANONICAL_BY_MESSY_POSTCODES = True
 STAGES = [
     ExactMatchStage(),
     # UniqueTrigramStage(),
-    # SplinkStage(
-    #     predict_threshold_match_weight=10,
-    #     improve_threshold_match_weight=-20,
-    #     final_match_weight_threshold=10,
-    #     final_distinguishability_threshold=5,
-    #     include_full_postcode_block=False,
-    #     retain_intermediate_calculation_columns=False,
-    # ),
+    SplinkStage(
+        predict_threshold_match_weight=10,
+        improve_threshold_match_weight=-20,
+        final_match_weight_threshold=10,
+        final_distinguishability_threshold=5,
+        include_full_postcode_block=False,
+        retain_intermediate_calculation_columns=False,
+    ),
 ]
 
 # Data cleaning configuration
@@ -74,6 +76,7 @@ DERIVE_TERM_FREQUENCIES_ON_THE_FLY = False
 # Analysis configuration
 MISMATCH_SAMPLES_PER_REASON = 10  # Random samples per match_reason
 TOP_WORST_MISMATCHES = 10  # Worst mismatches by similarity
+UNMATCHED_SAMPLES = 10  # Sample unresolved records to inspect
 
 # ============================================================================
 # Setup
@@ -118,12 +121,11 @@ print_stages_benchmark_header(
     stages=STAGES,
 )
 
-with time_phase(variant_timings, variant_label, "pipeline"):
-    df_messy_for_matching = timed_phase(
-        "create_messy_for_matching",
-        lambda: df_messy_clean.select("* EXCLUDE (dataset_name)"),
-    )
+df_messy_for_matching = con.sql(
+    "SELECT * EXCLUDE (dataset_name) FROM df_messy_clean"
+).execute()
 
+with time_phase(variant_timings, variant_label, "pipeline"):
     matcher = timed_phase(
         "address_matcher_init",
         lambda: AddressMatcher(
@@ -155,6 +157,8 @@ match_candidates = timed_phase(
         how="left",
     ),
 )
+con.sql("DROP TABLE IF EXISTS benchmark_match_candidates")
+match_candidates.to_table("benchmark_match_candidates")
 print("--- Match Reason Breakdown ---\n")
 timed_phase("print_match_metrics", lambda: print(match_result.match_metrics()))
 
@@ -164,6 +168,11 @@ accuracy = timed_phase(
     lambda: calculate_accuracy_metrics(match_candidates),
 )
 timed_phase("show_accuracy_metrics", lambda: accuracy.show(max_width=10000))
+print_unmatched_samples(
+    con,
+    "benchmark_match_candidates",
+    sample_size=UNMATCHED_SAMPLES,
+)
 
 incorrect_count = timed_phase(
     "count_incorrect_matches",
