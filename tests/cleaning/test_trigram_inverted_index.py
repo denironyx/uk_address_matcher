@@ -472,7 +472,9 @@ class TestDeriveInvertedIndexFunction:
             canonical_raw, duck_con, num_of_chunks=1
         )
 
-        derive_inverted_index(canonical_clean, duck_con, strategies=[TRIGRAM_STRATEGY])
+        inverted_idx = derive_inverted_index(  # noqa: F841
+            canonical_clean, duck_con, strategies=[TRIGRAM_STRATEGY]
+        )
 
         strategies = duck_con.sql("""
             SELECT DISTINCT index_strategy FROM inverted_idx
