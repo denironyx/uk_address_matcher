@@ -3,38 +3,84 @@ from __future__ import annotations
 from uk_address_matcher.sql_pipeline.steps import CTEStep, pipeline_stage
 
 
-@pipeline_stage(
-    name="derive_trigrams_from_address_tokens",
-    description=(
-        "Generate trigrams (consecutive 3-token sequences) from clean_full_address"
-    ),
-    tags="trigram_blocking",
-)
-def _derive_trigrams_from_address_tokens():
-    """Generate trigrams from clean_full_address tokens.
+def _derive_trigrams_from_address_tokens(
+    *, num_of_chunks: int | None = None, chunk_index: int | None = None
+):
+    """Factory for the trigram derivation pipeline stage.
 
-    Creates a 'trigrams' column containing an array of space-delimited trigrams.
-    For addresses with fewer than 3 tokens, returns an empty array.
+    When ``num_of_chunks`` and ``chunk_index`` are provided, the generated SQL
+    applies a ``list_filter`` on the trigram array so that only trigrams whose
+    hash maps to the given chunk are retained.  This allows the inverted index
+    to be built in memory-bounded chunks.
+
+    When called with no arguments the stage produces all trigrams (original
+    behaviour).
+
+    Args:
+        num_of_chunks: Total number of chunks.  Must be provided together
+            with ``chunk_index``.
+        chunk_index: Zero-based index of the current chunk.
     """
-    sql = """
-    SELECT
-        base.* EXCLUDE (tokenised),
-        CASE
-            WHEN len(tokenised) >= 3 THEN
-                list_transform(
-                    generate_series(1, len(tokenised) - 2),
-                    i -> tokenised[i] || ' ' || tokenised[i+1] || ' ' || tokenised[i+2]
-                )
-            ELSE []
-        END AS trigrams
-    FROM (
-        SELECT
-            *,
-            string_split(clean_full_address, ' ') AS tokenised
-        FROM {input}
-    ) AS base
-    """
-    return sql
+    chunked = num_of_chunks is not None and chunk_index is not None
+    chunk_label = f" (chunk {chunk_index + 1}/{num_of_chunks})" if chunked else ""
+
+    @pipeline_stage(
+        name="derive_trigrams_from_address_tokens",
+        description=(
+            "Generate trigrams (consecutive 3-token sequences) from "
+            "clean_full_address" + chunk_label
+        ),
+        tags="trigram_blocking",
+    )
+    def _stage():
+        if chunked:
+            sql = f"""
+            SELECT
+                base.* EXCLUDE (tokenised),
+                list_filter(
+                    CASE
+                        WHEN len(tokenised) >= 3 THEN
+                            list_transform(
+                                generate_series(1, len(tokenised) - 2),
+                                i -> tokenised[i] || ' '
+                                     || tokenised[i+1] || ' '
+                                     || tokenised[i+2]
+                            )
+                        ELSE []
+                    END,
+                    t -> (abs(hash(t)) % {num_of_chunks}) = {chunk_index}
+                ) AS trigrams
+            FROM (
+                SELECT
+                    *,
+                    string_split(clean_full_address, ' ') AS tokenised
+                FROM {{input}}
+            ) AS base
+            """
+        else:
+            sql = """
+            SELECT
+                base.* EXCLUDE (tokenised),
+                CASE
+                    WHEN len(tokenised) >= 3 THEN
+                        list_transform(
+                            generate_series(1, len(tokenised) - 2),
+                            i -> tokenised[i] || ' '
+                                 || tokenised[i+1] || ' '
+                                 || tokenised[i+2]
+                        )
+                    ELSE []
+                END AS trigrams
+            FROM (
+                SELECT
+                    *,
+                    string_split(clean_full_address, ' ') AS tokenised
+                FROM {input}
+            ) AS base
+            """
+        return sql
+
+    return _stage
 
 
 @pipeline_stage(

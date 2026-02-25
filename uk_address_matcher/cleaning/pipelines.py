@@ -116,7 +116,7 @@ QUEUE_FOR_TF_DERIVATION = QUEUE_CLEAN_FULL_ADDRESS
 
 # Trigram blocking pipelines
 QUEUE_TRIGRAM_WITH_INVERTED_INDEX = [
-    _derive_trigrams_from_address_tokens,
+    _derive_trigrams_from_address_tokens(),
     _lookup_trigrams_in_inverted_index,
 ]
 

@@ -334,7 +334,7 @@ def derive_inverted_index(
             con,
             input_rel=cleaned_address_table,
             stage_specs=[
-                _derive_trigrams_from_address_tokens,
+                _derive_trigrams_from_address_tokens(),
                 _build_inverted_index_from_trigrams(max_unique_ids_per_trigram),
             ],
             pipeline_name="Build inverted index",
@@ -348,61 +348,36 @@ def derive_inverted_index(
         return con.table(result_table)
 
     # --- Chunked path -------------------------------------------------------
-    # Step 1: Derive trigrams from addresses and materialise.
-    trigram_pipeline = create_sql_pipeline(
-        con,
-        input_rel=cleaned_address_table,
-        stage_specs=[_derive_trigrams_from_address_tokens],
-        pipeline_name="Derive trigrams for inverted index",
-        pipeline_description="Generate trigram arrays from address tokens",
-    )
-    trigrams_result = trigram_pipeline.run(debug_options)
+    # Each chunk scans ALL rows but derives trigrams on-the-fly and immediately
+    # filters to only trigrams whose hash maps to this chunk.  This avoids ever
+    # materialising all trigrams at once — only ~1/N of trigrams are unnested
+    # per iteration.  The inverted index aggregation then runs on the filtered
+    # subset with no further filtering required.
+    total_rows = cleaned_address_table.count("*").fetchone()[0]
 
-    trigrams_table = f"__ukam_trigrams_{uid}"
-    con.execute(f"DROP TABLE IF EXISTS {trigrams_table}")
-    trigrams_result.create(trigrams_table)
-
-    total_rows = con.sql(f"SELECT COUNT(*) FROM {trigrams_table}").fetchone()[0]
-
-    # Step 2: Build the inverted index one chunk at a time.
-    # Each chunk processes only the trigrams whose hash maps to that chunk,
-    # ensuring every occurrence of a given trigram is counted together.
     result_table = f"__ukam_derived_inverted_index_{uid}"
     con.execute(f"DROP TABLE IF EXISTS {result_table}")
 
     for chunk_index in range(num_of_chunks):
         chunk_started_at = time.perf_counter()
 
-        chunk_sql = f"""
-        WITH trigrams_in_chunk AS (
-            SELECT
-                unique_id,
-                list_filter(
-                    trigrams,
-                    t -> (abs(hash(t)) % {num_of_chunks}) = {chunk_index}
-                ) AS trigrams_filtered
-            FROM {trigrams_table}
-        ),
-        unnested_trigrams AS (
-            SELECT unique_id, unnest(trigrams_filtered) AS trigram
-            FROM trigrams_in_chunk
-            WHERE len(trigrams_filtered) > 0
-        ),
-        grouped AS (
-            SELECT
-                trigram,
-                list(DISTINCT unique_id ORDER BY unique_id) AS unique_ids,
-                COUNT(DISTINCT unique_id) AS count_unique_ids
-            FROM unnested_trigrams
-            GROUP BY trigram
+        trigram_pipeline = create_sql_pipeline(
+            con,
+            input_rel=cleaned_address_table,
+            stage_specs=[
+                _derive_trigrams_from_address_tokens(
+                    num_of_chunks=num_of_chunks,
+                    chunk_index=chunk_index,
+                ),
+                _build_inverted_index_from_trigrams(max_unique_ids_per_trigram),
+            ],
+            pipeline_name="Build inverted index",
+            pipeline_description=(
+                f"Derive trigrams and aggregate into inverted index "
+                f"(chunk {chunk_index + 1}/{num_of_chunks})"
+            ),
         )
-        SELECT trigram, unique_ids
-        FROM grouped
-        WHERE count_unique_ids >= 1
-          AND count_unique_ids <= {max_unique_ids_per_trigram}
-        """
-
-        chunk_result = con.sql(chunk_sql)
+        chunk_result = trigram_pipeline.run(debug_options if chunk_index == 0 else None)
 
         if chunk_index == 0:
             chunk_result.create(result_table)
@@ -420,9 +395,6 @@ def derive_inverted_index(
             total_chunks=num_of_chunks,
             chunk_elapsed_seconds=time.perf_counter() - chunk_started_at,
         )
-
-    # Clean up the intermediate trigrams table
-    con.execute(f"DROP TABLE IF EXISTS {trigrams_table}")
 
     return con.table(result_table)
 
