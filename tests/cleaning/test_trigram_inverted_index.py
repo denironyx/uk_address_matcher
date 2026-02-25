@@ -79,12 +79,145 @@ class TestTrigramGeneration:
         assert result == ["1 HIGH STREET"]
 
 
+class TestBigramGeneration:
+    """Tests for bigram generation from token arrays."""
+
+    def test_bigram_generation_basic(self, duck_con):
+        """Test basic bigram generation from tokens."""
+        result = duck_con.sql("""
+            WITH input AS (
+                SELECT '9 LOVE LANE LONDON' AS clean_full_address
+            )
+            SELECT
+                list_transform(
+                    generate_series(1, len(tokenised) - 1),
+                    i ->
+                        tokenised[i] || ' ' || tokenised[i + 1]
+                ) AS bigrams
+            FROM (
+                SELECT string_split(clean_full_address, ' ') AS tokenised
+                FROM input
+            )
+        """).fetchone()[0]
+
+        assert result == ["9 LOVE", "LOVE LANE", "LANE LONDON"]
+
+    def test_bigram_generation_single_token(self, duck_con):
+        """Test bigram generation with a single token gives empty list."""
+        result = duck_con.sql("""
+            WITH input AS (
+                SELECT 'LONDON' AS clean_full_address
+            )
+            SELECT
+                CASE
+                    WHEN len(tokenised) >= 2 THEN
+                        list_transform(
+                            generate_series(1, len(tokenised) - 1),
+                            i -> tokenised[i] || ' ' || tokenised[i + 1]
+                        )
+                    ELSE []
+                END AS bigrams
+            FROM (
+                SELECT string_split(clean_full_address, ' ') AS tokenised
+                FROM input
+            )
+        """).fetchone()[0]
+
+        assert result == []
+
+    def test_bigram_generation_two_tokens(self, duck_con):
+        """Test bigram generation with exactly 2 tokens."""
+        result = duck_con.sql("""
+            WITH input AS (
+                SELECT 'HIGH STREET' AS clean_full_address
+            )
+            SELECT
+                list_transform(
+                    generate_series(1, len(tokenised) - 1),
+                    i -> tokenised[i] || ' ' || tokenised[i + 1]
+                ) AS bigrams
+            FROM (
+                SELECT string_split(clean_full_address, ' ') AS tokenised
+                FROM input
+            )
+        """).fetchone()[0]
+
+        assert result == ["HIGH STREET"]
+
+
+class TestIndexingStrategySqlExpressions:
+    """Tests that the SQL expressions from IndexingStrategy produce correct results."""
+
+    def test_trigram_strategy_sql(self, duck_con):
+        """Test that the TRIGRAM_STRATEGY keys_sql_expr works correctly."""
+        from uk_address_matcher.cleaning.steps.inverted_index import TRIGRAM_STRATEGY
+
+        result = duck_con.sql(f"""
+            WITH input AS (
+                SELECT
+                    '9 LOVE LANE LONDON' AS clean_full_address,
+                    string_split('9 LOVE LANE LONDON', ' ') AS __tokens
+            )
+            SELECT {TRIGRAM_STRATEGY.keys_sql_expr} AS keys
+            FROM input
+        """).fetchone()[0]
+
+        assert result == ["9 LOVE LANE", "LOVE LANE LONDON"]
+
+    def test_trigram_strategy_sql_short_address(self, duck_con):
+        """Test TRIGRAM_STRATEGY with fewer than 3 tokens returns empty."""
+        from uk_address_matcher.cleaning.steps.inverted_index import TRIGRAM_STRATEGY
+
+        result = duck_con.sql(f"""
+            WITH input AS (
+                SELECT
+                    'HIGH STREET' AS clean_full_address,
+                    string_split('HIGH STREET', ' ') AS __tokens
+            )
+            SELECT {TRIGRAM_STRATEGY.keys_sql_expr} AS keys
+            FROM input
+        """).fetchone()[0]
+
+        assert result == []
+
+    def test_bigram_strategy_sql(self, duck_con):
+        """Test that the BIGRAM_STRATEGY keys_sql_expr works correctly."""
+        from uk_address_matcher.cleaning.steps.inverted_index import BIGRAM_STRATEGY
+
+        result = duck_con.sql(f"""
+            WITH input AS (
+                SELECT
+                    '9 LOVE LANE LONDON' AS clean_full_address,
+                    string_split('9 LOVE LANE LONDON', ' ') AS __tokens
+            )
+            SELECT {BIGRAM_STRATEGY.keys_sql_expr} AS keys
+            FROM input
+        """).fetchone()[0]
+
+        assert result == ["9 LOVE", "LOVE LANE", "LANE LONDON"]
+
+    def test_bigram_strategy_sql_single_token(self, duck_con):
+        """Test BIGRAM_STRATEGY with a single token returns empty."""
+        from uk_address_matcher.cleaning.steps.inverted_index import BIGRAM_STRATEGY
+
+        result = duck_con.sql(f"""
+            WITH input AS (
+                SELECT
+                    'LONDON' AS clean_full_address,
+                    string_split('LONDON', ' ') AS __tokens
+            )
+            SELECT {BIGRAM_STRATEGY.keys_sql_expr} AS keys
+            FROM input
+        """).fetchone()[0]
+
+        assert result == []
+
+
 class TestInvertedIndexBuilding:
     """Tests for inverted index construction."""
 
     def test_inverted_index_basic(self, duck_con):
-        """Test basic inverted index building."""
-        # Create test data with overlapping trigrams
+        """Test basic inverted index building with trigrams."""
         result = duck_con.sql("""
             WITH addresses AS (
                 SELECT * FROM (VALUES
@@ -145,7 +278,6 @@ class TestInvertedIndexBuilding:
 
     def test_inverted_index_filtering_by_frequency(self, duck_con):
         """Test that high-frequency trigrams are filtered out."""
-        # Create data where one trigram appears in many records
         result = duck_con.sql("""
             WITH addresses AS (
                 SELECT * FROM (VALUES
@@ -211,7 +343,6 @@ class TestDeriveInvertedIndexFunction:
             prepare_data_for_matching,
         )
 
-        # Create test canonical addresses
         canonical_raw = duck_con.sql("""
             SELECT * FROM (VALUES
                 ('1', '9 LOVE LANE LONDON', 'SW1A 1AA'),
@@ -221,40 +352,51 @@ class TestDeriveInvertedIndexFunction:
             ) AS t(unique_id, address_concat, postcode)
         """)
 
-        # First clean the canonical data
         canonical_clean = prepare_data_for_matching(
             canonical_raw, duck_con, num_of_chunks=1
         )
 
-        # Now derive inverted index from cleaned data
         inverted_idx = derive_inverted_index(
-            canonical_clean, duck_con, max_unique_ids_per_trigram=20
+            canonical_clean, duck_con, max_unique_ids_per_key=20
         )
 
         # Check structure
-        assert "trigram" in inverted_idx.columns
+        assert "key" in inverted_idx.columns
         assert "unique_ids" in inverted_idx.columns
+        assert "index_strategy" in inverted_idx.columns
 
-        # Check that we have some results
+        # Check that we have results from both strategies
         count = inverted_idx.count("*").fetchone()[0]
         assert count > 0
 
+        strategies = duck_con.sql("""
+            SELECT DISTINCT index_strategy
+            FROM inverted_idx
+            ORDER BY index_strategy
+        """).fetchall()
+        strategy_names = [row[0] for row in strategies]
+        assert "trigram" in strategy_names
+        assert "bigram" in strategy_names
+
         # Check specific trigram mappings
-        result = inverted_idx.fetchall()
-        result_dict = {row[0]: row[1] for row in result}
+        trigram_rows = duck_con.sql("""
+            SELECT key, unique_ids
+            FROM inverted_idx
+            WHERE index_strategy = 'trigram'
+        """).fetchall()
+        trigram_dict = {row[0]: row[1] for row in trigram_rows}
 
         # '9 LOVE LANE' should map to records 1 and 2
-        assert "9 LOVE LANE" in result_dict
-        assert sorted(result_dict["9 LOVE LANE"]) == ["1", "2"]
+        assert "9 LOVE LANE" in trigram_dict
+        assert sorted(trigram_dict["9 LOVE LANE"]) == ["1", "2"]
 
-    def test_derive_inverted_index_filters_common_trigrams(self, duck_con):
-        """Test that trigrams appearing in too many records are filtered out."""
+    def test_derive_inverted_index_filters_common_keys(self, duck_con):
+        """Test that keys appearing in too many records are filtered out."""
         from uk_address_matcher.cleaning.chunking_strategies import (
             derive_inverted_index,
             prepare_data_for_matching,
         )
 
-        # Create data where one trigram is very common
         canonical_raw = duck_con.sql("""
             SELECT * FROM (VALUES
                 ('1', 'COMMON STREET NAME LONDON', 'SW1A 1AA'),
@@ -264,20 +406,19 @@ class TestDeriveInvertedIndexFunction:
             ) AS t(unique_id, address_concat, postcode)
         """)
 
-        # First clean the canonical data
         canonical_clean = prepare_data_for_matching(
             canonical_raw, duck_con, num_of_chunks=1
         )
 
-        # Set max_unique_ids_per_trigram to 2 to filter out common trigrams
+        # Set max_unique_ids_per_key to 2 to filter out common keys
         inverted_idx = derive_inverted_index(
-            canonical_clean, duck_con, max_unique_ids_per_trigram=2
+            canonical_clean, duck_con, max_unique_ids_per_key=2
         )
 
         result = inverted_idx.fetchall()
         result_dict = {row[0]: row[1] for row in result}
 
-        # 'COMMON STREET NAME' appears in 3 records, should be filtered out
+        # 'COMMON STREET NAME' appears in 3 records as trigram, should be filtered
         assert "COMMON STREET NAME" not in result_dict
 
     def test_chunked_inverted_index_matches_non_chunked(self, duck_con):
@@ -306,19 +447,48 @@ class TestDeriveInvertedIndexFunction:
 
         # Build inverted index without chunking
         idx_no_chunk = derive_inverted_index(
-            canonical_clean, duck_con, max_unique_ids_per_trigram=20, num_of_chunks=1
+            canonical_clean, duck_con, max_unique_ids_per_key=20, num_of_chunks=1
         )
         no_chunk_rows = idx_no_chunk.fetchall()
-        no_chunk_dict = {row[0]: sorted(row[1]) for row in no_chunk_rows}
+        no_chunk_dict = {(row[0], row[2]): sorted(row[1]) for row in no_chunk_rows}
 
         # Build inverted index with chunking (use an odd-ish number)
         idx_chunked = derive_inverted_index(
-            canonical_clean, duck_con, max_unique_ids_per_trigram=20, num_of_chunks=5
+            canonical_clean, duck_con, max_unique_ids_per_key=20, num_of_chunks=5
         )
         chunked_rows = idx_chunked.fetchall()
-        chunked_dict = {row[0]: sorted(row[1]) for row in chunked_rows}
+        chunked_dict = {(row[0], row[2]): sorted(row[1]) for row in chunked_rows}
 
         assert no_chunk_dict == chunked_dict
+
+    def test_derive_inverted_index_trigram_only(self, duck_con):
+        """Test derive_inverted_index with only the trigram strategy."""
+        from uk_address_matcher.cleaning.chunking_strategies import (
+            derive_inverted_index,
+            prepare_data_for_matching,
+        )
+        from uk_address_matcher.cleaning.steps.inverted_index import TRIGRAM_STRATEGY
+
+        canonical_raw = duck_con.sql("""
+            SELECT * FROM (VALUES
+                ('1', '9 LOVE LANE LONDON', 'SW1A 1AA'),
+                ('2', '10 HIGH STREET OXFORD', 'OX1 1AA')
+            ) AS t(unique_id, address_concat, postcode)
+        """)
+
+        canonical_clean = prepare_data_for_matching(
+            canonical_raw, duck_con, num_of_chunks=1
+        )
+
+        inverted_idx = derive_inverted_index(  # noqa: F841
+            canonical_clean, duck_con, strategies=[TRIGRAM_STRATEGY]
+        )
+
+        strategies = duck_con.sql("""
+            SELECT DISTINCT index_strategy FROM inverted_idx
+        """).fetchall()
+        strategy_names = [row[0] for row in strategies]
+        assert strategy_names == ["trigram"]
 
 
 class TestPrepareDataForMatchingWithInvertedIndex:
@@ -331,7 +501,6 @@ class TestPrepareDataForMatchingWithInvertedIndex:
             prepare_data_for_matching,
         )
 
-        # Create canonical addresses
         canonical_raw = duck_con.sql("""
             SELECT * FROM (VALUES
                 ('1', '9 LOVE LANE LONDON', 'SW1A 1AA'),
@@ -339,33 +508,27 @@ class TestPrepareDataForMatchingWithInvertedIndex:
             ) AS t(unique_id, address_concat, postcode)
         """)
 
-        # Create messy addresses
         messy = duck_con.sql("""
             SELECT * FROM (VALUES
                 ('100', '9 LOVE LANE LONDON SW1A 1AA', 'SW1A 1AA')
             ) AS t(unique_id, address_concat, postcode)
         """)
 
-        # First clean canonical data (no inverted index)
         canonical_clean = prepare_data_for_matching(
             canonical_raw, duck_con, num_of_chunks=1
         )
 
-        # Derive inverted index from cleaned canonical
         inverted_idx = derive_inverted_index(canonical_clean, duck_con)
 
-        # Prepare messy data with inverted index
         prepared_messy = prepare_data_for_matching(
             messy, duck_con, num_of_chunks=1, inverted_index=inverted_idx
         )
 
-        # Check that exploding_unique_ids column exists
         assert "exploding_unique_ids" in prepared_messy.columns
 
-        # Get the exploding_unique_ids for the messy record
         result = prepared_messy.select("exploding_unique_ids").fetchone()[0]
 
-        # Should contain canonical unique_id '1' (matching trigrams)
+        # Should contain canonical unique_id '1' (matching keys)
         assert "1" in result
 
     def test_prepare_data_without_inverted_index(self, duck_con):
@@ -374,7 +537,6 @@ class TestPrepareDataForMatchingWithInvertedIndex:
             prepare_data_for_matching,
         )
 
-        # Create canonical addresses
         canonical = duck_con.sql("""
             SELECT * FROM (VALUES
                 ('1', '9 LOVE LANE LONDON', 'SW1A 1AA'),
@@ -382,53 +544,43 @@ class TestPrepareDataForMatchingWithInvertedIndex:
             ) AS t(unique_id, address_concat, postcode)
         """)
 
-        # Prepare without inverted index
         prepared = prepare_data_for_matching(canonical, duck_con, num_of_chunks=1)
 
-        # Check that exploding_unique_ids column exists
         assert "exploding_unique_ids" in prepared.columns
 
-        # Each record should have [unique_id] as exploding_unique_ids
         results = prepared.select("unique_id, exploding_unique_ids").fetchall()
         for unique_id, exploding_ids in results:
             assert exploding_ids == [unique_id]
 
     def test_exploding_unique_ids_empty_when_no_matches(self, duck_con):
-        """Test that exploding_unique_ids is empty when no trigrams match."""
+        """Test that exploding_unique_ids is empty when no keys match."""
         from uk_address_matcher.cleaning.chunking_strategies import (
             derive_inverted_index,
             prepare_data_for_matching,
         )
 
-        # Create canonical addresses
         canonical_raw = duck_con.sql("""
             SELECT * FROM (VALUES
                 ('1', '9 LOVE LANE LONDON', 'SW1A 1AA')
             ) AS t(unique_id, address_concat, postcode)
         """)
 
-        # Create messy address with completely different content
         messy = duck_con.sql("""
             SELECT * FROM (VALUES
                 ('100', 'COMPLETELY DIFFERENT ADDRESS HERE', 'M1 1AA')
             ) AS t(unique_id, address_concat, postcode)
         """)
 
-        # First clean canonical data
         canonical_clean = prepare_data_for_matching(
             canonical_raw, duck_con, num_of_chunks=1
         )
 
-        # Derive inverted index from cleaned canonical
         inverted_idx = derive_inverted_index(canonical_clean, duck_con)
 
-        # Prepare messy data with inverted index
         prepared_messy = prepare_data_for_matching(
             messy, duck_con, num_of_chunks=1, inverted_index=inverted_idx
         )
 
-        # Get the exploding_unique_ids for the messy record
         result = prepared_messy.select("exploding_unique_ids").fetchone()[0]
 
-        # Should be empty as no trigrams match
         assert result == []

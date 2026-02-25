@@ -9,12 +9,11 @@ from uk_address_matcher.cleaning.steps import (
     _canonicalise_postcode,
     _clean_address_string_first_pass,
     _clean_address_string_second_pass,
-    _derive_trigrams_from_address_tokens,
     _extract_postcode_from_address,
     _first_unusual_token,
     _generalised_token_aliases,
     _get_token_frequeny_table,
-    _lookup_trigrams_in_inverted_index,
+    _lookup_keys_in_inverted_index,
     _move_common_end_tokens_to_field,
     _normalise_abbreviations_and_units,
     _parse_out_business_unit,
@@ -114,13 +113,12 @@ QUEUE_POST_TF = [
 # Minimal pipeline for TF derivation: just clean address
 QUEUE_FOR_TF_DERIVATION = QUEUE_CLEAN_FULL_ADDRESS
 
-# Trigram blocking pipelines
-QUEUE_TRIGRAM_WITH_INVERTED_INDEX = [
-    _derive_trigrams_from_address_tokens(),
-    _lookup_trigrams_in_inverted_index,
+# Inverted index blocking pipelines
+QUEUE_INVERTED_INDEX_LOOKUP = [
+    _lookup_keys_in_inverted_index(),
 ]
 
-QUEUE_TRIGRAM_SELF = [
+QUEUE_INVERTED_INDEX_SELF = [
     _set_exploding_unique_ids_to_self,
 ]
 
@@ -345,12 +343,13 @@ def _register_inverted_index_table(
     con: DuckDBPyConnection,
     inverted_index: Optional[DuckDBPyRelation] = None,
 ) -> Optional[str]:
-    """Register inverted index table for trigram lookups.
+    """Register inverted index table for key lookups.
 
     Args:
         con: DuckDB connection.
-        inverted_index: Pre-computed inverted index table with 'trigram' and
-            'unique_ids' columns. If None, no table is registered.
+        inverted_index: Pre-computed inverted index table with 'key',
+            'unique_ids', and 'index_strategy' columns. If None, no
+            table is registered.
 
     Returns:
         The registered table name, or None if no inverted_index provided.
