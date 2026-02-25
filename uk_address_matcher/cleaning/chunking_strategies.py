@@ -8,17 +8,19 @@ from duckdb import DuckDBPyConnection, DuckDBPyRelation
 
 from uk_address_matcher.cleaning.pipelines import (
     QUEUE_FOR_TF_DERIVATION,
-    QUEUE_TRIGRAM_SELF,
-    QUEUE_TRIGRAM_WITH_INVERTED_INDEX,
+    QUEUE_INVERTED_INDEX_SELF,
+    QUEUE_INVERTED_INDEX_LOOKUP,
     _clean_data_pre_term_frequencies,
     _clean_data_using_precomputed_rel_tok_freq,
     _create_term_frequency_tables,
     _ensure_postcode_column,
     _register_inverted_index_table,
 )
-from uk_address_matcher.cleaning.steps.trigram_blocking import (
-    _build_inverted_index_from_trigrams,
-    _derive_trigrams_from_address_tokens,
+from uk_address_matcher.cleaning.steps.inverted_index import (
+    DEFAULT_INDEXING_STRATEGIES,
+    IndexingStrategy,
+    _build_inverted_index_from_keys,
+    _derive_keys_for_strategy,
 )
 from uk_address_matcher.sql_pipeline.helpers import _uid
 from uk_address_matcher.sql_pipeline.runner import create_sql_pipeline
@@ -278,123 +280,128 @@ def derive_term_frequencies_table(
 def derive_inverted_index(
     cleaned_address_table: DuckDBPyRelation,
     con: DuckDBPyConnection,
-    max_unique_ids_per_trigram: int = 20,
+    max_unique_ids_per_key: int = 20,
     num_of_chunks: int = 1,
+    strategies: list[IndexingStrategy] | None = None,
     *,
     debug_options: Optional["DebugOptions"] = None,
 ) -> DuckDBPyRelation:
-    """Derive a trigram-based inverted index from already-cleaned canonical data.
+    """Derive an inverted index from already-cleaned canonical data.
 
     This function expects pre-cleaned address data
     (output of prepare_data_for_matching)
-    with `clean_full_address` and `unique_id` columns already present.
-    It computes trigrams
-    (consecutive 3-token sequences) and builds an inverted index mapping each trigram
-    to a list of unique_ids. Trigrams appearing in more than `max_unique_ids_per_trigram`
-    records are filtered out as they provide poor blocking selectivity.
+    with ``clean_full_address`` and ``unique_id`` columns already present.
+    For each indexing strategy it generates keys and builds an inverted
+    index mapping each key to a list of unique_ids.  Keys appearing in more
+    than ``max_unique_ids_per_key`` records are filtered out as they provide
+    poor blocking selectivity.
 
-    When ``num_of_chunks`` > 1, the inverted index is built in chunks partitioned
-    by **trigram hash** (not by address).  This ensures every occurrence of a given
-    trigram is processed within the same chunk so the global frequency filter is
-    applied correctly.  Chunk results are vertically concatenated.
+    When ``num_of_chunks`` > 1, the inverted index is built in chunks
+    partitioned by **key hash** (not by address).  This ensures every
+    occurrence of a given key is processed within the same chunk so the
+    global frequency filter is applied correctly.  Chunk results are
+    vertically concatenated.
 
-    Example usage:
-        # First clean canonical data (no inverted index needed)
+    Example usage::
+
         df_canonical_clean = prepare_data_for_matching(df_canonical, con)
-
-        # Derive inverted index from cleaned canonical data
         inverted_idx = derive_inverted_index(df_canonical_clean, con)
-
-        # Clean messy data using the inverted index
         df_messy_clean = prepare_data_for_matching(
             df_messy, con, inverted_index=inverted_idx
         )
 
     Args:
-        cleaned_address_table: Pre-cleaned address relation with `clean_full_address`
-            and `unique_id` columns (output of prepare_data_for_matching).
+        cleaned_address_table: Pre-cleaned address relation with
+            ``clean_full_address`` and ``unique_id`` columns.
         con: DuckDB connection.
-        max_unique_ids_per_trigram: Maximum number of unique_ids a trigram can
-            reference before being filtered out. Default 20.
-        num_of_chunks: Number of chunks to split the work into.  Set to 1 (the
-            default) for no chunking.  Higher values reduce peak memory by
-            partitioning trigrams across chunks via a hash modulo.
+        max_unique_ids_per_key: Maximum number of unique_ids a key can
+            reference before being filtered out.  Default 20.
+        num_of_chunks: Number of chunks to split the work into.  Set to 1
+            (the default) for no chunking.
+        strategies: List of :class:`IndexingStrategy` instances.  Defaults
+            to :data:`DEFAULT_INDEXING_STRATEGIES` (trigram + bigram).
         debug_options: Optional debug configuration for pipeline execution.
 
     Returns:
-        Inverted index table with 'trigram' (VARCHAR)
-        and 'unique_ids' (LIST) columns.
+        Inverted index table with ``key`` (VARCHAR), ``unique_ids`` (LIST),
+        and ``index_strategy`` (VARCHAR) columns.
     """
+    if strategies is None:
+        strategies = DEFAULT_INDEXING_STRATEGIES
+
     uid = _uid()
     num_of_chunks = max(1, num_of_chunks)
 
-    if num_of_chunks == 1:
-        # Single-pass (original behaviour, no chunking overhead)
-        trigram_pipeline = create_sql_pipeline(
-            con,
-            input_rel=cleaned_address_table,
-            stage_specs=[
-                _derive_trigrams_from_address_tokens(),
-                _build_inverted_index_from_trigrams(max_unique_ids_per_trigram),
-            ],
-            pipeline_name="Build inverted index",
-            pipeline_description=("Derive trigrams and aggregate into inverted index"),
-        )
-        inverted_index_result = trigram_pipeline.run(debug_options)
-
-        result_table = f"__ukam_derived_inverted_index_{uid}"
-        con.sql(f"DROP TABLE IF EXISTS {result_table}")
-        inverted_index_result.create(result_table)
-        return con.table(result_table)
-
-    # --- Chunked path -------------------------------------------------------
-    # Each chunk scans ALL rows but derives trigrams on-the-fly and immediately
-    # filters to only trigrams whose hash maps to this chunk.  This avoids ever
-    # materialising all trigrams at once — only ~1/N of trigrams are unnested
-    # per iteration.  The inverted index aggregation then runs on the filtered
-    # subset with no further filtering required.
-    total_rows = cleaned_address_table.count("*").fetchone()[0]
-
     result_table = f"__ukam_derived_inverted_index_{uid}"
     con.execute(f"DROP TABLE IF EXISTS {result_table}")
+    first_insert = True
 
-    for chunk_index in range(num_of_chunks):
-        chunk_started_at = time.perf_counter()
+    total_rows = cleaned_address_table.count("*").fetchone()[0]
 
-        trigram_pipeline = create_sql_pipeline(
-            con,
-            input_rel=cleaned_address_table,
-            stage_specs=[
-                _derive_trigrams_from_address_tokens(
-                    num_of_chunks=num_of_chunks,
-                    chunk_index=chunk_index,
+    for strategy in strategies:
+        if num_of_chunks == 1:
+            # Single-pass for this strategy
+            pipeline = create_sql_pipeline(
+                con,
+                input_rel=cleaned_address_table,
+                stage_specs=[
+                    _derive_keys_for_strategy(strategy),
+                    _build_inverted_index_from_keys(strategy, max_unique_ids_per_key),
+                ],
+                pipeline_name=f"Build inverted index ({strategy.name})",
+                pipeline_description=(
+                    f"Derive {strategy.name} keys and aggregate into inverted index"
                 ),
-                _build_inverted_index_from_trigrams(max_unique_ids_per_trigram),
-            ],
-            pipeline_name="Build inverted index",
-            pipeline_description=(
-                f"Derive trigrams and aggregate into inverted index "
-                f"(chunk {chunk_index + 1}/{num_of_chunks})"
-            ),
-        )
-        chunk_result = trigram_pipeline.run(debug_options if chunk_index == 0 else None)
+            )
+            chunk_result = pipeline.run(debug_options if first_insert else None)
 
-        if chunk_index == 0:
-            chunk_result.create(result_table)
+            if first_insert:
+                chunk_result.create(result_table)
+                first_insert = False
+            else:
+                chunk_result.insert_into(result_table)
         else:
-            chunk_result.insert_into(result_table)
+            # Chunked path for this strategy
+            for chunk_index in range(num_of_chunks):
+                chunk_started_at = time.perf_counter()
 
-        _log_progress(
-            total_rows,
-            min(
-                (chunk_index + 1) * ((total_rows + num_of_chunks - 1) // num_of_chunks),
-                total_rows,
-            ),
-            stage_type="Built inverted index: ",
-            chunk_index=chunk_index,
-            total_chunks=num_of_chunks,
-            chunk_elapsed_seconds=time.perf_counter() - chunk_started_at,
-        )
+                pipeline = create_sql_pipeline(
+                    con,
+                    input_rel=cleaned_address_table,
+                    stage_specs=[
+                        _derive_keys_for_strategy(
+                            strategy,
+                            num_of_chunks=num_of_chunks,
+                            chunk_index=chunk_index,
+                        ),
+                        _build_inverted_index_from_keys(strategy, max_unique_ids_per_key),
+                    ],
+                    pipeline_name=f"Build inverted index ({strategy.name})",
+                    pipeline_description=(
+                        f"Derive {strategy.name} keys and aggregate into inverted "
+                        f"index (chunk {chunk_index + 1}/{num_of_chunks})"
+                    ),
+                )
+                chunk_result = pipeline.run(debug_options if first_insert else None)
+
+                if first_insert:
+                    chunk_result.create(result_table)
+                    first_insert = False
+                else:
+                    chunk_result.insert_into(result_table)
+
+                _log_progress(
+                    total_rows,
+                    min(
+                        (chunk_index + 1)
+                        * ((total_rows + num_of_chunks - 1) // num_of_chunks),
+                        total_rows,
+                    ),
+                    stage_type=(f"Built inverted index ({strategy.name}): "),
+                    chunk_index=chunk_index,
+                    total_chunks=num_of_chunks,
+                    chunk_elapsed_seconds=(time.perf_counter() - chunk_started_at),
+                )
 
     return con.table(result_table)
 
@@ -426,10 +433,11 @@ def prepare_data_for_matching(
             'token' and 'rel_freq' columns. Use derive_term_frequencies_table()
             to create this from a reference dataset (typically the canonical addresses).
             If not provided, uses the package's pre-baked term frequencies.
-        inverted_index: Optional pre-computed trigram inverted index table with
-            'trigram' and 'unique_ids' columns. Use derive_inverted_index()
+        inverted_index: Optional pre-computed inverted index table with
+            'key', 'unique_ids', and 'index_strategy' columns.
+            Use derive_inverted_index()
             to create this from canonical addresses. When provided, the function
-            derives trigrams from addresses and looks up matching unique_ids,
+            derives index keys from addresses and looks up matching unique_ids,
             populating the `exploding_unique_ids` column. When not provided,
             `exploding_unique_ids` is set to [unique_id] (single-element array).
         derive_distinguishing_wrt_adjacent_records: Whether to derive distinguishing
@@ -478,11 +486,11 @@ def prepare_data_for_matching(
     # Register inverted index table if provided (for use in pipeline stages)
     inv_idx_table_name = _register_inverted_index_table(con, inverted_index)
 
-    # Determine which trigram stages to use as additional pipeline stages
-    trigram_stages = (
-        list(QUEUE_TRIGRAM_WITH_INVERTED_INDEX)
+    # Determine which inverted index stages to use as additional pipeline stages
+    inverted_index_stages = (
+        list(QUEUE_INVERTED_INDEX_LOOKUP)
         if inv_idx_table_name is not None
-        else list(QUEUE_TRIGRAM_SELF)
+        else list(QUEUE_INVERTED_INDEX_SELF)
     )
 
     chunk_size = _calculate_chunk_size(total_rows, num_of_chunks)
@@ -504,7 +512,7 @@ def prepare_data_for_matching(
         chunk_table = f"__ukam_post_tf_chunk_input_{uid}_{chunk_index}"
         chunk = _materialise_relation(con, chunk_query, chunk_table)
 
-        # Process chunk: apply term frequencies + trigram blocking in one pass
+        # Process chunk: apply term frequencies + inverted index blocking in one pass
         processed_chunk = _clean_data_using_precomputed_rel_tok_freq(
             chunk,
             con=con,
@@ -512,7 +520,7 @@ def prepare_data_for_matching(
             derive_distinguishing_wrt_adjacent_records=(
                 derive_distinguishing_wrt_adjacent_records
             ),
-            additional_stages=trigram_stages,
+            additional_stages=inverted_index_stages,
             debug_options=debug_options if chunk_index == 0 else None,
         )
 
