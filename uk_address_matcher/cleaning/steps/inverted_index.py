@@ -8,10 +8,9 @@ from uk_address_matcher.sql_pipeline.steps import CTEStep, pipeline_stage
 class IndexingStrategy(NamedTuple):
     """Defines an inverted index strategy mapping clean_full_address to keys.
 
-    Each strategy provides a SQL expression that, given a ``clean_full_address``
-    column, evaluates to a ``VARCHAR[]`` array of index keys.  The expression
-    must be self-contained — tokenisation or any other pre-processing is part
-    of the strategy, not a shared prerequisite.
+    Each strategy provides a SQL expression that evaluates to a ``VARCHAR[]``
+    array of index keys. The expression can assume both
+    ``clean_full_address`` and ``__tokens`` are available.
 
     Attributes:
         name: Short identifier for the strategy (e.g. ``"trigram"``).
@@ -31,12 +30,12 @@ TRIGRAM_STRATEGY = IndexingStrategy(
     name="trigram",
     keys_sql_expr="""\
 CASE
-    WHEN len(string_split(clean_full_address, ' ')) >= 3 THEN
+    WHEN len(__tokens) >= 3 THEN
         list_transform(
-            generate_series(1, len(string_split(clean_full_address, ' ')) - 2),
-            __i -> string_split(clean_full_address, ' ')[__i]
-                   || ' ' || string_split(clean_full_address, ' ')[__i + 1]
-                   || ' ' || string_split(clean_full_address, ' ')[__i + 2]
+            generate_series(1, len(__tokens) - 2),
+            __i -> __tokens[__i]
+                   || ' ' || __tokens[__i + 1]
+                   || ' ' || __tokens[__i + 2]
         )
     ELSE []::VARCHAR[]
 END""",
@@ -46,11 +45,11 @@ BIGRAM_STRATEGY = IndexingStrategy(
     name="bigram",
     keys_sql_expr="""\
 CASE
-    WHEN len(string_split(clean_full_address, ' ')) >= 2 THEN
+    WHEN len(__tokens) >= 2 THEN
         list_transform(
-            generate_series(1, len(string_split(clean_full_address, ' ')) - 1),
-            __i -> string_split(clean_full_address, ' ')[__i]
-                   || ' ' || string_split(clean_full_address, ' ')[__i + 1]
+            generate_series(1, len(__tokens) - 1),
+            __i -> __tokens[__i]
+                   || ' ' || __tokens[__i + 1]
         )
     ELSE []::VARCHAR[]
 END""",
@@ -99,20 +98,34 @@ def _derive_keys_for_strategy(
         keys_expr = strategy.keys_sql_expr
         if chunked:
             sql = f"""
+            WITH tokenised AS (
+                SELECT
+                    unique_id,
+                    clean_full_address,
+                    string_split(clean_full_address, ' ') AS __tokens
+                FROM {{input}}
+            )
             SELECT
                 unique_id,
                 list_filter(
                     {keys_expr},
                     __k -> (abs(hash(__k)) % {num_of_chunks}) = {chunk_index}
                 ) AS __index_keys
-            FROM {{input}}
+            FROM tokenised
             """
         else:
             sql = f"""
+            WITH tokenised AS (
+                SELECT
+                    unique_id,
+                    clean_full_address,
+                    string_split(clean_full_address, ' ') AS __tokens
+                FROM {{input}}
+            )
             SELECT
                 unique_id,
                 {keys_expr} AS __index_keys
-            FROM {{input}}
+            FROM tokenised
             """
         return sql
 
@@ -197,7 +210,10 @@ def _lookup_keys_in_inverted_index(strategies=None):
     )
     def _stage():
         base_sql = """
-        SELECT * FROM {input}
+        SELECT
+            *,
+            string_split(clean_full_address, ' ') AS __tokens
+        FROM {input}
         """
 
         # Build UNION ALL of unnested keys from every strategy
@@ -234,7 +250,7 @@ def _lookup_keys_in_inverted_index(strategies=None):
         # Join back to base and add exploding_unique_ids column
         final_sql = """
         SELECT
-            base.*,
+            base.* EXCLUDE (__tokens),
             COALESCE(d.exploding_unique_ids, []) AS exploding_unique_ids
         FROM {base} AS base
         LEFT JOIN {deduplicated} AS d ON base.unique_id = d.__messy_uid

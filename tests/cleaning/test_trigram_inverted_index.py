@@ -154,7 +154,9 @@ class TestIndexingStrategySqlExpressions:
 
         result = duck_con.sql(f"""
             WITH input AS (
-                SELECT '9 LOVE LANE LONDON' AS clean_full_address
+                SELECT
+                    '9 LOVE LANE LONDON' AS clean_full_address,
+                    string_split('9 LOVE LANE LONDON', ' ') AS __tokens
             )
             SELECT {TRIGRAM_STRATEGY.keys_sql_expr} AS keys
             FROM input
@@ -168,7 +170,9 @@ class TestIndexingStrategySqlExpressions:
 
         result = duck_con.sql(f"""
             WITH input AS (
-                SELECT 'HIGH STREET' AS clean_full_address
+                SELECT
+                    'HIGH STREET' AS clean_full_address,
+                    string_split('HIGH STREET', ' ') AS __tokens
             )
             SELECT {TRIGRAM_STRATEGY.keys_sql_expr} AS keys
             FROM input
@@ -182,7 +186,9 @@ class TestIndexingStrategySqlExpressions:
 
         result = duck_con.sql(f"""
             WITH input AS (
-                SELECT '9 LOVE LANE LONDON' AS clean_full_address
+                SELECT
+                    '9 LOVE LANE LONDON' AS clean_full_address,
+                    string_split('9 LOVE LANE LONDON', ' ') AS __tokens
             )
             SELECT {BIGRAM_STRATEGY.keys_sql_expr} AS keys
             FROM input
@@ -196,7 +202,9 @@ class TestIndexingStrategySqlExpressions:
 
         result = duck_con.sql(f"""
             WITH input AS (
-                SELECT 'LONDON' AS clean_full_address
+                SELECT
+                    'LONDON' AS clean_full_address,
+                    string_split('LONDON', ' ') AS __tokens
             )
             SELECT {BIGRAM_STRATEGY.keys_sql_expr} AS keys
             FROM input
