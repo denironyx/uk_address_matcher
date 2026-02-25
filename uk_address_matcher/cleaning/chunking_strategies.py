@@ -279,6 +279,7 @@ def derive_inverted_index(
     cleaned_address_table: DuckDBPyRelation,
     con: DuckDBPyConnection,
     max_unique_ids_per_trigram: int = 20,
+    num_of_chunks: int = 1,
     *,
     debug_options: Optional["DebugOptions"] = None,
 ) -> DuckDBPyRelation:
@@ -291,6 +292,11 @@ def derive_inverted_index(
     (consecutive 3-token sequences) and builds an inverted index mapping each trigram
     to a list of unique_ids. Trigrams appearing in more than `max_unique_ids_per_trigram`
     records are filtered out as they provide poor blocking selectivity.
+
+    When ``num_of_chunks`` > 1, the inverted index is built in chunks partitioned
+    by **trigram hash** (not by address).  This ensures every occurrence of a given
+    trigram is processed within the same chunk so the global frequency filter is
+    applied correctly.  Chunk results are vertically concatenated.
 
     Example usage:
         # First clean canonical data (no inverted index needed)
@@ -310,6 +316,9 @@ def derive_inverted_index(
         con: DuckDB connection.
         max_unique_ids_per_trigram: Maximum number of unique_ids a trigram can
             reference before being filtered out. Default 20.
+        num_of_chunks: Number of chunks to split the work into.  Set to 1 (the
+            default) for no chunking.  Higher values reduce peak memory by
+            partitioning trigrams across chunks via a hash modulo.
         debug_options: Optional debug configuration for pipeline execution.
 
     Returns:
@@ -317,24 +326,75 @@ def derive_inverted_index(
         and 'unique_ids' (LIST) columns.
     """
     uid = _uid()
+    num_of_chunks = max(1, num_of_chunks)
 
-    # Generate trigrams and build inverted index using pipeline stages
-    trigram_pipeline = create_sql_pipeline(
-        con,
-        input_rel=cleaned_address_table,
-        stage_specs=[
-            _derive_trigrams_from_address_tokens,
-            _build_inverted_index_from_trigrams(max_unique_ids_per_trigram),
-        ],
-        pipeline_name="Build inverted index",
-        pipeline_description="Derive trigrams and aggregate into inverted index",
-    )
-    inverted_index_result = trigram_pipeline.run(debug_options)
+    if num_of_chunks == 1:
+        # Single-pass (original behaviour, no chunking overhead)
+        trigram_pipeline = create_sql_pipeline(
+            con,
+            input_rel=cleaned_address_table,
+            stage_specs=[
+                _derive_trigrams_from_address_tokens(),
+                _build_inverted_index_from_trigrams(max_unique_ids_per_trigram),
+            ],
+            pipeline_name="Build inverted index",
+            pipeline_description=("Derive trigrams and aggregate into inverted index"),
+        )
+        inverted_index_result = trigram_pipeline.run(debug_options)
 
-    # Materialise the result
+        result_table = f"__ukam_derived_inverted_index_{uid}"
+        con.sql(f"DROP TABLE IF EXISTS {result_table}")
+        inverted_index_result.create(result_table)
+        return con.table(result_table)
+
+    # --- Chunked path -------------------------------------------------------
+    # Each chunk scans ALL rows but derives trigrams on-the-fly and immediately
+    # filters to only trigrams whose hash maps to this chunk.  This avoids ever
+    # materialising all trigrams at once — only ~1/N of trigrams are unnested
+    # per iteration.  The inverted index aggregation then runs on the filtered
+    # subset with no further filtering required.
+    total_rows = cleaned_address_table.count("*").fetchone()[0]
+
     result_table = f"__ukam_derived_inverted_index_{uid}"
-    con.sql(f"DROP TABLE IF EXISTS {result_table}")
-    inverted_index_result.create(result_table)
+    con.execute(f"DROP TABLE IF EXISTS {result_table}")
+
+    for chunk_index in range(num_of_chunks):
+        chunk_started_at = time.perf_counter()
+
+        trigram_pipeline = create_sql_pipeline(
+            con,
+            input_rel=cleaned_address_table,
+            stage_specs=[
+                _derive_trigrams_from_address_tokens(
+                    num_of_chunks=num_of_chunks,
+                    chunk_index=chunk_index,
+                ),
+                _build_inverted_index_from_trigrams(max_unique_ids_per_trigram),
+            ],
+            pipeline_name="Build inverted index",
+            pipeline_description=(
+                f"Derive trigrams and aggregate into inverted index "
+                f"(chunk {chunk_index + 1}/{num_of_chunks})"
+            ),
+        )
+        chunk_result = trigram_pipeline.run(debug_options if chunk_index == 0 else None)
+
+        if chunk_index == 0:
+            chunk_result.create(result_table)
+        else:
+            chunk_result.insert_into(result_table)
+
+        _log_progress(
+            total_rows,
+            min(
+                (chunk_index + 1) * ((total_rows + num_of_chunks - 1) // num_of_chunks),
+                total_rows,
+            ),
+            stage_type="Built inverted index: ",
+            chunk_index=chunk_index,
+            total_chunks=num_of_chunks,
+            chunk_elapsed_seconds=time.perf_counter() - chunk_started_at,
+        )
 
     return con.table(result_table)
 

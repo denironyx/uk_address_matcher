@@ -280,6 +280,46 @@ class TestDeriveInvertedIndexFunction:
         # 'COMMON STREET NAME' appears in 3 records, should be filtered out
         assert "COMMON STREET NAME" not in result_dict
 
+    def test_chunked_inverted_index_matches_non_chunked(self, duck_con):
+        """Test that chunked inverted index produces the same results as single-pass."""
+        from uk_address_matcher.cleaning.chunking_strategies import (
+            derive_inverted_index,
+            prepare_data_for_matching,
+        )
+
+        canonical_raw = duck_con.sql("""
+            SELECT * FROM (VALUES
+                ('1', '9 LOVE LANE LONDON', 'SW1A 1AA'),
+                ('2', '9 LOVE LANE BRIGHTON', 'BN1 1AA'),
+                ('3', '8 LOVE LANE LONDON', 'SW1A 1AB'),
+                ('4', '10 HIGH STREET OXFORD', 'OX1 1AA'),
+                ('5', '5 PARK AVENUE MANCHESTER', 'M1 2AB'),
+                ('6', '12 CHURCH ROAD OXFORD', 'OX2 1BB'),
+                ('7', '3 KINGS ROAD BRIGHTON', 'BN1 2CC'),
+                ('8', '7 QUEENS DRIVE LONDON', 'SW2 3DD')
+            ) AS t(unique_id, address_concat, postcode)
+        """)
+
+        canonical_clean = prepare_data_for_matching(
+            canonical_raw, duck_con, num_of_chunks=1
+        )
+
+        # Build inverted index without chunking
+        idx_no_chunk = derive_inverted_index(
+            canonical_clean, duck_con, max_unique_ids_per_trigram=20, num_of_chunks=1
+        )
+        no_chunk_rows = idx_no_chunk.fetchall()
+        no_chunk_dict = {row[0]: sorted(row[1]) for row in no_chunk_rows}
+
+        # Build inverted index with chunking (use an odd-ish number)
+        idx_chunked = derive_inverted_index(
+            canonical_clean, duck_con, max_unique_ids_per_trigram=20, num_of_chunks=5
+        )
+        chunked_rows = idx_chunked.fetchall()
+        chunked_dict = {row[0]: sorted(row[1]) for row in chunked_rows}
+
+        assert no_chunk_dict == chunked_dict
+
 
 class TestPrepareDataForMatchingWithInvertedIndex:
     """Integration tests for prepare_data_for_matching with inverted_index parameter."""
