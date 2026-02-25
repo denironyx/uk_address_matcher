@@ -128,7 +128,7 @@ def prepare_canonical_folder(
     )
 
     logger.debug("Building inverted index")
-    inverted_index = derive_inverted_index(df_clean, con=con)
+    inverted_index = derive_inverted_index(df_clean, con=con, num_of_chunks=num_of_chunks)
 
     # Write parquet files
     addr_path = output_folder / PREPARED_ADDRESSES_FILENAME
