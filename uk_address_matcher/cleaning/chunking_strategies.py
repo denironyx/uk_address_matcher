@@ -8,8 +8,8 @@ from duckdb import DuckDBPyConnection, DuckDBPyRelation
 
 from uk_address_matcher.cleaning.pipelines import (
     QUEUE_FOR_TF_DERIVATION,
-    QUEUE_INVERTED_INDEX_SELF,
     QUEUE_INVERTED_INDEX_LOOKUP,
+    QUEUE_INVERTED_INDEX_SELF,
     _clean_data_pre_term_frequencies,
     _clean_data_using_precomputed_rel_tok_freq,
     _create_term_frequency_tables,
