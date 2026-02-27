@@ -85,7 +85,25 @@ uvx --from ukam-os-builder ukam-os-build
 
 If you use the default settings, your data will now be built to: `data/output/`.  Note, unless you set `num_chunks=1`, this will be a folder containing multiple files representing a single table.  DuckDB will allow us to easily read this as a single table using a command like `con.read_parquet('data/output/*.parquet')`.
 
+
+## Step 4: Pre-processing for matching (whole UK dataset only)
+
+When matching to address in a small region, using `uk_address_matcher` is simpler because all data processing can be done on the fly.  There is no need to pre-process any of the underlying tables such as features and inverted indices.
+
+If you're matching to the whole UK dataset, you will want to use the following preprocessing step where you derive the features and inverted index explicitly.   The reason for this is twofold:
+- If you attempt to process the full 60m records on the fly, you are likely to run into memory issues; and
+- You can re-use these preprocessed files for subsequent matching runs.  Even on a high spec computer, it will take several minutes to derive these tables, so pre-processing them avoids repeated recomputation.
+
+
 ## Step 4: Match the data using `uk_address_matcher`
+
+
+
+
+
+
+
+### Option A: If your datapackage is for a local council region
 
 
 Create your address matching script in a file called `script.py`
@@ -127,3 +145,6 @@ And run it using:
 ```
 uv run script.py
 ```
+
+### Option B: If your datapackage is for the whole of the UK
+
