@@ -2,20 +2,22 @@
 
 Ordnance Survey is the UK’s authoritative provider of address data.  Many public sector organisations are able to use this data for free under the [Public Sector Geospatial Agreement](https://www.ordnancesurvey.co.uk/customers/public-sector/public-sector-geospatial-agreement) (PSGA).
 
-This guide describes our recommended end-to-end process for address matching to Ordnance Survey data, including all software installs and building a single authorativie input address file file optimised for matching.
+This guide describes our recommended end-to-end process for address matching to Ordnance Survey data, including downloading the raw data, all software installs and building a single authoritative input address file optimised for matching.
 
 Supposing we have 100,000 messy addresses to match.  The steps and their respective timings are as follows.  Time taken dependes on whether the 100,000 are from around the whole country or a specific geographical region.  A local council area is used as an example.
 
 | Task | Timing (Local council region) | Timing (Full country) |
 |------|-------------------------------|----------------------|
-| 1. Install Python and Astral UV and the `uk_address_matcher` package 5 minutes | 5 minutes |
-| 2. Create a data package and corresponding API key in the [Ordnance Survey Data Hub](https://osdatahub.os.uk/data/downloads/data-packages) | 5 minutes | 5 minutes |
+| 1. Create a data package and corresponding API key in the [Ordnance Survey Data Hub](https://osdatahub.os.uk/data/downloads/data-packages) | 5 minutes | 5 minutes |
+| 2. Install Python and Astral UV and the `uk_address_matcher` package | 5 minutes | 5 minutes |
 | 3. Process Ordnance Survey data into a flatfile | 5 seconds* | 4 minutes** |
 | 4. Derives indexes and other features for address matching  | Not necessary, can be done on the fly | 4 mins 50 seconds |
 | 5. Use `uk_address_matcher` to match 100,000 records | 26 seconds |  |
 
-* Plus 15 seconds to download the data
-** Plus 18 minutes to download the data
+
+\* Plus 15 seconds to download the data
+
+\** Plus 18 minutes to download the data
 
 Timings data from processing on a Macbook Pro M4 Max.
 
@@ -31,7 +33,7 @@ To download data from Ordnance Survey, you need three values:
 
 Choose whether you want to use AddressBase or NGD.  Use whichever you're familiar with, but default to NGD if you've never used either.
 
-Log in to `https://osdatahub.os.uk/` and create a [new receipie](https://osdatahub.os.uk/data/downloads/recipe-library) corresponding to the geographical area of interest.
+Log in to `https://osdatahub.os.uk/` and create a [new recipe](https://osdatahub.os.uk/data/downloads/recipe-library) corresponding to the geographical area of interest.
 
 Once created, navigate to [data packages](https://osdatahub.os.uk/data/downloads/data-packages/), and locate your data package, which will be at a URL like `https://osdatahub.os.uk/data/downloads/data-packages/18296`.
 
@@ -41,7 +43,7 @@ Use this URL to identify the data package ID, which in the above example is `182
 
 Then obtain your API key and API secret from the [API Projects](https://osdatahub.os.uk/data/apis/projects) page in Data Hub.  Create a new project if one does not already exist.
 
-## Step 2: Install the required software
+## Step 2: Create a new directory for your project and install the required software
 
 We will use `uv` to install the `uk_address_matcher` package.  Install it using the [official instructions](https://docs.astral.sh/uv/getting-started/installation/).
 
@@ -52,78 +54,76 @@ mkdir address_project
 cd address_project
 ```
 
+Initiate a new `uv` project:
+
+```
+uv init --bare
+```
+
+Then install `uk_address_matcher` into your project:
+
+```
+uv add uk_address_matcher
+```
 
 ## Step 3: Build the optimised cannoical dataset of UK addresses
 
-The instructions are slighly different depending on whether your chose a NGD data package or AddressBase Premium
 
-### NGD:
-```bash
-git clone https://github.com/moj-analytical-services/prepare_ngd_for_address_matching
+We have created a tool called `ukam-os-builder`to process Ordnance Survey data into a format optimised for address matching.  For more details of the tool, see the Github [homepage](https://github.com/moj-analytical-services/ukam_os_builder).
 
-cd prepare_ngd_for_address_matching
-```
-
-### AddressBase Premium:
-```bash
-https://github.com/moj-analytical-services/prepare_addressbase_for_address_matching
-
-cd prepare_addressbase_for_address_matching
-```
-
-Once you've cloned the builder you then need to populate the config files with your API key.
-
-Create a new file called `.env`:
-
-```
-touch .env
-```
-
-Open the file, and add the following lines with the values you obtained in step 1.
-```
-OS_PROJECT_API_KEY=your_key_goes_here
-OS_PROJECT_API_SECRET=your_secret_goes_here
-```
-
-Open the file called `config.yaml` and update the `package_id` and the `version_id` variables with the values you obtained in step 1.
-
-Finally, in `config.yaml` update the `num_chunks` variable. This value causes the data to be processed in smaller parts rather than all at once, which means it runs more easily on a low specced compute.
-
-If your data package is the full country, we recommend a value between about 20-50, depending on how powerful your laptop is.
-
-If your data package is a single local authority, then a value of 1-4 is more appropriate.
-
-
-Now you're ready to build the data:
+Using this tool is a two step process.  The first command provides a config wizard that helps you point the tool to your data package.  The second command downloads the data and builds the optimised flatfile.
 
 ```bash
-uv sync
-uv run python script.py
+# Run config wizard:
+uvx --from ukam-os-builder ukam-os-setup
 ```
 
-## Step 4: Match the data using `uk_daddre
-
-
-
-Install `uk_address_matcher` into your project:
-```
-uv venv
-uv pip install uk_address_matcher
+```bash
+# Download the data and build the optimised flatfile:
+uvx --from ukam-os-builder ukam-os-build
 ```
 
-Test it works:
+If you use the default settings, your data will now be built to: `data/output/`.  Note, unless you set `num_chunks=1`, this will be a folder containing multiple files representing a single table.  DuckDB will allow us to easily read this as a single table using a command like `con.read_parquet('data/output/*.parquet')`.
 
-Create a new file called `script.py`
+## Step 4: Match the data using `uk_address_matcher`
+
+
+Create your address matching script in a file called `script.py`
 
 ```python
-import uk_address_matcher
-print("hello world")
+import duckdb
+from uk_address_matcher import AddressMatcher, ExactMatchStage, SplinkStage
+
+con = duckdb.connect()
+
+df_messy = con.read_parquet("messy_addresses.parquet")
+df_canonical = con.read_parquet("data/output/*.parquet")
+
+
+matcher = AddressMatcher(
+    canonical_addresses=df_canonical,
+    addresses_to_match=df_messy,
+    con=con,
+    stages=[
+        ExactMatchStage(),
+        SplinkStage(
+            final_match_weight_threshold=2,
+            final_distinguishability_threshold=1,
+        ),
+    ],
+)
+
+result = matcher.match()
+
+# Your results
+result.matches.show(max_width=10000)
+
+# Summary metrics on how many were matched
+result.match_metrics().show()
 ```
 
 And run it using:
 
-```bash
-uv run python my_script.py
 ```
-
-## Step 3:
+uv run script.py
+```
