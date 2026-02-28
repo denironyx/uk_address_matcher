@@ -187,7 +187,10 @@ def _get_linker(
     db_api = DuckDBAPI(connection=con)
 
     con.register("df_addresses_to_match_fix", df_addresses_to_match)
-    con.register("df_addresses_to_search_within_fix", df_addresses_to_search_within)
+
+    # See https://github.com/moj-analytical-services/uk_address_matcher/issues/253
+    # con.register("df_addresses_to_search_within_fix", df_addresses_to_search_within)
+    df_addresses_to_search_within_fix = df_addresses_to_search_within
 
     df_addresses_to_match_fix = con.table("df_addresses_to_match_fix")
     df_addresses_to_search_within_fix = con.table("df_addresses_to_search_within_fix")
