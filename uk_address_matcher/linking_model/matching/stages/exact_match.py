@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 MessyInputName = Literal["messy_addresses", "unmatched_records"]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class ExactMatchStage(MatchingStage):
     """Exact hash-join matching on clean_full_address + postcode."""
 

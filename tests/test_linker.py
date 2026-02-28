@@ -1,6 +1,6 @@
 import pytest
 
-from uk_address_matcher.linking_model.splink_model import get_linker
+from uk_address_matcher.linking_model.splink_model import _get_linker
 from uk_address_matcher.sql_pipeline.match_reasons import MatchReason
 
 
@@ -12,7 +12,14 @@ def resolved_only_matches(duck_con):
         SELECT *
         FROM (
             VALUES
-                (1::BIGINT, 'ADDRESS 1'::VARCHAR, 'POSTCODE 1'::VARCHAR, '{reason}'::VARCHAR, 100::BIGINT, NULL::BIGINT)
+                (
+                    1::BIGINT,
+                    'ADDRESS 1'::VARCHAR,
+                    'POSTCODE 1'::VARCHAR,
+                    '{reason}'::VARCHAR,
+                    100::BIGINT,
+                    NULL::BIGINT
+                )
         ) AS t(
             unique_id,
             original_address_concat,
@@ -33,7 +40,14 @@ def unresolved_matches(duck_con):
         SELECT *
         FROM (
             VALUES
-                (2::BIGINT, 'ADDRESS 2'::VARCHAR, 'POSTCODE 2'::VARCHAR, '{reason}'::VARCHAR, NULL::BIGINT, NULL::BIGINT)
+                (
+                    2::BIGINT,
+                    'ADDRESS 2'::VARCHAR,
+                    'POSTCODE 2'::VARCHAR,
+                    '{reason}'::VARCHAR,
+                    NULL::BIGINT,
+                    NULL::BIGINT
+                )
         ) AS t(
             unique_id,
             original_address_concat,
@@ -81,7 +95,7 @@ def test_get_linker_raises_when_no_unresolved_rows(
     canonical_non_empty,
 ):
     with pytest.raises(ValueError, match="No unresolved records remain"):
-        get_linker(
+        _get_linker(
             df_addresses_to_match=resolved_only_matches,
             df_addresses_to_search_within=canonical_non_empty,
             con=duck_con,
@@ -94,7 +108,7 @@ def test_get_linker_raises_when_canonical_empty(
     canonical_empty,
 ):
     with pytest.raises(ValueError, match="Canonical relation is empty"):
-        get_linker(
+        _get_linker(
             df_addresses_to_match=unresolved_matches,
             df_addresses_to_search_within=canonical_empty,
             con=duck_con,

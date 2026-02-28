@@ -16,6 +16,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger("uk_address_matcher")
 
 
+def _relation_sql(relation: duckdb.DuckDBPyRelation) -> str:
+    return f"({relation.sql_query()})"
+
+
 def _duckdb_column_type(
     con: duckdb.DuckDBPyConnection,
     relation: duckdb.DuckDBPyRelation,
@@ -65,7 +69,7 @@ def _create_results_table(
             NULL::{resolved_canonical_type} AS resolved_canonical_id,
             NULL::{canonical_ukam_type} AS canonical_ukam_address_id,
             NULL::ENUM {enum_values} AS match_reason
-        FROM ({df_messy_clean.sql_query()}) AS messy
+        FROM {_relation_sql(df_messy_clean)} AS messy
         """
     )
 
@@ -78,7 +82,7 @@ def _get_unmatched(
     return con.sql(
         f"""
         SELECT messy.*
-        FROM ({df_messy_clean.sql_query()}) AS messy
+        FROM {_relation_sql(df_messy_clean)} AS messy
         INNER JOIN {results_table} AS results
             ON results.ukam_address_id = messy.ukam_address_id
         WHERE results.resolved_canonical_id IS NULL
@@ -92,10 +96,7 @@ def _build_final_output(
     df_canonical_clean: duckdb.DuckDBPyRelation,
     results_table: str,
 ) -> duckdb.DuckDBPyRelation:
-    results_columns = [
-        row[1]
-        for row in con.execute(f"PRAGMA table_info('{results_table}')").fetchall()
-    ]
+    results_columns = con.table(results_table).columns
 
     excluded = {
         "ukam_address_id",
@@ -105,9 +106,7 @@ def _build_final_output(
         "canonical_ukam_address_id",
         "match_reason",
     }
-    additional_columns = [
-        column for column in results_columns if column not in excluded
-    ]
+    additional_columns = [column for column in results_columns if column not in excluded]
     additional_projection = "".join(
         f",\n            results.{column}" for column in additional_columns
     )
@@ -124,16 +123,16 @@ def _build_final_output(
             ,
             canonical.original_address_concat AS original_address_concat_canonical,
             canonical.postcode AS postcode_canonical
-        FROM ({df_messy_clean.sql_query()}) AS messy
+        FROM {_relation_sql(df_messy_clean)} AS messy
         INNER JOIN {results_table} AS results
             ON results.ukam_address_id = messy.ukam_address_id
-        LEFT JOIN ({df_canonical_clean.sql_query()}) AS canonical
+        LEFT JOIN {_relation_sql(df_canonical_clean)} AS canonical
             ON canonical.ukam_address_id = results.canonical_ukam_address_id
         """
     )
 
 
-def run_matching(
+def _run_matching(
     con: duckdb.DuckDBPyConnection,
     df_messy_clean: duckdb.DuckDBPyRelation,
     df_canonical_clean: duckdb.DuckDBPyRelation,
@@ -172,8 +171,8 @@ def run_matching(
         ],
     )
 
-    uid = _uid()
-    results_table = f"__ukam_results_{uid}"
+    run_id = _uid()
+    results_table = f"__ukam_results_{run_id}"
     _create_results_table(
         con=con,
         df_messy_clean=df_messy_clean,
@@ -238,7 +237,7 @@ def run_matching(
         results_table=results_table,
     )
 
-    final_table = f"__ukam_final_matches_{uid}"
+    final_table = f"__ukam_final_matches_{run_id}"
     con.execute(f"DROP TABLE IF EXISTS {final_table}")
     result.to_table(final_table)
     final_result = con.table(final_table)

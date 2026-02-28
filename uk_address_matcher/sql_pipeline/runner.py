@@ -38,6 +38,9 @@ StageFactory = Callable[[], Stage]
 StageLike = Union[Stage, StageFactory]
 
 
+_CON_RELATION_ALIAS_CACHE: dict[int, dict[str, str]] = {}
+
+
 class InputBinding(NamedTuple):
     name: str
     relation: duckdb.DuckDBPyRelation
@@ -57,17 +60,36 @@ class InputBinding(NamedTuple):
         con: duckdb.DuckDBPyConnection,
         registered_aliases: set[str],
     ) -> str:
-        alias_candidate = getattr(self.relation, "alias", None) or self.name
+        registration_cache = _CON_RELATION_ALIAS_CACHE.setdefault(id(con), {})
+
+        relation_sql = self.relation.sql_query()
+        cached_alias = registration_cache.get(relation_sql)
+        if cached_alias and _duckdb_table_exists(con, cached_alias):
+            registered_aliases.add(cached_alias)
+            return cached_alias
+
+        relation_alias = getattr(self.relation, "alias", None)
+        use_relation_alias = bool(
+            relation_alias and not str(relation_alias).startswith("unnamed_relation_")
+        )
+        alias_candidate = relation_alias if use_relation_alias else self.name
         alias_candidate = _slug(alias_candidate) or self.normalised_placeholder()
         if alias_candidate[0].isdigit():
             alias_candidate = f"t_{alias_candidate}"
+        if alias_candidate == "root":
+            alias_candidate = f"root_{_uid(4)}"
+
+        if use_relation_alias and _duckdb_table_exists(con, alias_candidate):
+            registration_cache[relation_sql] = alias_candidate
+            registered_aliases.add(alias_candidate)
+            return alias_candidate
 
         alias = alias_candidate
-        while alias in registered_aliases:
+        while alias in registered_aliases or _duckdb_table_exists(con, alias):
             alias = f"{alias_candidate}_{_uid(4)}"
 
-        if not _duckdb_table_exists(con, alias):
-            con.register(alias, self.relation)
+        con.register(alias, self.relation)
+        registration_cache[relation_sql] = alias
 
         registered_aliases.add(alias)
         return alias
@@ -306,19 +328,28 @@ class DuckDBPipeline(CTEPipeline):
             if len(bindings) == 1:
                 if not bindings[0].name:
                     raise ValueError(
-                        "Single InputBinding must define a placeholder or provide a standalone relation."
+                        (
+                            "Single InputBinding must define a placeholder or "
+                            "provide a standalone relation."
+                        )
                     )
                 return bindings
 
             for binding in bindings:
                 if not binding.name:
                     raise ValueError(
-                        "All InputBinding entries must have an explicit placeholder when providing multiple inputs."
+                        (
+                            "All InputBinding entries must have an explicit "
+                            "placeholder when providing multiple inputs."
+                        )
                     )
             return bindings
         else:
             raise TypeError(
-                "input_rel must be a DuckDBPyRelation or a sequence of InputBinding entries."
+                (
+                    "input_rel must be a DuckDBPyRelation or a sequence of "
+                    "InputBinding entries."
+                )
             )
 
     def _bootstrap_inputs(self, bindings: Sequence[InputBinding]) -> None:
@@ -329,7 +360,10 @@ class DuckDBPipeline(CTEPipeline):
             key = binding.normalised_placeholder()
             if key == "input":
                 raise ValueError(
-                    "The placeholder name 'input' is reserved; please choose a different alias."
+                    (
+                        "The placeholder name 'input' is reserved; please "
+                        "choose a different alias."
+                    )
                 )
             if key in seen_placeholders:
                 raise ValueError(f"Duplicate input placeholder detected: {key}")
@@ -380,9 +414,7 @@ class DuckDBPipeline(CTEPipeline):
         lines: List[str] = []
 
         stage_count = len(self._stages)
-        title = (
-            f"🔧 Pipeline Plan ({stage_count} stage{'s' if stage_count != 1 else ''})"
-        )
+        title = f"🔧 Pipeline Plan ({stage_count} stage{'s' if stage_count != 1 else ''})"
         name_line = self.name
         # Construct the header box with proper padding
         content_width = max(len(title), len(name_line))
@@ -565,7 +597,8 @@ class DuckDBPipeline(CTEPipeline):
         work_items = self.queue
         total = len(work_items)
         for idx, fragment in enumerate(work_items, start=1):
-            # Always emit a header during materialised debug to mirror non-materialised mode
+            # Always emit a header during materialised debug to mirror
+            # non-materialised mode
             header = f"\n=== DEBUG STEP {idx}/{total}"
             if fragment.stage_name:
                 header += f" — stage `{fragment.stage_name}`"
@@ -584,9 +617,10 @@ class DuckDBPipeline(CTEPipeline):
                 _emit_debug(_pretty_sql(fragment.sql))
                 _emit_debug("\n--------------------------------------------\n")
             start = perf_counter()
-            # TODO(ThomasHepworth): ParserException: Parser Error: syntax error at or near "{"
-            # is a common error, typically indicating that a placeholder wasn't replaced
-            # correctly. There are various ways we could try to catch this earlier.
+            # TODO(ThomasHepworth): ParserException: Parser Error: syntax
+            # error at or near "{" is a common error, typically indicating
+            # that a placeholder wasn't replaced correctly. There are various
+            # ways we could try to catch this earlier.
             self.con.execute(
                 f"CREATE OR REPLACE TEMP TABLE {fragment.alias} AS {fragment.sql}"
             )

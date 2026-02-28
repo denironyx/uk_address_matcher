@@ -88,6 +88,12 @@ def analyse_mismatches(
             "matches_input", unmatchable_sql
         )
 
+    # Determine if canonical data contains the primary flag before building SQL
+    canonical_has_is_primary = "is_primary" in ukam_canonical.columns
+    primary_sort_expression = (
+        "COALESCE(is_primary, FALSE)" if canonical_has_is_primary else "FALSE"
+    )
+
     # Build and MATERIALISE the base mismatch data once to avoid repeated EXISTS checks
     unmatchable_filter = (
         """
@@ -115,7 +121,7 @@ def analyse_mismatches(
                 ROW_NUMBER() OVER (
                     PARTITION BY unique_id
                     ORDER BY
-                        COALESCE(is_primary, FALSE) DESC,
+                        {primary_sort_expression} DESC,
                         ukam_address_id
                 ) AS rn
             FROM ukam_canonical
@@ -156,7 +162,8 @@ def analyse_mismatches(
             matches_input.postcode
         FROM matches_input
         WHERE matches_input.match_reason IS NOT NULL
-          AND matches_input.ukam_label != matches_input.resolved_canonical_id{unmatchable_filter}
+          AND matches_input.ukam_label !=
+              matches_input.resolved_canonical_id{unmatchable_filter}
     ) AS im
     LEFT JOIN ukam_canonical AS c
             ON im.canonical_ukam_address_id = c.ukam_address_id
@@ -172,7 +179,8 @@ def analyse_mismatches(
     # Force materialisation by creating a temporary table
     # This avoids re-running the EXISTS check for every subsequent query
     mismatches_base.query(
-        "m", "CREATE OR REPLACE TEMP TABLE _mismatches_materialised AS SELECT * FROM m"
+        "m",
+        "CREATE OR REPLACE TEMP TABLE _mismatches_materialised AS SELECT * FROM m",
     )
     mismatches_materialised = ukam_matches.query(
         "matches_input", "SELECT * FROM _mismatches_materialised"
@@ -249,9 +257,7 @@ def analyse_mismatches(
     ORDER BY similarity_score DESC, match_reason
     LIMIT {top_high_confidence}
     """
-    high_confidence_wrong = mismatches_materialised.query(
-        "m", high_confidence_wrong_sql
-    )
+    high_confidence_wrong = mismatches_materialised.query("m", high_confidence_wrong_sql)
 
     # 4. Same-building mismatches (similarity > 0.9) - likely flat/unit confusion
     # Very high similarity suggests same building, wrong flat/unit

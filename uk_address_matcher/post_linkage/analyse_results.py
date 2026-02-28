@@ -99,15 +99,23 @@ def best_matches_with_distinguishability(
 
     d_case_whens = "\n".join(
         [
-            f"WHEN distinguishability > {d} THEN '{str(index).zfill(2)}: Distinguishability > {d}'"
+            (
+                f"WHEN distinguishability > {d} THEN '"
+                f"{str(index).zfill(2)}: Distinguishability > {d}'"
+            )
             for index, d in enumerate(thres_sorted, start=2)
         ]
     )
     next_label_index = len(thres_sorted) + 2
     next_label_value = f"{str(next_label_index).zfill(2)}."
+    nan_label = f"{next_label_value}: NaN (last match in group)"
+    zero_label = f"{next_label_value}: Distinguishability = 0"
 
     rn_filter = (
-        "QUALIFY ROW_NUMBER() OVER (PARTITION BY unique_id_r ORDER BY match_weight DESC, unique_id_l) = 1"
+        (
+            "QUALIFY ROW_NUMBER() OVER (PARTITION BY unique_id_r "
+            "ORDER BY match_weight DESC, unique_id_l) = 1"
+        )
         if best_match_only
         else ""
     )
@@ -134,9 +142,9 @@ def best_matches_with_distinguishability(
                 *,
                 CASE
                     WHEN match_count = 1 THEN '01: One match only'
-                    WHEN distinguishability IS NULL THEN '{next_label_value}: NaN (last match in group)'
+                    WHEN distinguishability IS NULL THEN '{nan_label}'
                     {d_case_whens}
-                    WHEN distinguishability = 0 THEN '{next_label_value}: Distinguishability = 0'
+                    WHEN distinguishability = 0 THEN '{zero_label}'
                     ELSE '99: error, uncategorized'
                 END AS distinguishability_category
             FROM distinguishability_calc
@@ -153,87 +161,14 @@ def best_matches_with_distinguishability(
         t.postcode_l,
         t.match_weight,
         t.distinguishability,
-        COALESCE(t.distinguishability_category, '99: No match') AS distinguishability_category,
+        COALESCE(
+            t.distinguishability_category, '99: No match'
+        ) AS distinguishability_category,
         {add_cols_select}
     FROM addresses_to_match AS a
     LEFT JOIN categorized_matches AS t
     ON a.ukam_address_id = t.ukam_address_id_r
     {sort_str}
     """
-
-    return con.sql(sql)
-
-
-def best_matches_summary(
-    *,
-    df_predict: DuckDBPyRelation,
-    df_addresses_to_match: DuckDBPyRelation,
-    con: DuckDBPyConnection,
-    disinguishability_thresholds=[1, 5, 10],
-    group_by_match_weight_bins=False,
-):
-    """
-    Generates a summary of match distinguishability categories with counts and percentages.
-
-
-    Args:
-        df_predict: Table containing pairwise predictions from either
-            `linker.inference.predict` or
-            `improve_predictions_using_distinguishing_tokens`
-        df_addresses_to_match: table containing addresses to be matched in
-            cleaned form cols = (unique_id, ukam_address_id, address_concat, postcode)
-        con: DuckDB connection for executing SQL queries
-        disinguishability_thresholds: List of thresholds for categorizing match
-            distinguishability. Default is [1, 5, 10].
-        group_by_match_weight_bins: If True, further groups results by match weight
-            bins. Default is False.
-
-    Returns:
-        DuckDBPyRelation: A summary table w
-
-    """
-    d_list_cat = best_matches_with_distinguishability(
-        df_predict=df_predict,
-        df_addresses_to_match=df_addresses_to_match,
-        con=con,
-        distinguishability_thresholds=disinguishability_thresholds,
-    )
-    con.register("d_list_cat", d_list_cat)
-
-    sql = """
-    select
-        distinguishability_category,
-        count(*) as count,
-        printf('%.2f%%', 100*count(*)/sum(count(*)) over()) as percentage
-    from d_list_cat
-    group by distinguishability_category
-    order by distinguishability_category asc
-    """
-
-    if group_by_match_weight_bins:
-        sql = """
-        WITH a AS (
-            SELECT
-                *,
-                CASE
-                    WHEN match_weight < -20 tHEN '00. mw < -20'
-                    WHEN match_weight >= -20 AND match_weight < -10 THEN '01. -20 to -10'
-                    WHEN match_weight >= -10 AND match_weight < 0 THEN '02. -10 to 0'
-                    WHEN match_weight >= 0 AND match_weight < 10 THEN '03. 0 to 10'
-                    WHEN match_weight >= 10 AND match_weight < 20 THEN '04. 10 to 20'
-                    WHEN match_weight >= 20 THEN '05. mw > 20'
-                    ELSE 'Unknown'
-                END AS match_weight_bin_label
-            FROM d_list_cat
-        )
-        SELECT
-            distinguishability_category,
-            match_weight_bin_label,
-            COUNT(*) AS count,
-            printf('%.2f%%', 100.0 * COUNT(*) / (SELECT COUNT(*) FROM a)) AS percentage
-        FROM a
-        GROUP BY distinguishability_category, match_weight_bin_label
-        ORDER BY distinguishability_category ASC, match_weight_bin_label DESC
-        """
 
     return con.sql(sql)

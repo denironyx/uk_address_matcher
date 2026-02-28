@@ -1,5 +1,4 @@
 import duckdb
-import pytest
 
 from uk_address_matcher.cleaning.steps import (
     _parse_out_business_unit,
@@ -8,7 +7,6 @@ from uk_address_matcher.cleaning.steps import (
 )
 from uk_address_matcher.cleaning.steps.normalisation import (
     _clean_address_string_first_pass,
-    _peel_common_uk_end_tokens,
 )
 from uk_address_matcher.sql_pipeline.runner import DebugOptions, DuckDBPipeline
 
@@ -24,7 +22,8 @@ def test_parse_out_flat_positional():
 
     # Format of test cases:
     # (input_address, flat_positional, flat_letter, flat_number)
-    # Note: When a number+letter pattern exists (e.g., 11A, 15B), only the LETTER is a flat determinant
+    # Note: When a number+letter pattern exists (e.g., 11A, 15B),
+    # only the LETTER is a flat determinant.
     # The number is the building/house number, not a flat identifier
     test_cases = [
         ("11A SPITFIRE COURT BIRMINGHAM", None, "A", None),
@@ -38,7 +37,12 @@ def test_parse_out_flat_positional():
         ("FIRST FLOOR 15B LONDON ROAD", "FIRST FLOOR", "B", None),
         ("FLAT C MY HOUSE 120 MY ROAD", None, "C", None),
         ("FLAT 2 733 GIPSY HILL", None, None, "2"),
-        ("2 7 GIPSY HILL", None, None, None),  # Ambiguous - no explicit FLAT indicator
+        (
+            "2 7 GIPSY HILL",
+            None,
+            None,
+            None,
+        ),  # Ambiguous - no explicit FLAT indicator
         ("773 GIPSY HILL", None, None, None),
         ("FLAT C SECOND FLOOR 27 OK ROAD", "SECOND FLOOR", "C", None),
         ("FLAT A GROUND FLOOR 18 RAVENSWOOD STREET", "GROUND FLOOR", "A", None),
@@ -129,13 +133,16 @@ def test_parse_out_flat_positional():
         test_cases, rows
     ):
         assert row[positional_idx] == expected_pos, (
-            f"Address '{address}' expected positional '{expected_pos}' but got '{row[positional_idx]}'"
+            f"Address '{address}' expected positional '{expected_pos}' "
+            f"but got '{row[positional_idx]}'"
         )
         assert row[letter_idx] == expected_letter, (
-            f"Address '{address}' expected letter '{expected_letter}' but got '{row[letter_idx]}'"
+            f"Address '{address}' expected letter '{expected_letter}' "
+            f"but got '{row[letter_idx]}'"
         )
         assert row[number_idx] == expected_number, (
-            f"Address '{address}' expected number '{expected_number}' but got '{row[number_idx]}'"
+            f"Address '{address}' expected number '{expected_number}' "
+            f"but got '{row[number_idx]}'"
         )
         # has_flat_indicator is True if any of the three fields are set,
         # OR if the word FLAT appears in the address
@@ -147,7 +154,8 @@ def test_parse_out_flat_positional():
             or "FLAT" in address
         )
         assert row[indicator_idx] == expected_indicator, (
-            f"Address '{address}' expected has_flat_indicator '{expected_indicator}' but got '{row[indicator_idx]}'"
+            f"Address '{address}' expected has_flat_indicator '{expected_indicator}' "
+            f"but got '{row[indicator_idx]}'"
         )
 
 
@@ -220,148 +228,6 @@ def test_replace_excluding_basement_terms_first_pass_cleaning():
     for (address, expected), row in zip(test_cases, rows):
         assert row[0] == expected, (
             f"Address '{address}' expected '{expected}' but got '{row[0]}'"
-        )
-
-
-@pytest.mark.skip(reason="Peeling logic removed from cleaning steps")
-def test_peel_common_uk_end_tokens():
-    connection = duckdb.connect()
-
-    # Format: (input_address, expected_clean_address, expected_peeled_tokens)
-    # The peeled tokens are returned in reverse order (most recently peeled first)
-    test_cases = [
-        # Single city at end - should be peeled
-        (
-            "FLAT 5 SASKIA HOUSE 87-91 HACKNEY ROAD LONDON",
-            "FLAT 5 SASKIA HOUSE 87-91 HACKNEY ROAD",
-            ["LONDON"],
-        ),
-        # Multiple tokens to peel - city then region
-        (
-            "10 HIGH STREET MANCHESTER GREATER MANCHESTER",
-            "10 HIGH STREET",
-            ["MANCHESTER", "GREATER MANCHESTER"],
-        ),
-        # Multi-token pattern (GREATER LONDON) then UK
-        (
-            "5 PARK LANE LONDON GREATER LONDON UK",
-            "5 PARK LANE",
-            ["LONDON", "GREATER LONDON", "UK"],
-        ),
-        # London borough then London then Greater London
-        (
-            "25 MAIN ROAD HACKNEY LONDON GREATER LONDON",
-            "25 MAIN ROAD",
-            ["HACKNEY", "LONDON", "GREATER LONDON"],
-        ),
-        # County at end
-        (
-            "THE OLD RECTORY CHURCH LANE HERTFORDSHIRE",
-            "THE OLD RECTORY CHURCH LANE",
-            ["HERTFORDSHIRE"],
-        ),
-        # Multiple counties/regions
-        (
-            "15 STATION ROAD LEEDS WEST YORKSHIRE",
-            "15 STATION ROAD",
-            ["LEEDS", "WEST YORKSHIRE"],
-        ),
-        # Nothing to peel - unique end token
-        (
-            "42 ACACIA AVENUE SPRINGFIELD",
-            "42 ACACIA AVENUE SPRINGFIELD",
-            [],
-        ),
-        # Don't peel if the token appears mid-address (only peel from end)
-        # HACKNEY appears in the middle, ROAD is the end token (not in list)
-        (
-            "87-91 HACKNEY ROAD",
-            "87-91 HACKNEY ROAD",
-            [],
-        ),
-        # Welsh address
-        (
-            "10 HIGH STREET CARDIFF SOUTH WALES",
-            "10 HIGH STREET",
-            ["CARDIFF", "SOUTH WALES"],
-        ),
-        # Scottish address
-        (
-            "5 PRINCES STREET EDINBURGH SCOTLAND",
-            "5 PRINCES STREET",
-            ["EDINBURGH", "SCOTLAND"],
-        ),
-        # Long chain of localities
-        (
-            "1 TEST ROAD LEWISHAM LONDON GREATER LONDON ENGLAND UK",
-            "1 TEST ROAD",
-            ["LEWISHAM", "LONDON", "GREATER LONDON", "ENGLAND", "UK"],
-        ),
-        # County with -SHIRE suffix
-        (
-            "ROSE COTTAGE MILL LANE CAMBRIDGESHIRE",
-            "ROSE COTTAGE MILL LANE",
-            ["CAMBRIDGESHIRE"],
-        ),
-        # Address ending with just a county town (not the county)
-        (
-            "50 MARKET SQUARE CAMBRIDGE",
-            "50 MARKET SQUARE",
-            ["CAMBRIDGE"],
-        ),
-        # West/East Sussex distinction
-        (
-            "12 SEAFRONT PARADE BRIGHTON EAST SUSSEX",
-            "12 SEAFRONT PARADE",
-            ["BRIGHTON", "EAST SUSSEX"],
-        ),
-        # Northern cities
-        (
-            "99 INDUSTRIAL ESTATE NEWCASTLE TYNE AND WEAR",
-            "99 INDUSTRIAL ESTATE",
-            ["NEWCASTLE", "TYNE AND WEAR"],
-        ),
-        # Midlands
-        (
-            "UNIT 5 BUSINESS PARK BIRMINGHAM WEST MIDLANDS",
-            "UNIT 5 BUSINESS PARK",
-            ["BIRMINGHAM", "WEST MIDLANDS"],
-        ),
-        # Address with postcode-like ending (shouldn't affect peeling)
-        (
-            "3 LONDON ROAD OXFORD",
-            "3 LONDON ROAD",
-            ["OXFORD"],
-        ),
-    ]
-
-    # Build input - need ukam_address_id for the QUALIFY clause
-    values = ",".join(
-        f"('{address}', '{address}', '{i}')"
-        for i, (address, _, _) in enumerate(test_cases)
-    )
-    input_relation = connection.sql(
-        f"SELECT * FROM (VALUES {values}) AS t(clean_full_address, original_address_concat, ukam_address_id)"
-    )
-
-    result = _run_single_stage(_peel_common_uk_end_tokens, input_relation, connection)
-    rows = result.fetchall()
-    columns = result.columns
-    peeled_idx = columns.index("peeled_tokens_list")
-    id_idx = columns.index("ukam_address_id")
-
-    # Build lookup by ukam_address_id since row order is not guaranteed
-    results_by_id = {row[id_idx]: row for row in rows}
-
-    for i, (input_address, expected_clean, expected_peeled) in enumerate(test_cases):
-        row = results_by_id[str(i)]
-        actual_peeled = row[peeled_idx] if row[peeled_idx] else []
-
-        # The clean_full_address doesn't change in this stage - we just add common_end_tokens
-        # So we check the peeled tokens
-        assert list(actual_peeled) == expected_peeled, (
-            f"Address '{input_address}' expected peeled tokens {expected_peeled} "
-            f"but got {list(actual_peeled)}"
         )
 
 

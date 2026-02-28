@@ -2,20 +2,18 @@ from typing import Optional
 
 from duckdb import DuckDBPyConnection, DuckDBPyRelation
 
-
 from uk_address_matcher.cleaning.steps import (
+    _add_numeric_term_frequencies_using_registered_df,
     _add_term_frequencies_to_address_tokens_using_registered_df,
     _add_ukam_address_id,
-    _build_inverted_index_from_trigrams,
     _canonicalise_postcode,
     _clean_address_string_first_pass,
     _clean_address_string_second_pass,
-    _derive_trigrams_from_address_tokens,
     _extract_postcode_from_address,
     _first_unusual_token,
     _generalised_token_aliases,
     _get_token_frequeny_table,
-    _lookup_trigrams_in_inverted_index,
+    _lookup_keys_in_inverted_index,
     _move_common_end_tokens_to_field,
     _normalise_abbreviations_and_units,
     _parse_out_business_unit,
@@ -27,6 +25,7 @@ from uk_address_matcher.cleaning.steps import (
     _separate_unusual_tokens,
     _set_exploding_unique_ids_to_self,
     _split_numeric_tokens_to_cols,
+    _strip_country_suffix,
     _tokenise_address_without_numbers,
     _trim_whitespace_address_and_postcode,
     _upper_case_address_and_postcode,
@@ -34,9 +33,6 @@ from uk_address_matcher.cleaning.steps import (
 )
 from uk_address_matcher.cleaning.steps.term_frequencies import (
     _create_histograms_from_token_frequencies,
-)
-from uk_address_matcher.cleaning.steps.tokenisation import (
-    _create_tokenised_address_concat,
 )
 from uk_address_matcher.sql_pipeline.helpers import package_resource_read_sql
 from uk_address_matcher.sql_pipeline.runner import DebugOptions, create_sql_pipeline
@@ -78,12 +74,12 @@ QUEUE_CLEAN_FULL_ADDRESS = [
     _canonicalise_postcode,
     _clean_address_string_first_pass,
     _normalise_abbreviations_and_units,
+    _strip_country_suffix,
     _remove_duplicate_end_tokens,  # clean_full_address now completed
 ]
 
 
 QUEUE_DERIVE_NON_TF_FEATURES = [
-    _create_tokenised_address_concat,  # based on clean_full_address
     _parse_out_flat_position_and_letter,
     _parse_out_business_unit,
     _parse_out_numbers,
@@ -114,16 +110,15 @@ QUEUE_POST_TF = [
     _create_histograms_from_token_frequencies,
 ]
 
-# Minimal pipeline for TF derivation: just clean address + tokenise
-QUEUE_FOR_TF_DERIVATION = QUEUE_CLEAN_FULL_ADDRESS + [_create_tokenised_address_concat]
+# Minimal pipeline for TF derivation: just clean address
+QUEUE_FOR_TF_DERIVATION = QUEUE_CLEAN_FULL_ADDRESS
 
-# Trigram blocking pipelines
-QUEUE_TRIGRAM_WITH_INVERTED_INDEX = [
-    _derive_trigrams_from_address_tokens,
-    _lookup_trigrams_in_inverted_index,
+# Inverted index blocking pipelines
+QUEUE_INVERTED_INDEX_LOOKUP = [
+    _lookup_keys_in_inverted_index(),
 ]
 
-QUEUE_TRIGRAM_SELF = [
+QUEUE_INVERTED_INDEX_SELF = [
     _set_exploding_unique_ids_to_self,
 ]
 
@@ -145,11 +140,17 @@ def _clean_data_pre_term_frequencies(
     )
     result = pipeline.run(debug_options)
 
-    # Exclude source_dataset column if present (will be overwritten by linker)
+    exclude_columns = []
     if "source_dataset" in result.columns:
+        exclude_columns.append("source_dataset")
+    if "address_without_numbers" in result.columns:
+        exclude_columns.append("address_without_numbers")
+
+    if exclude_columns:
         con.register("__temp_result_for_exclude", result)
+        exclude_sql = ", ".join(exclude_columns)
         result = con.sql(
-            "SELECT * EXCLUDE (source_dataset) FROM __temp_result_for_exclude"
+            f"SELECT * EXCLUDE ({exclude_sql}) FROM __temp_result_for_exclude"
         )
 
     return result
@@ -174,7 +175,8 @@ def _clean_data_using_precomputed_rel_tok_freq(
     )
 
     tf_and_post = [
-        _add_term_frequencies_to_address_tokens_using_registered_df
+        _add_term_frequencies_to_address_tokens_using_registered_df,
+        _add_numeric_term_frequencies_using_registered_df,
     ] + QUEUE_POST_TF
     stage_queue = (
         pre_queue + tf_and_post + additional_stages
@@ -193,11 +195,17 @@ def _clean_data_using_precomputed_rel_tok_freq(
     )
     result = pipeline.run(debug_options)
 
-    # Exclude source_dataset column if present (will be overwritten by linker)
+    exclude_columns = []
     if "source_dataset" in result.columns:
+        exclude_columns.append("source_dataset")
+    if "address_without_numbers" in result.columns:
+        exclude_columns.append("address_without_numbers")
+
+    if exclude_columns:
         con.register("__temp_result_for_exclude", result)
+        exclude_sql = ", ".join(exclude_columns)
         result = con.sql(
-            "SELECT * EXCLUDE (source_dataset) FROM __temp_result_for_exclude"
+            f"SELECT * EXCLUDE ({exclude_sql}) FROM __temp_result_for_exclude"
         )
 
     return result
@@ -287,12 +295,13 @@ def _create_term_frequency_tables(
 ) -> DuckDBPyRelation:
     """Register address token  and numeric term frequency tables.
 
-    - Numeric term frequencies are always loaded from pre-baked data. 'Numeric' meaning e.g. 'how often
-        does the token '1' appear relative to the token '7' in UK addresses.
+        - Numeric term frequencies are always loaded from pre-baked data.
+            'Numeric' means e.g. how often token '1' appears
+            relative to token '7' in UK addresses.
         They are used implicitly in the linking model by loading them into
         linker.table_management.register_term_frequency_lookup
-    - Token term frequencies are usually derived from the data itself, but if not provided by
-         the user a pre-baked table is used
+        - Token term frequencies are usually derived from the data itself,
+            but if not provided by the user a pre-baked table is used.
 
     Args:
         con: DuckDB connection.
@@ -325,6 +334,7 @@ def _create_term_frequency_tables(
     numeric_term_frequencies_rel = con.sql(read_numeric_tf_sql)
     con.sql("DROP TABLE IF EXISTS __ukam_numeric_term_frequencies")
     numeric_term_frequencies_rel.create("__ukam_numeric_term_frequencies")
+    con.register("numeric_term_frequencies", con.table("__ukam_numeric_term_frequencies"))
 
     return con.table("__ukam_rel_tok_freq")
 
@@ -333,12 +343,13 @@ def _register_inverted_index_table(
     con: DuckDBPyConnection,
     inverted_index: Optional[DuckDBPyRelation] = None,
 ) -> Optional[str]:
-    """Register inverted index table for trigram lookups.
+    """Register inverted index table for key lookups.
 
     Args:
         con: DuckDB connection.
-        inverted_index: Pre-computed inverted index table with 'trigram' and
-            'unique_ids' columns. If None, no table is registered.
+        inverted_index: Pre-computed inverted index table with 'key',
+            'unique_ids', and 'index_strategy' columns. If None, no
+            table is registered.
 
     Returns:
         The registered table name, or None if no inverted_index provided.

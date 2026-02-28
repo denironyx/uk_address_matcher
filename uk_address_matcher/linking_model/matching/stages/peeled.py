@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
+from functools import lru_cache
+from importlib.resources import files
 from typing import TYPE_CHECKING, Optional
 
 from uk_address_matcher.linking_model.matching.input_filters import (
@@ -16,7 +20,7 @@ if TYPE_CHECKING:
     from uk_address_matcher.sql_pipeline.runner import DebugOptions
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class PeeledAddressStage(MatchingStage):
     """Match records after peeling common UK locality suffix tokens."""
 
@@ -69,9 +73,8 @@ def _peeled_address_matches() -> list[CTEStep]:
         - "25 HIGH ROAD HACKNEY LONDON" -> "25 HIGH ROAD"
         - "10 MAIN AVENUE MANCHESTER GREATER MANCHESTER" -> "10 MAIN AVENUE"
 
-    This stage uses pre-computed columns from the cleaning pipeline:
-        - address_tokens: VARCHAR[] of the full address tokens
-        - peeled_tokens_list: VARCHAR[] of tokens that were peeled from the end
+    This stage generates peeled tokens on-the-fly so it no longer relies on
+    upstream cleaning stages to populate `peeled_tokens_list`.
 
     Matching rules:
         1. Postcodes must be identical
@@ -79,94 +82,39 @@ def _peeled_address_matches() -> list[CTEStep]:
         3. At least one side must have peeled something (to avoid duplicating
            exact match results)
     """
-    # Use the dedicated enum value for peeled-address matches so that any SQL
-    # cast to the MatchReason ENUM remains valid.
     match_reason_value = MatchReason.PEELED_ADDRESS.value
     enum_values = str(MatchReason.enum_values())
 
-    messy_peeled_sql = """
-        SELECT
-            ukam_address_id,
-            postcode,
-            clean_full_address,
-            address_tokens,
-            peeled_tokens_list,
-            COALESCE(
-                (SELECT SUM(len(string_split(token, ' ')))
-                 FROM unnest(peeled_tokens_list) AS t(token)),
-                0
-            )::INTEGER AS peeled_word_count,
-            CASE
-                WHEN peeled_tokens_list IS NULL OR len(peeled_tokens_list) = 0
-                THEN array_to_string(address_tokens, ' ')
-                ELSE array_to_string(
-                    list_slice(
-                        address_tokens,
-                        1,
-                        len(address_tokens) - COALESCE(
-                            (SELECT SUM(len(string_split(token, ' ')))
-                             FROM unnest(peeled_tokens_list) AS t(token)),
-                            0
-                        )::INTEGER
-                    ),
-                    ' '
-                )
-            END AS peeled_address
-        FROM {messy_addresses}
-    """
+    messy_peeled_sql = _build_regex_peel_sql(
+        source_placeholder="messy_addresses",
+        id_column="ukam_address_id",
+        canonical=False,
+    )
 
-    canonical_peeled_sql = """
-        SELECT
-            ukam_address_id AS canonical_ukam_address_id,
-            canonical_unique_id,
-            postcode,
-            clean_full_address AS canonical_clean_full_address,
-            address_tokens AS canonical_address_tokens,
-            peeled_tokens_list AS canonical_peeled_tokens_list,
-            COALESCE(
-                (SELECT SUM(len(string_split(token, ' ')))
-                 FROM unnest(peeled_tokens_list) AS t(token)),
-                0
-            )::INTEGER AS canonical_peeled_word_count,
-            CASE
-                WHEN peeled_tokens_list IS NULL OR len(peeled_tokens_list) = 0
-                THEN array_to_string(address_tokens, ' ')
-                ELSE array_to_string(
-                    list_slice(
-                        address_tokens,
-                        1,
-                        len(address_tokens) - COALESCE(
-                            (SELECT SUM(len(string_split(token, ' ')))
-                             FROM unnest(peeled_tokens_list) AS t(token)),
-                            0
-                        )::INTEGER
-                    ),
-                    ' '
-                )
-            END AS peeled_address
-        FROM {canonical_addresses_restricted}
-    """
+    canonical_peeled_sql = _build_regex_peel_sql(
+        source_placeholder="canonical_addresses_restricted",
+        id_column="ukam_address_id",
+        canonical=True,
+    )
 
     candidates_sql = """
         SELECT
             messy.ukam_address_id AS messy_ukam_address_id,
             messy.clean_full_address AS messy_clean_full_address,
             messy.peeled_address AS messy_peeled_address,
-            messy.peeled_tokens_list AS messy_peeled_tokens,
-            messy.peeled_word_count AS messy_peeled_word_count,
+            messy.did_peel AS messy_did_peel,
             canon.canonical_ukam_address_id,
             canon.canonical_unique_id,
             canon.canonical_clean_full_address,
             canon.peeled_address AS canonical_peeled_address,
-            canon.canonical_peeled_tokens_list AS canonical_peeled_tokens,
-            canon.canonical_peeled_word_count
+            canon.did_peel AS canonical_did_peel
         FROM {messy_peeled} AS messy
         INNER JOIN {canonical_peeled} AS canon
             ON messy.postcode = canon.postcode
             AND messy.peeled_address = canon.peeled_address
         WHERE
-            messy.peeled_word_count > 0
-            OR canon.canonical_peeled_word_count > 0
+            messy.did_peel
+            OR canon.did_peel
     """
 
     annotated_sql = f"""
@@ -174,7 +122,7 @@ def _peeled_address_matches() -> list[CTEStep]:
             messy_ukam_address_id AS ukam_address_id,
             canonical_ukam_address_id,
             canonical_unique_id AS resolved_canonical_id,
-            '{MatchReason.PEELED_ADDRESS.value}'::ENUM {enum_values} AS match_reason
+            '{match_reason_value}'::ENUM {enum_values} AS match_reason
         FROM (
             SELECT
                 *,
@@ -193,3 +141,128 @@ def _peeled_address_matches() -> list[CTEStep]:
         CTEStep("peeled_address_candidates", candidates_sql),
         CTEStep("peeled_address_matches", annotated_sql),
     ]
+
+
+def _normalise_end_token(token: str) -> str:
+    return " ".join(token.strip().upper().split())
+
+
+@lru_cache(maxsize=1)
+def _load_end_tokens_for_regex() -> tuple[str, ...]:
+    data_path = files("uk_address_matcher.data").joinpath("common_uk_end_tokens.json")
+    data = json.loads(data_path.read_text(encoding="utf-8"))
+
+    aliases = data.get("aliases", {}) or {}
+    candidates = (
+        list(data.get("single_tokens", []) or [])
+        + list(data.get("multi_tokens", []) or [])
+        + list(aliases.keys())
+        + list(aliases.values())
+    )
+
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for value in candidates:
+        if not isinstance(value, str):
+            continue
+        token = _normalise_end_token(value)
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        ordered.append(token)
+
+    ordered.sort(key=lambda token: (-len(token.split()), -len(token), token))
+    return tuple(ordered)
+
+
+@lru_cache(maxsize=1)
+def _build_suffix_peel_regex_sql_literal() -> str:
+    tokens = _load_end_tokens_for_regex()
+    escaped = "|".join(re.escape(token).replace(r"\ ", " ") for token in tokens)
+    pattern = rf"(?:^|\s+)(?:{escaped})(?:\s+(?:{escaped}))*\s*$"
+    return pattern.replace("'", "''")
+
+
+def _build_regex_peel_sql(
+    *,
+    source_placeholder: str,
+    id_column: str,
+    canonical: bool,
+) -> str:
+    pattern_sql = _build_suffix_peel_regex_sql_literal()
+
+    if canonical:
+        return f"""
+            WITH normalised AS (
+                SELECT
+                    {id_column} AS canonical_ukam_address_id,
+                    canonical_unique_id,
+                    postcode,
+                    regexp_replace(
+                        upper(trim(clean_full_address)),
+                        '\\s+',
+                        ' ',
+                        'g'
+                    ) AS canonical_clean_full_address
+                FROM {{{source_placeholder}}}
+            ),
+            peeled AS (
+                SELECT
+                    canonical_ukam_address_id,
+                    canonical_unique_id,
+                    postcode,
+                    canonical_clean_full_address,
+                    trim(
+                        regexp_replace(
+                            canonical_clean_full_address,
+                            '{pattern_sql}',
+                            ''
+                        )
+                    ) AS peeled_address
+                FROM normalised
+            )
+            SELECT
+                canonical_ukam_address_id,
+                canonical_unique_id,
+                postcode,
+                canonical_clean_full_address,
+                peeled_address,
+                peeled_address <> canonical_clean_full_address AS did_peel
+            FROM peeled
+        """
+
+    return f"""
+        WITH normalised AS (
+            SELECT
+                {id_column} AS ukam_address_id,
+                postcode,
+                regexp_replace(
+                    upper(trim(clean_full_address)),
+                    '\\s+',
+                    ' ',
+                    'g'
+                ) AS clean_full_address
+            FROM {{{source_placeholder}}}
+        ),
+        peeled AS (
+            SELECT
+                ukam_address_id,
+                postcode,
+                clean_full_address,
+                trim(
+                    regexp_replace(
+                        clean_full_address,
+                        '{pattern_sql}',
+                        ''
+                    )
+                ) AS peeled_address
+            FROM normalised
+        )
+        SELECT
+            ukam_address_id,
+            postcode,
+            clean_full_address,
+            peeled_address,
+            peeled_address <> clean_full_address AS did_peel
+        FROM peeled
+    """

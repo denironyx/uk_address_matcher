@@ -32,6 +32,10 @@ Will match two datasets provided in this format:
 - You may also provide a separate column called `postcode`, which, if provided will trump any postcode information provided in `address_concat`.
 - If you have labelled data (you know the ground truth), you may provide a column called `ukam_label`, if provided, this will propagate through your results for accuracy analysis.
 
+Postcode handling rules:
+- If you provide a separate `postcode` column, `address_concat` should ideally not include the postcode.
+- If you do not provide `postcode`, the matcher will attempt to extract it during cleaning.
+
 
 Generally one dataset will be a dataset of 'messy addresses' which need matching, and the second will be a 'canonical dataset' of addresses to match to.
 
@@ -71,50 +75,127 @@ We provide a recommendation for automated build scripts for how to build such a 
 
 ### Basic Matching
 
-Match them with:
+> [!NOTE]
+> Two runnable examples with live sample data are included for experimentation:
+> - [`examples/example_matching.py`](./examples/example_matching.py): End-to-end matching example, including loading data, running the matcher, and previewing results.
+> - [`examples/example_prepare_canonical.py`](./examples/example_prepare_canonical.py): Example of preparing a canonical dataset for repeated use, demonstrating how to persist prepared data to disk and load it for matching.
+>
+> Both use parquet files in [`example_data/`](./example_data/) so you can run and adapt them immediately. You will need to download the example data from the releases page to run them, or you can adapt the code to use your own data.
 
 ```python
 import duckdb
 
+from uk_address_matcher import AddressMatcher, ExactMatchStage, SplinkStage
+
+con = duckdb.connect()
+
+df_canonical = con.read_parquet("your_canonical_addresses.parquet")
+df_messy = con.read_parquet("your_messy_addresses.parquet")
+
+matcher = AddressMatcher(
+    canonical_addresses=df_canonical,
+    addresses_to_match=df_messy,
+    con=con,
+)
+
+result = matcher.match()  # returns a DuckDBPyRelation
+result.limit(10).show(max_width=500)
+```
+
+The default stages are `ExactMatchStage` followed by `SplinkStage`. You can
+customise them by passing your own `stages` list:
+
+```python
 from uk_address_matcher import (
+    AddressMatcher,
     ExactMatchStage,
     SplinkStage,
     UniqueTrigramStage,
-    run_matching,
 )
-from uk_address_matcher.cleaning.chunking_strategies import clean_data_with_term_frequencies
 
-p_ch = "./example_data/companies_house_addresess_postcode_overlap.parquet"
-p_fhrs = "./example_data/fhrs_addresses_sample.parquet"
-
-con = duckdb.connect(database=":memory:")
-
-df_ch = con.read_parquet(p_ch).order("postcode")
-df_fhrs = con.read_parquet(p_fhrs).order("postcode")
-
-df_ch_clean = clean_data_with_term_frequencies(df_ch, con=con)
-df_fhrs_clean = clean_data_with_term_frequencies(df_fhrs, con=con)
-
-match_candidates = run_matching(
+matcher = AddressMatcher(
+    canonical_addresses=df_canonical,
+    addresses_to_match=df_messy,
     con=con,
-    df_messy_clean=df_fhrs_clean,
-    df_canonical_clean=df_ch_clean,
     stages=[
         ExactMatchStage(),
         UniqueTrigramStage(),
         SplinkStage(
-            predict_threshold_match_weight=-50,
-            improve_threshold_match_weight=-20,
-            final_match_weight_threshold=15,
-            final_distinguishability_threshold=None,
-            include_full_postcode_block=True,
-            additional_columns_to_retain=["original_address_concat"],
+            final_match_weight_threshold=20.0,
+            final_distinguishability_threshold=5.0,
         ),
     ],
 )
 
-match_candidates.show(max_width=500, max_rows=20)
+result = matcher.match()
+```
 
+### Pre-preparing canonical data
+
+Cleaning a large canonical dataset (e.g. AddressBase) is expensive. Use
+`prepare_canonical_folder` to do it once and write the artefacts to disk.
+Subsequent runs load the prepared folder directly, skipping cleaning entirely.
+
+```python
+from uk_address_matcher import AddressMatcher, prepare_canonical_folder
+
+# One-time preparation
+prepare_canonical_folder(
+    df_canonical,
+    output_folder="./ukam_prepared_canonical",
+    con=con,
+    overwrite=True,
+)
+
+print("Prepared canonical data written to ./ukam_prepared_canonical/")
+
+# Fast matching — pass the folder path instead of a relation
+matcher = AddressMatcher(
+    canonical_addresses="./ukam_prepared_canonical",
+    addresses_to_match=df_messy,
+    con=con,
+)
+
+result = matcher.match()
+```
+
+### Matching one or more AddressRecord entries
+
+If you want to match a small number of addresses, or you have them in-memory as Python dictionaries, you can pass them directly as `addresses_to_match` without needing to create a DuckDB relation first.
+
+You can pass a list of `AddressRecord` entries directly as
+`addresses_to_match`. The matcher also accepts a list of dicts with
+`address_concat`, `postcode`, and `unique_id`, or a DuckDB relation.
+
+```python
+import duckdb
+
+from uk_address_matcher import AddressMatcher, AddressRecord
+
+con = duckdb.connect()
+
+df_canonical = con.read_parquet("your_canonical_addresses.parquet")
+
+records = [
+    AddressRecord(
+        unique_id="m_1",
+        address_concat="10 downing street westminster london",
+        postcode="SW1A 2AA",
+    ),
+    AddressRecord(
+        unique_id="m_2",
+        address_concat="11 downing street westminster london",
+        postcode="SW1A 2AB",
+    ),
+]
+
+matcher = AddressMatcher(
+    canonical_addresses=df_canonical,
+    addresses_to_match=records,
+    con=con,
+)
+
+result = matcher.match()
 ```
 
 

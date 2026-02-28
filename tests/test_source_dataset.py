@@ -1,7 +1,8 @@
 import duckdb
 import pytest
 
-from uk_address_matcher import get_linker, prepare_data_for_matching
+from uk_address_matcher import prepare_data_for_matching
+from uk_address_matcher.linking_model.splink_model import _get_linker
 
 
 def test_source_dataset_is_ignored():
@@ -9,7 +10,8 @@ def test_source_dataset_is_ignored():
     Test that the source_dataset column in input data is ignored and
     the correct values are set in the output regardless of user input.
 
-    The source_dataset_l should be set to 'c_' and the source_dataset_r should be set to 'm_'
+    The source_dataset_l should be set to 'c_'
+    and the source_dataset_r should be set to 'm_'
     irrespective of what the user put in the input source dataset.
     """
     # Create a DuckDB connection
@@ -59,7 +61,7 @@ def test_source_dataset_is_ignored():
     )
 
     # Create a linker with the cleaned data
-    linker = get_linker(
+    linker = _get_linker(
         df_addresses_to_match=messy_clean,
         df_addresses_to_search_within=canonical_clean,
         con=con,
@@ -75,12 +77,10 @@ def test_source_dataset_is_ignored():
     SELECT DISTINCT source_dataset_l, source_dataset_r
     FROM df_predict_ddb
     """
-    result = con.execute(sql).fetchall()
+    result = df_predict_ddb.query("df_predict_ddb", sql).fetchall()
 
     # Assert that the source_dataset values are set to 'c_' and 'm_' regardless of input
-    assert len(result) == 1, (
-        "Expected exactly one distinct pair of source_dataset values"
-    )
+    assert len(result) == 1, "Expected exactly one distinct pair of source_dataset values"
     source_dataset_l, source_dataset_r = result[0]
     assert source_dataset_l == "c_", "source_dataset_l should be 'c_'"
     assert source_dataset_r == "m_", "source_dataset_r should be 'm_'"
@@ -88,7 +88,8 @@ def test_source_dataset_is_ignored():
 
 def test_get_linker_raises_error_with_source_dataset():
     """
-    Test that get_linker raises an error when a source_dataset column is present in the input data.
+    Test that _get_linker raises an error when a source_dataset
+    column is present in the input data.
     """
     # Create a DuckDB connection
     con = duckdb.connect(":memory:")
@@ -120,7 +121,7 @@ def test_get_linker_raises_error_with_source_dataset():
     with pytest.raises(
         ValueError, match="Input datasets contain a 'source_dataset' column"
     ):
-        get_linker(
+        _get_linker(
             df_addresses_to_match=test_data,
             df_addresses_to_search_within=test_data_no_source,
             con=con,
@@ -130,7 +131,7 @@ def test_get_linker_raises_error_with_source_dataset():
     with pytest.raises(
         ValueError, match="Input datasets contain a 'source_dataset' column"
     ):
-        get_linker(
+        _get_linker(
             df_addresses_to_match=test_data_no_source,
             df_addresses_to_search_within=test_data,
             con=con,
@@ -141,7 +142,7 @@ def test_get_linker_raises_error_with_source_dataset():
     test_data_no_source_clean = prepare_data_for_matching(test_data_no_source, con=con)
 
     # Verify this works without error
-    get_linker(
+    _get_linker(
         df_addresses_to_match=test_data_clean,
         df_addresses_to_search_within=test_data_no_source_clean,
         con=con,

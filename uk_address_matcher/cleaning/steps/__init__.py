@@ -1,5 +1,15 @@
 from __future__ import annotations
 
+from uk_address_matcher.cleaning.steps.inverted_index import (
+    BIGRAM_STRATEGY,
+    DEFAULT_INDEXING_STRATEGIES,
+    TRIGRAM_STRATEGY,
+    IndexingStrategy,
+    _build_inverted_index_from_keys,
+    _derive_keys_for_strategy,
+    _lookup_keys_in_inverted_index,
+    _set_exploding_unique_ids_to_self,
+)
 from uk_address_matcher.cleaning.steps.normalisation import (
     _add_ukam_address_id,
     _canonicalise_postcode,
@@ -8,10 +18,12 @@ from uk_address_matcher.cleaning.steps.normalisation import (
     _normalise_abbreviations_and_units,
     _remove_duplicate_end_tokens,
     _rename_and_select_columns,
+    _strip_country_suffix,
     _trim_whitespace_address_and_postcode,
     _upper_case_address_and_postcode,
 )
 from uk_address_matcher.cleaning.steps.term_frequencies import (
+    _add_numeric_term_frequencies_using_registered_df,
     _add_term_frequencies_to_address_tokens,
     _add_term_frequencies_to_address_tokens_using_registered_df,
     _create_histograms_from_token_frequencies,
@@ -33,12 +45,6 @@ from uk_address_matcher.cleaning.steps.tokenisation import (
     _split_numeric_tokens_to_cols,
     _tokenise_address_without_numbers,
 )
-from uk_address_matcher.cleaning.steps.trigram_blocking import (
-    _build_inverted_index_from_trigrams,
-    _derive_trigrams_from_address_tokens,
-    _lookup_trigrams_in_inverted_index,
-    _set_exploding_unique_ids_to_self,
-)
 
 __all__ = [
     # token_parsing
@@ -55,6 +61,7 @@ __all__ = [
     "_canonicalise_postcode",
     "_upper_case_address_and_postcode",
     "_clean_address_string_first_pass",
+    "_strip_country_suffix",
     "_remove_duplicate_end_tokens",
     "_rename_and_select_columns",
     "_normalise_abbreviations_and_units",
@@ -63,6 +70,7 @@ __all__ = [
     "_split_numeric_tokens_to_cols",
     "_tokenise_address_without_numbers",
     # term_frequencies
+    "_add_numeric_term_frequencies_using_registered_df",
     "_add_term_frequencies_to_address_tokens",
     "_add_term_frequencies_to_address_tokens_using_registered_df",
     "_move_common_end_tokens_to_field",
@@ -70,9 +78,13 @@ __all__ = [
     "_use_first_unusual_token_if_no_numeric_token",
     "_separate_unusual_tokens",
     "_create_histograms_from_token_frequencies",
-    # trigram_blocking
-    "_build_inverted_index_from_trigrams",
-    "_derive_trigrams_from_address_tokens",
-    "_lookup_trigrams_in_inverted_index",
+    # inverted_index
+    "IndexingStrategy",
+    "TRIGRAM_STRATEGY",
+    "BIGRAM_STRATEGY",
+    "DEFAULT_INDEXING_STRATEGIES",
+    "_build_inverted_index_from_keys",
+    "_derive_keys_for_strategy",
+    "_lookup_keys_in_inverted_index",
     "_set_exploding_unique_ids_to_self",
 ]

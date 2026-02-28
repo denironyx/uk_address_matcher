@@ -7,6 +7,14 @@ from splink import DuckDBAPI, Linker, SettingsCreator
 from uk_address_matcher.sql_pipeline.helpers import package_resource_read_sql
 
 
+def _ensure_column(
+    rel: DuckDBPyRelation, column_name: str, column_type: str
+) -> DuckDBPyRelation:
+    if column_name in rel.columns:
+        return rel
+    return rel.select(f"*, CAST(NULL AS {column_type}) AS {column_name}")
+
+
 def _get_model_settings_dict():
     with (
         pkg_resources.files("uk_address_matcher.data")
@@ -61,13 +69,13 @@ def _get_precomputed_numeric_tf_table(con: DuckDBPyConnection):
     return con.sql(read_tf_sql)
 
 
-def get_linker(
+def _get_linker(
     df_addresses_to_match: DuckDBPyRelation,
     df_addresses_to_search_within: DuckDBPyRelation,
     *,
     con: DuckDBPyConnection,
     additional_columns_to_retain: list[str] | None = None,
-    include_full_postcode_block=True,
+    include_full_postcode_block=False,
     include_outside_postcode_block=True,
     precomputed_numeric_tf_table: DuckDBPyRelation | None = None,
     retain_intermediate_calculation_columns=False,
@@ -80,8 +88,9 @@ def get_linker(
         or "source_dataset" in df_addresses_to_search_within.columns
     ):
         raise ValueError(
-            "Input datasets contain a 'source_dataset' column. This column should be removed "
-            "before calling get_linker as it will be overwritten by the linker."
+            "Input datasets contain a 'source_dataset' column. "
+            "This column should be removed "
+            "before calling _get_linker as it will be overwritten by the linker."
         )
 
     # Skim off any matches that we have already labelled as exact matches
@@ -126,7 +135,8 @@ def get_linker(
         settings_as_dict.setdefault("additional_columns_to_retain", [])
         settings_as_dict["additional_columns_to_retain"] += additional_columns_to_retain
 
-    # Use ukam_address_id as unique_id column name (created as part of our cleaning process)
+    # Use ukam_address_id as unique_id column name
+    # (created as part of our cleaning process).
     settings_as_dict["unique_id_column_name"] = "ukam_address_id"
     # Also make sure we now retain unique_id from both datasets...
 
@@ -143,6 +153,13 @@ def get_linker(
                 "*, NULL::VARCHAR AS ukam_label"
             )
 
+    df_addresses_to_match = _ensure_column(
+        df_addresses_to_match, "address_without_numbers", "VARCHAR"
+    )
+    df_addresses_to_search_within = _ensure_column(
+        df_addresses_to_search_within, "address_without_numbers", "VARCHAR"
+    )
+
     settings_as_dict["retain_intermediate_calculation_columns"] = (
         retain_intermediate_calculation_columns
     )
@@ -152,7 +169,8 @@ def get_linker(
     # Check if both blocking rule settings are False
     if not include_full_postcode_block and not include_outside_postcode_block:
         raise ValueError(
-            "At least one of 'include_full_postcode_block' or 'include_outside_postcode_block' "
+            "At least one of 'include_full_postcode_block' or "
+            "'include_outside_postcode_block' "
             "must be True. Cannot proceed without any blocking rules."
         )
 
@@ -169,7 +187,12 @@ def get_linker(
     db_api = DuckDBAPI(connection=con)
 
     con.register("df_addresses_to_match_fix", df_addresses_to_match)
-    con.register("df_addresses_to_search_within_fix", df_addresses_to_search_within)
+    df_addresses_to_match_fix = con.table("df_addresses_to_match_fix")
+
+    # See https://github.com/moj-analytical-services/uk_address_matcher/issues/253
+    # con.register("df_addresses_to_search_within_fix", df_addresses_to_search_within)
+    # df_addresses_to_search_within_fix = con.table("df_addresses_to_search_within_fix")
+    df_addresses_to_search_within_fix = df_addresses_to_search_within
 
     # Drop stale Splink views/tables from any prior linker on this connection.
     for tbl in ("m_", "c_"):
@@ -177,7 +200,7 @@ def get_linker(
         con.execute(f"DROP TABLE IF EXISTS {tbl}")
 
     linker = Linker(
-        [df_addresses_to_match, df_addresses_to_search_within],
+        [df_addresses_to_match_fix, df_addresses_to_search_within_fix],
         settings=settings,
         db_api=db_api,
         input_table_aliases=["m_", "c_"],
@@ -197,5 +220,20 @@ def get_linker(
         linker.table_management.register_term_frequency_lookup(
             df, f"numeric_token_{i}", overwrite=True
         )
+
+    cols_to_select = df_addresses_to_match.columns
+    select_expr = ", ".join(cols_to_select)
+
+    sql = f"""
+    select {select_expr}, 'm_' as source_dataset
+    from df_addresses_to_match_fix
+    UNION ALL
+    select {select_expr}, 'c_' as source_dataset
+    from df_addresses_to_search_within_fix
+
+    """
+
+    concat_with_tf = con.sql(sql)
+    linker.table_management.register_table_input_nodes_concat_with_tf(concat_with_tf)
 
     return linker

@@ -24,7 +24,8 @@ def _restrict_canonical_to_messy_postcodes(
     if postcode_strategy not in POSTCODE_STRATEGIES:
         valid_strategies = ", ".join(f"'{s}'" for s in POSTCODE_STRATEGIES)
         raise ValueError(
-            f"postcode_strategy must be one of: {valid_strategies}. Got '{postcode_strategy}'."
+            "postcode_strategy must be one of: "
+            f"{valid_strategies}. Got '{postcode_strategy}'."
         )
 
     def _postcode_prefix(expr: str) -> str:
@@ -38,7 +39,6 @@ def _restrict_canonical_to_messy_postcodes(
         "canon.postcode",
         "canon.unique_id AS canonical_unique_id",
         "canon.ukam_address_id AS ukam_address_id",
-        "canon.address_tokens",
         "canon.numeric_tokens",
         "canon.has_flat_indicator",
         "canon.flat_positional",

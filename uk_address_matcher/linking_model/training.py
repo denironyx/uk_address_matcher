@@ -41,34 +41,50 @@ def get_address_without_numbers_comparison(
     difference with a possible location difference.  Jaccard on the character
     bigrams separates these cases neatly.
     """
+    regex_pattern = (
+        r"\b"
+        r"(\d{1,5}-\d{1,5}|[A-Za-z]?\d{1,5}[A-Za-z]?)"
+        r"\b"
+    )
+
+    def _strip_numbers(expr: str) -> str:
+        return (
+            "trim(regexp_replace(regexp_replace("  # remove numbers and tidy spaces
+            f"{expr}, '{regex_pattern}', '', 'g'), "
+            "'\\s+', ' ', 'g'))"
+        )
+
+    left_expr = _strip_numbers("clean_full_address_l")
+    right_expr = _strip_numbers("clean_full_address_r")
+
     address_without_numbers_comparison = {
         "output_column_name": "address_without_numbers",
         "comparison_levels": [
             {
-                "sql_condition": '"address_without_numbers_l" IS NULL OR "address_without_numbers_r" IS NULL',
+                "sql_condition": f"{left_expr} IS NULL OR {right_expr} IS NULL",
                 "label_for_charts": "address_without_numbers is NULL",
                 "is_null_level": True,
             },
             {
-                "sql_condition": '"address_without_numbers_l" = "address_without_numbers_r"',
+                "sql_condition": f"{left_expr} = {right_expr}",
                 "label_for_charts": "Exact match on address_without_numbers",
                 "m_probability": WEIGHT_EXACT,
                 "u_probability": 1,
             },
             {
-                "sql_condition": "jaccard(address_without_numbers_l, address_without_numbers_r) >= 0.95",
+                "sql_condition": f"jaccard({left_expr}, {right_expr}) >= 0.95",
                 "label_for_charts": "Jaccard >= 0.95 on address_without_numbers",
                 "m_probability": WEIGHT_JACCARD_HIGH,
                 "u_probability": 1,
             },
             {
-                "sql_condition": "jaccard(address_without_numbers_l, address_without_numbers_r) >= 0.88",
+                "sql_condition": f"jaccard({left_expr}, {right_expr}) >= 0.88",
                 "label_for_charts": "Jaccard >= 0.88 on address_without_numbers",
                 "m_probability": WEIGHT_JACCARD_MED,
                 "u_probability": 1,
             },
             {
-                "sql_condition": "jaccard(address_without_numbers_l, address_without_numbers_r) >= 0.80",
+                "sql_condition": f"jaccard({left_expr}, {right_expr}) >= 0.80",
                 "label_for_charts": "Jaccard >= 0.80 on address_without_numbers",
                 "m_probability": WEIGHT_JACCARD_LOW,
                 "u_probability": 1,
@@ -195,7 +211,9 @@ def get_flat_identity_comparison(
             },
             # Both null → neutral
             {
-                "sql_condition": '"flat_identity_l" IS NULL AND "flat_identity_r" IS NULL',
+                "sql_condition": (
+                    '"flat_identity_l" IS NULL AND "flat_identity_r" IS NULL'
+                ),
                 "label_for_charts": "Both null (no flat info)",
                 "is_null_level": True,
             },
@@ -301,10 +319,15 @@ def get_first_n_tokens_comparison(
         "comparison_levels": [
             {
                 "sql_condition": f"""
-                    regexp_extract(original_address_concat_l, '{regex_4_tokens}') = regexp_extract(original_address_concat_r, '{regex_4_tokens}')
-                    and length(regexp_extract(original_address_concat_l, '{regex_4_tokens}')) > 1
+                    regexp_extract(
+                        original_address_concat_l, '{regex_4_tokens}'
+                    ) = regexp_extract(
+                        original_address_concat_r, '{regex_4_tokens}'
+                    )
+                    and length(
+                        regexp_extract(original_address_concat_l, '{regex_4_tokens}')
+                    ) > 1
                     and postcode_l = postcode_r
-
                 """,
                 "label_for_charts": "First 4 tokens match",
                 "m_probability": match_weight_to_bayes_factor(WEIGHT_1),
@@ -314,8 +337,14 @@ def get_first_n_tokens_comparison(
             },
             {
                 "sql_condition": f"""
-                    regexp_extract(original_address_concat_l, '{regex_3_tokens}') = regexp_extract(original_address_concat_r, '{regex_3_tokens}')
-                    and length(regexp_extract(original_address_concat_l, '{regex_3_tokens}')) > 1
+                    regexp_extract(
+                        original_address_concat_l, '{regex_3_tokens}'
+                    ) = regexp_extract(
+                        original_address_concat_r, '{regex_3_tokens}'
+                    )
+                    and length(
+                        regexp_extract(original_address_concat_l, '{regex_3_tokens}')
+                    ) > 1
                     and postcode_l = postcode_r
                 """,
                 "label_for_charts": "First 3 tokens match",
@@ -326,8 +355,14 @@ def get_first_n_tokens_comparison(
             },
             {
                 "sql_condition": f"""
-                    regexp_extract(original_address_concat_l, '{regex_2_tokens}') = regexp_extract(original_address_concat_r, '{regex_2_tokens}')
-                    and length(regexp_extract(original_address_concat_l, '{regex_2_tokens}')) > 1
+                    regexp_extract(
+                        original_address_concat_l, '{regex_2_tokens}'
+                    ) = regexp_extract(
+                        original_address_concat_r, '{regex_2_tokens}'
+                    )
+                    and length(
+                        regexp_extract(original_address_concat_l, '{regex_2_tokens}')
+                    ) > 1
                     and postcode_l = postcode_r
                 """,
                 "label_for_charts": "First 2 tokens match",
@@ -338,8 +373,14 @@ def get_first_n_tokens_comparison(
             },
             {
                 "sql_condition": f"""
-                    regexp_extract(original_address_concat_l, '{regex_1_token}') = regexp_extract(original_address_concat_r, '{regex_1_token}')
-                    and length(regexp_extract(original_address_concat_l, '{regex_1_token}')) > 1
+                    regexp_extract(
+                        original_address_concat_l, '{regex_1_token}'
+                    ) = regexp_extract(
+                        original_address_concat_r, '{regex_1_token}'
+                    )
+                    and length(
+                        regexp_extract(original_address_concat_l, '{regex_1_token}')
+                    ) > 1
                     and postcode_l = postcode_r
                 """,
                 "label_for_charts": "First token match",
@@ -408,7 +449,10 @@ def get_num_1_comparison(
                 "fix_u_probability": toggle_u_probability_fix,
             },
             {
-                "sql_condition": "numeric_token_2_l = numeric_token_1_r or numeric_token_1_l = numeric_token_2_r",
+                "sql_condition": (
+                    "numeric_token_2_l = numeric_token_1_r or "
+                    "numeric_token_1_l = numeric_token_2_r"
+                ),
                 "label_for_charts": "Exact match inverted numbers",
                 "m_probability": match_weight_to_bayes_factor(WEIGHT_3),
                 "u_probability": 1,
@@ -416,7 +460,11 @@ def get_num_1_comparison(
                 "fix_u_probability": toggle_u_probability_fix,
             },
             {
-                "sql_condition": '"numeric_token_1_l" IS NOT NULL AND "numeric_token_1_r" IS NOT NULL AND "numeric_token_1_l" != "numeric_token_1_r"',
+                "sql_condition": (
+                    '"numeric_token_1_l" IS NOT NULL AND '
+                    '"numeric_token_1_r" IS NOT NULL AND '
+                    '"numeric_token_1_l" != "numeric_token_1_r"'
+                ),
                 "label_for_charts": "Primary numbers both present but differ",
                 "m_probability": match_weight_to_bayes_factor(WEIGHT_4),
                 "u_probability": 1,
@@ -442,7 +490,9 @@ def get_num_2_comparison(
     WEIGHT_4=-2,
     WEIGHT_5=-4,
 ):
-    """Compare the secondary numeric token (often the house number when a flat is present).
+    """Compare the secondary numeric token.
+
+    This is often the house number when a flat is present.
 
     Levels are evaluated top-to-bottom:
 
@@ -464,7 +514,9 @@ def get_num_2_comparison(
         "comparison_levels": [
             # Both null → neutral
             {
-                "sql_condition": '"numeric_token_2_l" IS NULL AND "numeric_token_2_r" IS NULL',
+                "sql_condition": (
+                    '"numeric_token_2_l" IS NULL AND "numeric_token_2_r" IS NULL'
+                ),
                 "label_for_charts": "Both null",
                 "is_null_level": True,
             },
@@ -479,7 +531,10 @@ def get_num_2_comparison(
                 "fix_u_probability": toggle_u_probability_fix,
             },
             {
-                "sql_condition": "numeric_token_1_l = numeric_token_2_r OR numeric_token_1_r = numeric_token_2_l",
+                "sql_condition": (
+                    "numeric_token_1_l = numeric_token_2_r OR "
+                    "numeric_token_1_r = numeric_token_2_l"
+                ),
                 "label_for_charts": "Exact match inverted numbers",
                 "m_probability": match_weight_to_bayes_factor(WEIGHT_2),
                 "u_probability": 1,
@@ -488,7 +543,11 @@ def get_num_2_comparison(
             },
             # Both present but values differ — strong evidence of wrong address
             {
-                "sql_condition": '"numeric_token_2_l" IS NOT NULL AND "numeric_token_2_r" IS NOT NULL AND "numeric_token_2_l" != "numeric_token_2_r"',
+                "sql_condition": (
+                    '"numeric_token_2_l" IS NOT NULL AND '
+                    '"numeric_token_2_r" IS NOT NULL AND '
+                    '"numeric_token_2_l" != "numeric_token_2_r"'
+                ),
                 "label_for_charts": "Secondary numbers both present but differ",
                 "m_probability": match_weight_to_bayes_factor(WEIGHT_3),
                 "u_probability": 1,
@@ -497,7 +556,9 @@ def get_num_2_comparison(
             },
             # One has a num_2 and the other does not
             {
-                "sql_condition": '"numeric_token_2_l" IS NULL OR "numeric_token_2_r" IS NULL',
+                "sql_condition": (
+                    '"numeric_token_2_l" IS NULL OR "numeric_token_2_r" IS NULL'
+                ),
                 "label_for_charts": "One null",
                 "m_probability": match_weight_to_bayes_factor(WEIGHT_4),
                 "u_probability": 1,
@@ -520,7 +581,9 @@ num_3_comparison = {
     "output_column_name": "numeric_token_3",
     "comparison_levels": [
         {
-            "sql_condition": '"numeric_token_3_l" IS NULL AND "numeric_token_3_r" IS NULL',
+            "sql_condition": (
+                '"numeric_token_3_l" IS NULL AND "numeric_token_3_r" IS NULL'
+            ),
             "label_for_charts": "Null",
             "is_null_level": True,
         },
@@ -572,53 +635,35 @@ def array_reduce_by_freq(column_name: str) -> str:
     matching_tokens = f"""
     list_reduce(
         list_prepend(
-        1.0,
-        list_filter(
-            list_transform(
-            flatten(
+            1.0,
+            list_filter(
                 list_transform(
-                map_entries({column_name}_l),
-                entry -> CASE
-                            WHEN COALESCE({column_name}_r[entry.key], 0) > 0
-                            THEN list_value(POW(entry.key.rel_freq, LEAST(entry.value, {column_name}_r[entry.key])))
-                            ELSE list_value()
-                        END
-                )
-            ),
-            x -> x
-            ),
-            x -> x IS NOT NULL
-        )
+                    flatten(
+                        list_transform(
+                            map_entries({column_name}_l),
+                            entry -> CASE
+                                WHEN COALESCE({column_name}_r[entry.key], 0) > 0
+                                THEN list_value(
+                                    POW(
+                                        entry.key.rel_freq,
+                                        LEAST(entry.value, {column_name}_r[entry.key])
+                                    )
+                                )
+                                ELSE list_value()
+                            END
+                        )
+                    ),
+                    x -> x
+                ),
+                x -> x IS NOT NULL
+            )
         ),
         (p, q) -> p * q
     )
     """
 
-    # This current fails if experimental optimisation on splink==4.0.7.dev1 is enabled
-    # https://github.com/moj-analytical-services/splink/pull/2630
-    # It doesn't appear to improve accuracy anyway
-    #
-    # missing_tokens_product = f"""
-    # list_reduce(
-    #     list_prepend(
-    #         1.0,
-    #         list_concat(
-    #             list_transform(
-    #                 map_entries({column_name}_l),
-    #                 entry -> POW(entry.key.rel_freq, GREATEST(entry.value::INTEGER - COALESCE({column_name}_r[entry.key], 0), 0))
-    #             ),
-    #             list_transform(
-    #                 map_entries({column_name}_r),
-    #                 entry -> POW(entry.key.rel_freq, GREATEST(entry.value::INTEGER - COALESCE({column_name}_l[entry.key], 0), 0))
-    #             )
-    #         )
-    #     ),
-    #     (p, q) -> p * q
-    # )
-    # """
-
     # return f"{matching_tokens} / POW({missing_tokens_product}, 0.33)"
-    return f"{matching_tokens}"
+    return matching_tokens
 
 
 def generate_arr_reduce_data(
@@ -672,11 +717,6 @@ def get_token_rel_freq_arr_comparison(
     token_rel_freq_arr_comparison = {
         "output_column_name": "token_rel_freq_arr_hist",
         "comparison_levels": [
-            {
-                "sql_condition": '"token_rel_freq_arr_hist_l" IS NULL OR "token_rel_freq_arr_hist_r" IS NULL',
-                "label_for_charts": "Null",
-                "is_null_level": True,
-            },
             *middle_conditions,
             {
                 "sql_condition": "ELSE",
@@ -699,7 +739,9 @@ common_end_tokens_comparison = {
     "output_column_name": "common_end_tokens",
     "comparison_levels": [
         {
-            "sql_condition": '"common_end_tokens_hist_l" IS NULL OR "common_end_tokens_hist_r" IS NULL',
+            "sql_condition": (
+                '"common_end_tokens_hist_l" IS NULL OR "common_end_tokens_hist_r" IS NULL'
+            ),
             "label_for_charts": "Null",
             "is_null_level": True,
         },
@@ -728,9 +770,17 @@ postcode_comparison = {
     "output_column_name": "postcode",
     "comparison_levels": [
         {
-            "sql_condition": '"postcode_l" IS NULL OR "postcode_r" IS NULL',
+            "sql_condition": "postcode_l IS NULL AND postcode_r IS NULL",
             "label_for_charts": "Null",
             "is_null_level": True,
+        },
+        {
+            "sql_condition": "postcode_r IS NULL",
+            "label_for_charts": "Postcode missing from messy table",
+            "fix_m_probability": True,
+            "fix_u_probability": True,
+            "m_probability": 1024,
+            "u_probability": 1,
         },
         {
             "sql_condition": "postcode_l = postcode_r",
@@ -757,7 +807,9 @@ postcode_comparison = {
             "fix_u_probability": toggle_u_probability_fix,
         },
         {
-            "sql_condition": "split_part(postcode_l, ' ', 1) = split_part(postcode_r, ' ', 1)",
+            "sql_condition": (
+                "split_part(postcode_l, ' ', 1) = split_part(postcode_r, ' ', 1)"
+            ),
             "label_for_charts": "District",
             "m_probability": 3000,
             "u_probability": 1,
@@ -765,7 +817,9 @@ postcode_comparison = {
             "fix_u_probability": toggle_u_probability_fix,
         },
         {
-            "sql_condition": "split_part(postcode_l, ' ', 2) = split_part(postcode_r, ' ', 2)",
+            "sql_condition": (
+                "split_part(postcode_l, ' ', 2) = split_part(postcode_r, ' ', 2)"
+            ),
             "label_for_charts": "Unit not District",
             "m_probability": 2000,
             "u_probability": 1,
