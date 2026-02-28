@@ -1,15 +1,13 @@
 # High performance UK addresses matcher (geocoder)
 
-Extremely fast address matching using a pre-trained [Splink](https://github.com/moj-analytical-services/splink) model.
+Fast, simple address matching (geocoding) in Python.
 
 The key features are:
-- Simple: Python only, no infrastructure needed, set up in seconds on a standard laptop
-- Fast: Match 100,000 addresses in around 30 seconds*
+- **Simple**: Python only, set up in seconds on any laptop, no infrastructure needed
+- **Fast**: Match 100,000 addresses in around 30 seconds*
+- **Reproducible benchmarks**:  High accuracy, demonstrated with reproducible examples
 
 \* Timings based on a Macbook M4 Max.
-
-
-
 
 ## Installation
 
@@ -19,9 +17,7 @@ pip install --pre uk_address_matcher
 
 ## Usage
 
-High performance address matching using a pre-trained [Splink](https://github.com/moj-analytical-services/splink) model.
-
-Will match two datasets provided in this format:
+`uk_address_matcher` assumes you have two tables in the following format:
 
 | unique_id | address_concat                          |
 |-----------|-----------------------------------------|
@@ -30,48 +26,9 @@ Will match two datasets provided in this format:
 | ...       | ...                                     |
 
 
-- You may also provide a separate column called `postcode`, which, if provided will trump any postcode information provided in `address_concat`.
-- If you have labelled data (you know the ground truth), you may provide a column called `ukam_label`, if provided, this will propagate through your results for accuracy analysis.
-
-Postcode handling rules:
-- If you provide a separate `postcode` column, `address_concat` should ideally not include the postcode.
-- If you do not provide `postcode`, the matcher will attempt to extract it during cleaning.
+Generally one dataset will be a dataset of 'messy addresses' which need matching, and the second will be a 'canonical dataset' of addresses to match to, such as Ordnance Survey Addressbase or NGD.
 
 
-Generally one dataset will be a dataset of 'messy addresses' which need matching, and the second will be a 'canonical dataset' of addresses to match to.
-
-## Preparing AddressBase for use in `uk_address_matcher`
-
-`uk_address_matcher` can be used to any canonical list of addresses provided in the format above.
-
-Many users will wish to link to Ordnance Survey address products.
-
-
-### Simplest route (lower accuracy)
-
-The simplest Ordnance Survey product to use for this purpose is [NGD Built Address](https://docs.os.uk/osngd/data-structure/address/gb-address/built-address).
-
-You can use this 'out of the box' as your canonical list of addresses by selecting data from BuiltAddress as follows:
-
-```
-select uprn as unique_id, fulladdress as address_concat
-from builtaddress
-where {your_filter_here}
-```
-
-And providing the result output to `uk_address_matcher`.  You will generally improve accuracy if you filter the data down to the geographical region of interest, and filter the addresses down as much as possible to include only those of interest (e.g. residential only, if you're matching residential addresses)
-
-### Full prep (higher accuracy)
-
-Higher accuracy can be achieve by processing Ornance Survey data in a more sophisticated way.
-
-For instance, Ordnance Survey provides multiple representations of a single address in Addressbase Premium and also in [NGD Address](https://docs.os.uk/osngd/data-structure/address/related-components/alternate-address).
-
-By providing multiple addresses representations of each canonical address to `uk_adress_matcher`, you will have a better chance of higher precisison matching.
-
-We provide a recommendation for automated build scripts for how to build such a file from Addressbase Premium and the NGD datasets here:
-- [AddressBase Premium build script](https://github.com/moj-analytical-services/prepare_addressbase_for_address_matching)
-- [NGD build script](https://github.com/moj-analytical-services/prepare_ngd_for_address_matching)
 
 
 ### Basic Matching
@@ -130,6 +87,12 @@ matcher = AddressMatcher(
 
 result = matcher.match()
 ```
+
+### Additional columns
+
+You may also provide a separate column called `postcode`, which, if provided will take precidence over any postcode information provided in `address_concat`.
+
+If you have labelled data (you know the ground truth), you may provide a column called `ukam_label`, if provided, this will propagate through your results for accuracy analysis.
 
 ### Pre-preparing canonical data
 
@@ -200,7 +163,7 @@ result = matcher.match()
 ```
 
 
-### Two-Pass Matching Approach
+## Methodology
 
 The Splink phase uses a two-pass approach to achieve high accuracy matching:
 
