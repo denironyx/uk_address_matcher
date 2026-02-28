@@ -6,7 +6,7 @@ This guide describes our recommended end-to-end process for address matching to 
 
 Supposing we have 100,000 messy addresses to match.  The steps and their respective timings are as follows.  Time taken dependes on whether the 100,000 are from around the whole country or a specific geographical region.  A local council area is used as an example.
 
-| Task | Timing (Local council region) | Timing (Full country) |
+| Task | Timing (Matching to local council region) | Timing (Matching to full country) |
 |------|-------------------------------|----------------------|
 | 1. Create a data package and corresponding API key in the [Ordnance Survey Data Hub](https://osdatahub.os.uk/data/downloads/data-packages) | 5 minutes | 5 minutes |
 | 2. Install Python and Astral UV and the `uk_address_matcher` package | 5 minutes | 5 minutes |

@@ -2,13 +2,14 @@
 
 Extremely fast address matching using a pre-trained [Splink](https://github.com/moj-analytical-services/splink) model.
 
-```
-Full time taken: 11.05 seconds
-to match 176,640 messy addresses to 273,832 canonical addresses
-at a rate of 15,008 addresses per second
+The key features are:
+- Simple: Python only, no infrastructure needed, set up in seconds on a standard laptop
+- Fast: Match 100,000 addresses in around 30 seconds*
 
-(On Macbook M4 Max)
-```
+\* Timings based on a Macbook M4 Max.
+
+
+
 
 ## Installation
 
