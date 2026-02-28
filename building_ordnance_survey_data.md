@@ -12,7 +12,7 @@ Supposing we have 100,000 messy addresses to match.  The steps and their respect
 | 2. Install Python and Astral UV and the `uk_address_matcher` package | 5 minutes | 5 minutes |
 | 3. Process Ordnance Survey data into a flatfile | 5 seconds* | 4 minutes** |
 | 4. Derives indexes and other features for address matching  | Not necessary, can be done on the fly | 4 mins 50 seconds |
-| 5. Use `uk_address_matcher` to match 100,000 records | 26 seconds |  |
+| 5. Use `uk_address_matcher` to match 100,000 records | 26 seconds | 46 seconds |
 
 
 \* Plus 15 seconds to download the data
@@ -96,11 +96,6 @@ If you're matching to the whole UK dataset, you will want to use the following p
 
 
 ## Step 4: Match the data using `uk_address_matcher`
-
-
-
-
-
 
 
 ### Option A: If your datapackage is for a local council region
