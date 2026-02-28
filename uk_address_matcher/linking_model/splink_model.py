@@ -75,7 +75,7 @@ def _get_linker(
     *,
     con: DuckDBPyConnection,
     additional_columns_to_retain: list[str] | None = None,
-    include_full_postcode_block=True,
+    include_full_postcode_block=False,
     include_outside_postcode_block=True,
     precomputed_numeric_tf_table: DuckDBPyRelation | None = None,
     retain_intermediate_calculation_columns=False,

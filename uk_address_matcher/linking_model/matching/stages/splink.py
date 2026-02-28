@@ -41,7 +41,7 @@ class SplinkStage(MatchingStage):
     final_distinguishability_threshold: Optional[float] = 5.0
 
     # Blocking configuration
-    include_full_postcode_block: bool = True
+    include_full_postcode_block: bool = False
     include_outside_postcode_block: bool = True
 
     # Additional columns to retain through Splink
