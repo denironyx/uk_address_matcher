@@ -78,10 +78,7 @@ matcher = AddressMatcher(
     stages=[
         ExactMatchStage(),
         UniqueTrigramStage(),
-        SplinkStage(
-            final_match_weight_threshold=20.0,
-            final_distinguishability_threshold=5.0,
-        ),
+        SplinkStage(),
     ],
 )
 
