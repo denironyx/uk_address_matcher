@@ -23,7 +23,7 @@ def _run_matcher(duck_con, canonical_relation, addresses_to_match):
         stages=[ExactMatchStage()],
     )
     match_result = matcher.match()
-    row = match_result.matches.fetchone()
+    row = match_result.matches().fetchone()
     assert row is not None
 
 
