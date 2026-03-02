@@ -15,7 +15,7 @@ from uk_address_matcher.post_linkage.match_result.splink_inspector import (
 _SPLINK_MATCH_REASON = "splink: probabilistic match"
 
 
-def _build_roc_sql(rounding_expr: str) -> str:
+def _build_threshold_metrics_sql(rounding_expr: str) -> str:
     """Return threshold metrics SQL parameterised by the score-rounding expression.
 
     This query evaluates top-1 outcomes (one emitted decision per input row):
@@ -32,7 +32,7 @@ def _build_roc_sql(rounding_expr: str) -> str:
     """
     return f"""
     WITH canonical_ids AS (
-        SELECT DISTINCT unique_id FROM __ukam_roc_canonical__
+        SELECT DISTINCT unique_id FROM __ukam_threshold_canonical__
     ),
     labelled AS (
         SELECT
@@ -49,7 +49,7 @@ def _build_roc_sql(rounding_expr: str) -> str:
                 WHEN m.match_reason = '{_SPLINK_MATCH_REASON}' THEN {rounding_expr}
                 ELSE CAST(999 AS DOUBLE)
             END AS match_weight_adj
-        FROM __ukam_roc_matches__ m
+        FROM __ukam_threshold_matches__ m
         LEFT JOIN canonical_ids c ON m.ukam_label = c.unique_id
     ),
     grouped AS (
@@ -204,7 +204,7 @@ class MatchResult:
             threshold_match_weight=threshold_match_weight,
         )
 
-    def roc_data(
+    def accuracy_data(
         self,
         *,
         match_weight_round_to_nearest: float | None = 0.1,
@@ -243,12 +243,12 @@ class MatchResult:
         """
         if "ukam_label" not in self._relation.columns:
             raise ValueError(
-                "roc_data requires a 'ukam_label' column in the match results. "
+                "accuracy_data requires a 'ukam_label' column in the match results. "
                 "Add a ground-truth label column to the input addresses_to_match data."
             )
         if self._canonical_relation is None:
             raise ValueError(
-                "roc_data requires access to the canonical dataset to determine "
+                "accuracy_data requires access to the canonical dataset to determine "
                 "the ground-truth positive class.  This is set automatically when "
                 "matching via AddressMatcher."
             )
@@ -261,17 +261,17 @@ class MatchResult:
         else:
             rounding_expr = "m.match_weight"
 
-        sql = _build_roc_sql(rounding_expr)
+        sql = _build_threshold_metrics_sql(rounding_expr)
 
-        self.con.register("__ukam_roc_matches__", self._relation)
-        self.con.register("__ukam_roc_canonical__", self._canonical_relation)
+        self.con.register("__ukam_threshold_matches__", self._relation)
+        self.con.register("__ukam_threshold_canonical__", self._canonical_relation)
         try:
             rel = self.con.sql(sql)
             rows = rel.fetchall()
             cols = rel.columns
         finally:
-            self.con.unregister("__ukam_roc_matches__")
-            self.con.unregister("__ukam_roc_canonical__")
+            self.con.unregister("__ukam_threshold_matches__")
+            self.con.unregister("__ukam_threshold_canonical__")
 
         return [dict(zip(cols, row)) for row in rows]
 
@@ -319,7 +319,7 @@ class MatchResult:
             threshold_selection_tool as _splink_threshold_tool,
         )
 
-        records = self.roc_data(
+        records = self.accuracy_data(
             match_weight_round_to_nearest=match_weight_round_to_nearest
         )
 

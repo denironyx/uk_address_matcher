@@ -4,23 +4,25 @@ import pytest
 
 from uk_address_matcher.post_linkage.match_result.result import (
     MatchResult,
-    _build_roc_sql,
+    _build_threshold_metrics_sql,
 )
 
-# Sentinel values used by _build_roc_sql for ±infinity
+# Sentinel values used by threshold metrics SQL for ±infinity
 _NEG_INF = -999.0
 _POS_INF = 999.0
 
 
-def _run_roc(matches: list[dict], canonical_ids: list[str]) -> dict[float, dict]:
-    """Register tables, run the ROC SQL, return rows keyed by truth_threshold."""
+def _run_threshold_metrics(
+    matches: list[dict], canonical_ids: list[str]
+) -> dict[float, dict]:
+    """Register tables, run threshold-metrics SQL, return rows keyed by threshold."""
     con = duckdb.connect()
-    con.register("__ukam_roc_matches__", pa.Table.from_pylist(matches))
+    con.register("__ukam_threshold_matches__", pa.Table.from_pylist(matches))
     con.register(
-        "__ukam_roc_canonical__",
+        "__ukam_threshold_canonical__",
         pa.Table.from_pylist([{"unique_id": uid} for uid in canonical_ids]),
     )
-    rel = con.sql(_build_roc_sql("m.match_weight"))
+    rel = con.sql(_build_threshold_metrics_sql("m.match_weight"))
     cols = rel.columns
     rows = rel.fetchall()
     return {row[cols.index("truth_threshold")]: dict(zip(cols, row)) for row in rows}
@@ -33,7 +35,7 @@ def _run_roc(matches: list[dict], canonical_ids: list[str]) -> dict[float, dict]
 
 def test_null_match_reason_maps_to_neg_inf():
     """NULL match_reason → truth_threshold of -999 (treated as −∞)."""
-    rows = _run_roc(
+    rows = _run_threshold_metrics(
         matches=[
             {
                 "unique_id": "a",
@@ -55,7 +57,7 @@ def test_deterministic_reasons_map_to_pos_inf():
         "peeled_address: match after removing common uk end tokens",
         "unique_trigram: unique trigram match",
     ]:
-        rows = _run_roc(
+        rows = _run_threshold_metrics(
             matches=[
                 {
                     "unique_id": "a",
@@ -72,7 +74,7 @@ def test_deterministic_reasons_map_to_pos_inf():
 
 def test_splink_match_uses_actual_weight():
     """Splink match_reason uses the real match_weight as the threshold."""
-    rows = _run_roc(
+    rows = _run_threshold_metrics(
         matches=[
             {
                 "unique_id": "a",
@@ -97,7 +99,7 @@ def test_tp_fp_fn_tn_basic():
     At threshold +999: only exact survives.
       TP=1, FP=0, FN=1 (splink match now below), TN=1.
     """
-    rows = _run_roc(
+    rows = _run_threshold_metrics(
         matches=[
             {
                 "unique_id": "a",
@@ -134,14 +136,14 @@ def test_tp_fp_fn_tn_basic():
     assert (r["tp"], r["fp"], r["fn"], r["tn"]) == (1.0, 0.0, 1.0, 1.0)
 
 
-def test_wrong_canonical_match_scored_at_floor():
+def test_wrong_canonical_match_uses_emitted_score():
     """Wrong canonical IDs keep the emitted splink score and count as FP.
 
     With top-1 semantics, wrong-ID rows are false positives at their emitted
     score (not floored to -999), while recall is still reduced because TP/P
     stays below 1.
     """
-    rows = _run_roc(
+    rows = _run_threshold_metrics(
         matches=[
             {
                 "unique_id": "e",
@@ -179,7 +181,7 @@ def test_label_without_canonical_is_not_a_false_negative():
     A second record with a real splink score anchors a threshold above -999,
     at which the unmatchable record falls into TN.
     """
-    rows = _run_roc(
+    rows = _run_threshold_metrics(
         matches=[
             {
                 "unique_id": "a",
@@ -219,7 +221,7 @@ def test_wrong_match_threshold_transition_fp_then_fn_only():
       removing the false positive, but the true link is still unrecovered,
       so it remains a false negative.
     """
-    rows = _run_roc(
+    rows = _run_threshold_metrics(
         matches=[
             {
                 "unique_id": "good",
