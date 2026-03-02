@@ -26,8 +26,8 @@ from uk_address_matcher.sql_pipeline.runner import DebugOptions
 # Configuration
 # ============================================================================
 
-# DATASET_NAME = "lambeth_council"
-DATASET_NAME = "hackney_council"
+DATASET_NAME = "lambeth_council"
+# DATASET_NAME = "hackney_council"
 apply_env_from_private_config()
 
 OS_DATA_PATH: Path | None = None
@@ -83,6 +83,7 @@ UNMATCHED_SAMPLES = 10  # Sample unresolved records to inspect
 # ============================================================================
 
 print("Initialising benchmark environment...")
+benchmark_started_at = perf_counter()
 variant_label = "configured_stages"
 variant_timings: dict[str, dict[str, float]] = {}
 
@@ -111,7 +112,6 @@ df_messy_clean, df_os_clean = timed_phase(
         derive_term_frequencies_on_the_fly=DERIVE_TERM_FREQUENCIES_ON_THE_FLY,
     ),
 )
-con.sql("DROP TABLE IF EXISTS df_messy")
 df_messy_clean.to_table("df_messy_clean")
 dataset_info = get_dataset_info(DATASET_NAME)
 
@@ -126,64 +126,56 @@ df_messy_for_matching = con.sql(
 ).execute()
 
 with time_phase(variant_timings, variant_label, "pipeline"):
-    matcher = timed_phase(
-        "address_matcher_init",
-        lambda: AddressMatcher(
-            canonical_addresses=df_os_clean,
-            addresses_to_match=df_messy_for_matching,
-            con=con,
-            stages=STAGES,
-            debug_options=DEBUG_OPTIONS,
-        ),
+    matcher = AddressMatcher(
+        canonical_addresses=df_os_clean,
+        addresses_to_match=df_messy_for_matching,
+        con=con,
+        stages=STAGES,
+        debug_options=DEBUG_OPTIONS,
     )
 
     match_result = timed_phase("matcher_match", matcher.match)
-    match_candidates = timed_phase(
-        "materialise_match_results", lambda: match_result.matches()
-    )
+    match_candidates = match_result.matches(all_columns=True)
 
 pipeline_duration = variant_timings[variant_label]["pipeline"]
 print(f"⏱  Pipeline completed in {pipeline_duration:.2f} seconds.\n")
 
 # Bring `dataset_name` back for analysis
-match_candidates = timed_phase(
-    "join_dataset_name_back",
-    lambda: match_candidates.join(
-        timed_phase(
-            "create_dataset_name_lookup",
-            lambda: df_messy_clean.select("ukam_address_id, dataset_name"),
-        ),
-        condition="ukam_address_id",
-        how="left",
-    ),
+con.sql("DROP TABLE IF EXISTS benchmark_match_candidates_raw")
+match_candidates.to_table("benchmark_match_candidates_raw")
+match_candidates = con.sql(
+    """
+        SELECT mc.*, messy.dataset_name
+        FROM benchmark_match_candidates_raw AS mc
+        LEFT JOIN (
+            SELECT ukam_address_id, dataset_name
+            FROM df_messy_clean
+        ) AS messy
+        USING (ukam_address_id)
+        """
 )
 con.sql("DROP TABLE IF EXISTS benchmark_match_candidates")
 match_candidates.to_table("benchmark_match_candidates")
 print("--- Match Reason Breakdown ---\n")
-timed_phase("print_match_metrics", lambda: print(match_result.match_metrics()))
+print(match_result.match_metrics())
 
 print("\n--- Accuracy Metrics ---\n")
-accuracy = timed_phase(
-    "calculate_accuracy_metrics",
-    lambda: calculate_accuracy_metrics(match_candidates),
-)
-timed_phase("show_accuracy_metrics", lambda: accuracy.show(max_width=10000))
+accuracy = calculate_accuracy_metrics(match_candidates)
+accuracy.show(max_width=10000)
 print_unmatched_samples(
     con,
     "benchmark_match_candidates",
     sample_size=UNMATCHED_SAMPLES,
 )
 
-incorrect_count = timed_phase(
-    "count_incorrect_matches",
-    lambda: (
-        match_candidates.filter(
-            "match_reason IS NOT NULL AND ukam_label != resolved_canonical_id"
-        )
-        .count("*")
-        .fetchone()[0]
-    ),
-)
+incorrect_count = con.sql(
+    """
+    SELECT COUNT(*) AS incorrect_count
+    FROM benchmark_match_candidates
+    WHERE match_reason IS NOT NULL
+      AND ukam_label != resolved_canonical_id
+    """
+).fetchone()[0]
 
 if incorrect_count > 0:
     print(f"\n📊 Found {incorrect_count:,} incorrect matches. Analysing mismatches...\n")
@@ -197,11 +189,12 @@ if incorrect_count > 0:
             top_worst=TOP_WORST_MISMATCHES,
         ),
     )
-    timed_phase(
-        "print_mismatch_analysis", lambda: print_mismatch_analysis(mismatch_results)
-    )
+    print_mismatch_analysis(mismatch_results)
 else:
     print("\n✓ No incorrect matches found!\n")
+
+total_benchmark_runtime = perf_counter() - benchmark_started_at
+print(f"\nTotal benchmark runtime: {total_benchmark_runtime:.2f} seconds")
 
 print("\nTiming summary:")
 for line in format_timing_summary(variant_timings):
