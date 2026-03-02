@@ -37,11 +37,11 @@ class SplinkStage(MatchingStage):
     improve_use_bigrams: bool = True
 
     # Thresholds for final candidate selection
-    final_match_weight_threshold: float = 10.0
-    final_distinguishability_threshold: Optional[float] = 5.0
+    final_match_weight_threshold: float = -20.0
+    final_distinguishability_threshold: Optional[float] = 0.0
 
     # Blocking configuration
-    include_full_postcode_block: bool = True
+    include_full_postcode_block: bool = False
     include_outside_postcode_block: bool = True
 
     # Additional columns to retain through Splink

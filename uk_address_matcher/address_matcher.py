@@ -109,10 +109,7 @@ class AddressMatcher:
                 stages=[
                     ExactMatchStage(),
                     UniqueTrigramStage(),
-                    SplinkStage(
-                        final_match_weight_threshold=20,
-                        final_distinguishability_threshold=5.0,
-                    ),
+                    SplinkStage(),
                 ],
             )
             result = matcher.match()
@@ -220,7 +217,9 @@ class AddressMatcher:
             # handles pre-cleaned input correctly (it checks internally).
             logger.debug("Deriving term frequencies from canonical data")
             self._tf_table = derive_term_frequencies_table(
-                self._raw_canonical, con=self.con
+                self._raw_canonical,
+                con=self.con,
+                debug_options=self.debug_options,
             )
 
             logger.debug("Cleaning canonical data")
@@ -228,11 +227,14 @@ class AddressMatcher:
                 self._raw_canonical,
                 con=self.con,
                 term_frequency_lookup=self._tf_table,
+                debug_options=self.debug_options,
             )
 
             logger.debug("Building inverted index from canonical data")
             self._inverted_index = derive_inverted_index(
-                self._canonical_clean, con=self.con
+                self._canonical_clean,
+                con=self.con,
+                debug_options=self.debug_options,
             )
 
     def _resolve_messy_data(self) -> None:
@@ -249,6 +251,7 @@ class AddressMatcher:
                 # If nothing was loaded from disk, these will be None — but that's fine,
                 term_frequency_lookup=self._tf_table,
                 inverted_index=self._inverted_index,
+                debug_options=self.debug_options,
             )
 
     def _coerce_addresses_to_match(

@@ -75,7 +75,7 @@ def _get_linker(
     *,
     con: DuckDBPyConnection,
     additional_columns_to_retain: list[str] | None = None,
-    include_full_postcode_block=True,
+    include_full_postcode_block=False,
     include_outside_postcode_block=True,
     precomputed_numeric_tf_table: DuckDBPyRelation | None = None,
     retain_intermediate_calculation_columns=False,
@@ -187,10 +187,12 @@ def _get_linker(
     db_api = DuckDBAPI(connection=con)
 
     con.register("df_addresses_to_match_fix", df_addresses_to_match)
-    con.register("df_addresses_to_search_within_fix", df_addresses_to_search_within)
-
     df_addresses_to_match_fix = con.table("df_addresses_to_match_fix")
-    df_addresses_to_search_within_fix = con.table("df_addresses_to_search_within_fix")
+
+    # See https://github.com/moj-analytical-services/uk_address_matcher/issues/253
+    # con.register("df_addresses_to_search_within_fix", df_addresses_to_search_within)
+    # df_addresses_to_search_within_fix = con.table("df_addresses_to_search_within_fix")
+    df_addresses_to_search_within_fix = df_addresses_to_search_within
 
     # Drop stale Splink views/tables from any prior linker on this connection.
     for tbl in ("m_", "c_"):

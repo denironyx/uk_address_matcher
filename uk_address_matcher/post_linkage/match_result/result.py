@@ -17,7 +17,7 @@ from uk_address_matcher.post_linkage.match_result.splink_inspector import (
 class MatchResult:
     """Wraps match output with connection-scoped inspection helpers.
 
-    Access the underlying DuckDB relation via `.matches`.
+    Access the underlying DuckDB relation via `.matches()`.
 
     Key methods:
         match_metrics      - match-reason breakdown with counts and percentages.
@@ -41,13 +41,30 @@ class MatchResult:
         class_name = self.__class__.__name__
         return (
             f"{class_name} object.\n"
-            "Use .matches to retrieve your raw results as a DuckDB table."
+            "Use .matches() to retrieve your raw results as a DuckDB table."
         )
 
-    @property
-    def matches(self) -> DuckDBPyRelation:
-        """The underlying DuckDB relation containing match results."""
-        return self._relation
+    def matches(self, *, all_columns: bool = False) -> DuckDBPyRelation:
+        """The underlying DuckDB relation containing match results.
+
+        Args:
+            all_columns: When True, return every column. By default only the
+                key result columns are returned.
+        """
+        if all_columns:
+            return self._relation
+        preferred = [
+            "unique_id",
+            "resolved_canonical_id",
+            "original_address_concat",
+            "original_address_concat_canonical",
+            "match_reason",
+            "match_weight",
+            "distinguishability",
+        ]
+        available = set(self._relation.columns)
+        cols = [c for c in preferred if c in available]
+        return self._relation.select(*cols)
 
     def match_metrics(
         self,
