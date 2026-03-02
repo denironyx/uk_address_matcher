@@ -16,7 +16,20 @@ _SPLINK_MATCH_REASON = "splink: probabilistic match"
 
 
 def _build_roc_sql(rounding_expr: str) -> str:
-    """Return the ROC truth-space SQL, parameterised by the score-rounding expression."""
+    """Return threshold metrics SQL parameterised by the score-rounding expression.
+
+    This query evaluates top-1 outcomes (one emitted decision per input row):
+
+    - A row is "positive" when ``ukam_label`` exists in the canonical dataset.
+    - A row is a true positive when the emitted ``resolved_canonical_id`` equals
+      ``ukam_label`` and the decision score is above threshold.
+    - Wrong-ID rows are treated as false positives at the emitted score, while
+      also reducing recall via ``FN = P - TP``.
+
+    This means wrong-ID rows are not floored to ``-999``; their emitted score is
+    retained so precision-recall thresholding behaves as expected for top-1
+    systems.
+    """
     return f"""
     WITH canonical_ids AS (
         SELECT DISTINCT unique_id FROM __ukam_roc_canonical__
@@ -26,22 +39,15 @@ def _build_roc_sql(rounding_expr: str) -> str:
             m.unique_id,
             CASE WHEN c.unique_id IS NOT NULL THEN 1 ELSE 0 END AS clerical_positive,
             CASE
-                -- No correct canonical exists: score their actual model decision.
-                WHEN c.unique_id IS NULL THEN
-                    CASE
-                        WHEN m.match_reason IS NULL THEN CAST(-999 AS DOUBLE)
-                        WHEN m.match_reason = '{_SPLINK_MATCH_REASON}' THEN {rounding_expr}
-                        ELSE CAST(999 AS DOUBLE)
-                    END
-                -- Correct canonical exists and we matched to it: score their confidence.
-                WHEN m.resolved_canonical_id = m.ukam_label THEN
-                    CASE
-                        WHEN m.match_reason IS NULL THEN CAST(-999 AS DOUBLE)
-                        WHEN m.match_reason = '{_SPLINK_MATCH_REASON}' THEN {rounding_expr}
-                        ELSE CAST(999 AS DOUBLE)
-                    END
-                -- Correct canonical exists but we missed or mis-matched: count as lowest score.
-                ELSE CAST(-999 AS DOUBLE)
+                WHEN c.unique_id IS NOT NULL
+                 AND m.resolved_canonical_id = m.ukam_label
+                THEN 1
+                ELSE 0
+            END AS true_positive_row,
+            CASE
+                WHEN m.match_reason IS NULL THEN CAST(-999 AS DOUBLE)
+                WHEN m.match_reason = '{_SPLINK_MATCH_REASON}' THEN {rounding_expr}
+                ELSE CAST(999 AS DOUBLE)
             END AS match_weight_adj
         FROM __ukam_roc_matches__ m
         LEFT JOIN canonical_ids c ON m.ukam_label = c.unique_id
@@ -49,7 +55,8 @@ def _build_roc_sql(rounding_expr: str) -> str:
     grouped AS (
         SELECT
             match_weight_adj                             AS truth_threshold,
-            COUNT(*)                                     AS n,
+            SUM(true_positive_row)                       AS tp_row,
+            SUM(1 - true_positive_row)                   AS not_tp_row,
             SUM(clerical_positive)                       AS cp,
             SUM(1 - clerical_positive)                   AS cn
         FROM labelled
@@ -58,23 +65,21 @@ def _build_roc_sql(rounding_expr: str) -> str:
     stats AS (
         SELECT
             truth_threshold,
-            SUM(cp) OVER (ORDER BY truth_threshold DESC)                AS cum_tp,
-            SUM(cn) OVER (ORDER BY truth_threshold ASC)  - cn           AS cum_tn,
-            SUM(cp) OVER ()                                             AS total_p,
-            SUM(cn) OVER ()                                             AS total_n,
-            SUM(n)  OVER (ORDER BY truth_threshold DESC)                AS n_at_or_above,
-            SUM(n)  OVER (ORDER BY truth_threshold ASC)  - n           AS n_below
+            SUM(tp_row) OVER (ORDER BY truth_threshold DESC)            AS tp,
+            SUM(not_tp_row) OVER (ORDER BY truth_threshold DESC)        AS fp,
+            SUM(cp) OVER ()                                             AS p,
+            SUM(cn) OVER ()                                             AS n
         FROM grouped
     ),
     truth_space AS (
         SELECT
             truth_threshold,
-            total_p                                      AS P,
-            total_n                                      AS N,
-            CAST(cum_tp                    AS DOUBLE)    AS TP,
-            CAST(cum_tn                    AS DOUBLE)    AS TN,
-            CAST(n_at_or_above - cum_tp    AS DOUBLE)    AS FP,
-            CAST(n_below       - cum_tn    AS DOUBLE)    AS FN
+            p                                             AS p,
+            n                                             AS n,
+            CAST(tp                    AS DOUBLE)         AS tp,
+            CAST(fp                    AS DOUBLE)         AS fp,
+            CAST(p - tp                AS DOUBLE)         AS fn,
+            CAST(n - fp                AS DOUBLE)         AS tn
         FROM stats
     )
     SELECT
@@ -82,21 +87,22 @@ def _build_roc_sql(rounding_expr: str) -> str:
         CASE
             WHEN truth_threshold >=  999 THEN 1.0
             WHEN truth_threshold <= -999 THEN 0.0
-            ELSE power(2, truth_threshold) / (1.0 + power(2, truth_threshold))
-        END                                                             AS match_probability,
-        TP                                                              AS tp,
-        TN                                                              AS tn,
-        FP                                                              AS fp,
-        FN                                                              AS fn,
-        TP / NULLIF(P, 0)                                               AS tp_rate,
-        TN / NULLIF(N, 0)                                               AS tn_rate,
-        FP / NULLIF(N, 0)                                               AS fp_rate,
-        FN / NULLIF(P, 0)                                               AS fn_rate,
-        CASE WHEN TP + FP = 0 THEN 1.0 ELSE TP / (TP + FP) END         AS precision,
-        TP / NULLIF(P, 0)                                               AS recall,
+            ELSE power(2, truth_threshold)
+                / (1.0 + power(2, truth_threshold))
+        END AS match_probability,
+        tp                                                              AS tp,
+        tn                                                              AS tn,
+        fp                                                              AS fp,
+        fn                                                              AS fn,
+        tp / NULLIF(p, 0)                                               AS tp_rate,
+        tn / NULLIF(n, 0)                                               AS tn_rate,
+        fp / NULLIF(n, 0)                                               AS fp_rate,
+        fn / NULLIF(p, 0)                                               AS fn_rate,
+        CASE WHEN tp + fp = 0 THEN 1.0 ELSE tp / (tp + fp) END         AS precision,
+        tp / NULLIF(p, 0)                                               AS recall,
         CASE
-            WHEN 2.0 * TP + FP + FN = 0 THEN 0.0
-            ELSE 2.0 * TP / (2.0 * TP + FP + FN)
+            WHEN 2.0 * tp + fp + fn = 0 THEN 0.0
+            ELSE 2.0 * tp / (2.0 * tp + fp + fn)
         END                                                             AS f1
     FROM truth_space
     ORDER BY truth_threshold ASC
@@ -203,11 +209,16 @@ class MatchResult:
         *,
         match_weight_round_to_nearest: float | None = 0.1,
     ) -> list[dict]:
-        """Compute ROC truth-space metrics swept over every match-weight threshold.
+        """Compute threshold metrics swept over every emitted decision score.
 
         Each row in the returned list corresponds to one threshold value and
         contains the confusion-matrix counts (tp, tn, fp, fn) plus the derived
-        rates (tp_rate, fp_rate, precision, recall, f1) used to plot a ROC curve.
+        rates (tp_rate, fp_rate, precision, recall, f1).
+
+        Important semantics: this uses top-1 outcome evaluation.  Wrong-ID rows
+        are false positives at their emitted score; they are not score-floored.
+        Recall is derived from true positives as ``TP/P`` (equivalently
+        ``FN = P - TP``).
 
         The ground-truth positive class is determined by looking up each record's
         ``ukam_label`` in the canonical dataset.  A record whose ``ukam_label``
@@ -216,11 +227,9 @@ class MatchResult:
 
         The score used as the decision threshold is:
 
-        - ``+999`` for non-splink matches (exact, peeled, trigram) — treated as
-          certainty, but only when the canonical was matched correctly.
+                - ``+999`` for non-splink matches (exact, peeled, trigram).
         - The actual ``match_weight`` for splink probabilistic matches.
-        - ``-999`` for unmatched records or records matched to the wrong
-          canonical — treated as the lowest possible confidence.
+                - ``-999`` for rows with ``match_reason`` = ``NULL``.
 
         Args:
             match_weight_round_to_nearest: Round splink match weights to this
@@ -270,9 +279,9 @@ class MatchResult:
         self,
         *,
         match_weight_round_to_nearest: float | None = 0.1,
-        output_type: Literal[
-            "threshold_selection", "roc", "precision_recall", "table"
-        ] = "threshold_selection",
+        output_type: Literal["threshold_selection", "precision_recall", "table"] = (
+            "threshold_selection"
+        ),
         add_metrics: List[
             Literal["specificity", "npv", "accuracy", "f1", "f2", "f0_5", "p4", "phi"]
         ] = [],
@@ -290,9 +299,13 @@ class MatchResult:
 
                 - ``"threshold_selection"`` *(default)* — interactive panel
                   showing precision/recall curves against match-weight threshold.
-                - ``"roc"`` — ROC curve (false positive rate vs true positive rate).
                 - ``"precision_recall"`` — precision vs recall curve.
                 - ``"table"`` — the raw truth-space data as a list of dicts.
+
+                                ``"roc"`` is intentionally not supported here because this
+                                record-level evaluation does not observe the full
+                                negative-pair universe, making TN-dependent ROC
+                                interpretation unreliable.
 
             add_metrics: Extra metrics to include in the ``"threshold_selection"``
                 chart.  Accepted values: ``"specificity"``, ``"npv"``,
@@ -303,7 +316,6 @@ class MatchResult:
         """
         from splink.internals.charts import (
             precision_recall_chart as _splink_pr_chart,
-            roc_chart as _splink_roc_chart,
             threshold_selection_tool as _splink_threshold_tool,
         )
 
@@ -313,8 +325,6 @@ class MatchResult:
 
         if output_type == "threshold_selection":
             return _splink_threshold_tool(records, add_metrics=add_metrics)
-        elif output_type == "roc":
-            return _splink_roc_chart(records)
         elif output_type == "precision_recall":
             return _splink_pr_chart(records)
         elif output_type == "table":
@@ -322,7 +332,7 @@ class MatchResult:
         else:
             raise ValueError(
                 "Invalid output_type. Allowed values are: "
-                "'threshold_selection', 'roc', 'precision_recall', 'table'."
+                "'threshold_selection', 'precision_recall', 'table'."
             )
 
     def _splink_waterfall_chart(
