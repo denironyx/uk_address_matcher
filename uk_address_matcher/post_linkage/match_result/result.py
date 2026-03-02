@@ -65,13 +65,13 @@ def _build_threshold_metrics_sql(rounding_expr: str) -> str:
     ),
     grouped AS (
         SELECT
-            match_weight_adj                                                   AS truth_threshold,
-            SUM(true_positive_row)                                             AS tp_row,
-            SUM(1 - true_positive_row)                                         AS not_tp_row,
+            match_weight_adj                                           AS truth_threshold,
+            SUM(true_positive_row)                                     AS tp_row,
+            SUM(1 - true_positive_row)                                 AS not_tp_row,
             SUM(CASE WHEN true_positive_row = 0 AND clerical_positive = 0
-                     THEN 1 ELSE 0 END)                                        AS fp_neg_at,
-            SUM(clerical_positive)                                             AS cp,
-            SUM(1 - clerical_positive)                                         AS cn
+                     THEN 1 ELSE 0 END)                                AS fp_neg_at,
+            SUM(clerical_positive)                                     AS cp,
+            SUM(1 - clerical_positive)                                 AS cn
         FROM labelled
         GROUP BY match_weight_adj
     ),
