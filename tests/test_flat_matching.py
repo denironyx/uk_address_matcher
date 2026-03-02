@@ -76,6 +76,7 @@ def test_flat_penalties():
         messy_cleaned,
         canon_cleaned,
         con=con,
+        include_full_postcode_block=True,
         include_outside_postcode_block=False,
     )
     predictions = linker.inference.predict(threshold_match_probability=0.00001)
@@ -170,6 +171,7 @@ def test_flat_one_sided_null_penalty():
         messy_cleaned,
         canon_cleaned,
         con=con,
+        include_full_postcode_block=True,
         include_outside_postcode_block=False,
     )
     predictions = linker.inference.predict(threshold_match_probability=0.00001)
@@ -268,6 +270,7 @@ def test_flat_equivalence_soft_boost():
         messy_cleaned,
         canon_cleaned,
         con=con,
+        include_full_postcode_block=True,
         include_outside_postcode_block=False,
     )
     predictions = linker.inference.predict(threshold_match_probability=0.00001)
@@ -332,6 +335,7 @@ def test_flat_number_letter_one_sided_penalty_not_fuzzy_equivalence():
         messy_cleaned,
         canon_cleaned,
         con=con,
+        include_full_postcode_block=True,
         include_outside_postcode_block=False,
         retain_intermediate_calculation_columns=True,
     )
