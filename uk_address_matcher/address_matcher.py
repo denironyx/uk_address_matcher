@@ -330,6 +330,7 @@ class AddressMatcher:
             result,
             con=self.con,
             _splink_linker=splink_linker,
+            _canonical_relation=self._canonical_clean,
         )
 
     def _find_splink_stage(self):
