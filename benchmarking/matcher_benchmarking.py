@@ -139,7 +139,7 @@ with time_phase(variant_timings, variant_label, "pipeline"):
 
     match_result = timed_phase("matcher_match", matcher.match)
     match_candidates = timed_phase(
-        "materialise_match_results", lambda: match_result.matches
+        "materialise_match_results", lambda: match_result.matches()
     )
 
 pipeline_duration = variant_timings[variant_label]["pipeline"]

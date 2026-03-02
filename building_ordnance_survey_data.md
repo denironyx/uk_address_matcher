@@ -154,7 +154,7 @@ matcher = AddressMatcher(
 result = matcher.match()
 
 # Your results
-result.matches.show(max_width=10000)
+result.matches().show(max_width=10000)
 
 # Summary metrics on how many were matched
 result.match_metrics().show()

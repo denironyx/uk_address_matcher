@@ -77,8 +77,8 @@ def test_match_with_default_stages(con, canonical_data, messy_data):
     result = matcher.match()
 
     assert isinstance(result, MatchResult)
-    assert isinstance(result.matches, duckdb.DuckDBPyRelation)
-    assert result.matches.count("*").fetchone()[0] > 0
+    assert isinstance(result.matches(), duckdb.DuckDBPyRelation)
+    assert result.matches().count("*").fetchone()[0] > 0
 
 
 def test_match_with_explicit_stages(con, canonical_data, messy_data):
@@ -92,8 +92,8 @@ def test_match_with_explicit_stages(con, canonical_data, messy_data):
     result = matcher.match()
 
     assert isinstance(result, MatchResult)
-    assert isinstance(result.matches, duckdb.DuckDBPyRelation)
-    assert result.matches.count("*").fetchone()[0] > 0
+    assert isinstance(result.matches(), duckdb.DuckDBPyRelation)
+    assert result.matches().count("*").fetchone()[0] > 0
 
 
 def test_match_result_has_expected_columns(con, canonical_data, messy_data):
@@ -104,7 +104,7 @@ def test_match_result_has_expected_columns(con, canonical_data, messy_data):
         stages=[ExactMatchStage()],
     )
     result = matcher.match()
-    cols = result.matches.columns
+    cols = result.matches().columns
 
     assert "unique_id_l" in cols or "unique_id" in cols
     assert "match_reason" in cols
@@ -126,7 +126,7 @@ def test_match_with_custom_splink_stage(con, canonical_data, messy_data):
     )
     result = matcher.match()
     assert isinstance(result, MatchResult)
-    assert isinstance(result.matches, duckdb.DuckDBPyRelation)
+    assert isinstance(result.matches(), duckdb.DuckDBPyRelation)
 
 
 def test_match_from_prepared_folder(con, canonical_data, messy_data):
@@ -145,8 +145,8 @@ def test_match_from_prepared_folder(con, canonical_data, messy_data):
         result = matcher.match()
 
         assert isinstance(result, MatchResult)
-        assert isinstance(result.matches, duckdb.DuckDBPyRelation)
-        assert result.matches.count("*").fetchone()[0] > 0
+        assert isinstance(result.matches(), duckdb.DuckDBPyRelation)
+        assert result.matches().count("*").fetchone()[0] > 0
 
 
 def test_match_from_prepared_folder_path_object(con, canonical_data, messy_data):
@@ -163,7 +163,7 @@ def test_match_from_prepared_folder_path_object(con, canonical_data, messy_data)
             stages=[ExactMatchStage()],
         )
         result = matcher.match()
-        assert result.matches.count("*").fetchone()[0] > 0
+        assert result.matches().count("*").fetchone()[0] > 0
 
 
 def test_stage_repr_is_concise_and_informative():
