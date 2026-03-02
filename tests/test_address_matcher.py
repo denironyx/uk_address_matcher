@@ -166,6 +166,111 @@ def test_match_from_prepared_folder_path_object(con, canonical_data, messy_data)
         assert result.matches().count("*").fetchone()[0] > 0
 
 
+def test_canonical_address_filter_applies_to_prepared_folder(con):
+    canonical_records = [
+        {
+            "unique_id": "C1",
+            "address_concat": "1 high street london",
+            "postcode": "SW1A 1AA",
+            "classificationcode": "RD06",
+            "lowertierlocalauthoritygsscode": "E07000219",
+        },
+        {
+            "unique_id": "C2",
+            "address_concat": "2 low street manchester",
+            "postcode": "M1 1AA",
+            "classificationcode": "RD07",
+            "lowertierlocalauthoritygsscode": "E07000219",
+        },
+    ]
+    messy_records = [
+        {
+            "unique_id": "M1",
+            "address_concat": "1 high street london",
+            "postcode": "SW1A 1AA",
+        },
+        {
+            "unique_id": "M2",
+            "address_concat": "2 low street manchester",
+            "postcode": "M1 1AA",
+        },
+    ]
+
+    canonical_data = _make_addresses(con, canonical_records)
+    messy_data = _make_addresses(con, messy_records)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        prepare_canonical_folder(
+            canonical_data,
+            output_folder=tmp,
+            con=con,
+            overwrite=True,
+        )
+
+        matcher = AddressMatcher(
+            canonical_addresses=tmp,
+            addresses_to_match=messy_data,
+            canonical_address_filter=(
+                "classificationcode = 'RD06' "
+                "AND lowertierlocalauthoritygsscode = 'E07000219'"
+            ),
+            con=con,
+            stages=[ExactMatchStage()],
+        )
+        result = matcher.match().matches().order("unique_id")
+        rows = result.select("unique_id, resolved_canonical_id").fetchall()
+
+    assert rows == [("M1", "C1"), ("M2", None)]
+
+
+def test_canonical_address_filter_applies_to_relation(con):
+    canonical_records = [
+        {
+            "unique_id": "C1",
+            "address_concat": "1 high street london",
+            "postcode": "SW1A 1AA",
+            "classificationcode": "RD06",
+            "lowertierlocalauthoritygsscode": "E07000219",
+        },
+        {
+            "unique_id": "C2",
+            "address_concat": "2 low street manchester",
+            "postcode": "M1 1AA",
+            "classificationcode": "RD07",
+            "lowertierlocalauthoritygsscode": "E07000219",
+        },
+    ]
+    messy_records = [
+        {
+            "unique_id": "M1",
+            "address_concat": "1 high street london",
+            "postcode": "SW1A 1AA",
+        },
+        {
+            "unique_id": "M2",
+            "address_concat": "2 low street manchester",
+            "postcode": "M1 1AA",
+        },
+    ]
+
+    canonical_data = _make_addresses(con, canonical_records)
+    messy_data = _make_addresses(con, messy_records)
+
+    matcher = AddressMatcher(
+        canonical_addresses=canonical_data,
+        addresses_to_match=messy_data,
+        canonical_address_filter=(
+            "classificationcode = 'RD06' AND lowertierlocalauthoritygsscode = 'E07000219'"
+        ),
+        con=con,
+        stages=[ExactMatchStage()],
+    )
+    result = matcher.match().matches().order("unique_id")
+    rows = result.select("unique_id, resolved_canonical_id").fetchall()
+
+    assert rows == [("M1", "C1"), ("M2", None)]
+
+
 def test_stage_repr_is_concise_and_informative():
     exact_repr = repr(ExactMatchStage())
     peeled_repr = repr(PeeledAddressStage())
