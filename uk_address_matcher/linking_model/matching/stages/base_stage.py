@@ -290,7 +290,8 @@ class MatchingStage(ABC):
             if column_name not in results_columns:
                 column_type = temp_column_types[column_name]
                 con.execute(
-                    f'ALTER TABLE "{results_table}" ADD COLUMN {column_name} {column_type}'
+                    f'ALTER TABLE "{results_table}" '
+                    f"ADD COLUMN {column_name} {column_type}"
                 )
 
         set_clauses = [

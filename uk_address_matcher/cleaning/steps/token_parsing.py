@@ -198,7 +198,9 @@ def _parse_out_flat_position_and_letter():
     # Match all numbers (standalone digits, not part of ranges like 120-122)
     count_numbers = r"\b(\d{1,5})\b"
 
-    flat_num_after_flat = r"\bFLAT\s+(\d{1,4})(?:\s|[A-Za-z/])"  # FLAT 12 / FLAT 12A / FLAT 12/2 - match if followed by space, letter, or slash
+    flat_num_after_flat = (
+        r"\bFLAT\s+(\d{1,4})(?:\s|[A-Za-z/])"  # FLAT 12 / FLAT 12A / FLAT 12/2
+    )
     flat_letter_after_num_after_flat = (
         r"\bFLAT\s+\d{1,4}\s*([A-Za-z])\b"  # FLAT 12A / FLAT 12 A
     )
@@ -214,11 +216,20 @@ def _parse_out_flat_position_and_letter():
 
         -- 1) Positional/floor signal
         CASE
-            WHEN NULLIF(regexp_extract(i.clean_full_address, '{floor_positions}', 1), '') = 'LOWER GROUND'
+            WHEN NULLIF(
+                regexp_extract(i.clean_full_address, '{floor_positions}', 1),
+                ''
+            ) = 'LOWER GROUND'
                 THEN 'GROUND FLOOR'
-            WHEN NULLIF(regexp_extract(i.clean_full_address, '{floor_positions}', 1), '') = 'LOWER FLOOR'
+            WHEN NULLIF(
+                regexp_extract(i.clean_full_address, '{floor_positions}', 1),
+                ''
+            ) = 'LOWER FLOOR'
                 THEN 'LOWER FLOOR'
-            ELSE NULLIF(regexp_extract(i.clean_full_address, '{floor_positions}', 1), '')
+            ELSE NULLIF(
+                regexp_extract(i.clean_full_address, '{floor_positions}', 1),
+                ''
+            )
         END AS flat_positional,
 
         -- 2) flat_letter (priority:
