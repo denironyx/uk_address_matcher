@@ -29,6 +29,17 @@ def _build_threshold_metrics_sql(rounding_expr: str) -> str:
     This means wrong-ID rows are not floored to ``-999``; their emitted score is
     retained so precision-recall thresholding behaves as expected for top-1
     systems.
+
+    Two FP concepts are tracked separately:
+
+    - ``fp`` (fp_all): every non-TP accepted row, used for precision.
+    - ``fp_neg``: non-TP rows whose ``ukam_label`` is *not* in the canonical
+      dataset (genuine negatives wrongly accepted).  Used to derive ``tn``,
+      ``tn_rate``, and ``fp_rate``.
+
+    Separating the two prevents TN from going negative when matchable records
+    receive wrong-ID decisions, because wrong-ID rows inflate ``fp`` but should
+    not reduce the count of correctly-rejected genuine negatives.
     """
     return f"""
     WITH canonical_ids AS (
@@ -54,19 +65,22 @@ def _build_threshold_metrics_sql(rounding_expr: str) -> str:
     ),
     grouped AS (
         SELECT
-            match_weight_adj                             AS truth_threshold,
-            SUM(true_positive_row)                       AS tp_row,
-            SUM(1 - true_positive_row)                   AS not_tp_row,
-            SUM(clerical_positive)                       AS cp,
-            SUM(1 - clerical_positive)                   AS cn
+            match_weight_adj                                                   AS truth_threshold,
+            SUM(true_positive_row)                                             AS tp_row,
+            SUM(1 - true_positive_row)                                         AS not_tp_row,
+            SUM(CASE WHEN true_positive_row = 0 AND clerical_positive = 0
+                     THEN 1 ELSE 0 END)                                        AS fp_neg_at,
+            SUM(clerical_positive)                                             AS cp,
+            SUM(1 - clerical_positive)                                         AS cn
         FROM labelled
         GROUP BY match_weight_adj
     ),
     stats AS (
         SELECT
             truth_threshold,
-            SUM(tp_row) OVER (ORDER BY truth_threshold DESC)            AS tp,
+            SUM(tp_row)    OVER (ORDER BY truth_threshold DESC)         AS tp,
             SUM(not_tp_row) OVER (ORDER BY truth_threshold DESC)        AS fp,
+            SUM(fp_neg_at) OVER (ORDER BY truth_threshold DESC)         AS fp_neg,
             SUM(cp) OVER ()                                             AS p,
             SUM(cn) OVER ()                                             AS n
         FROM grouped
@@ -74,12 +88,13 @@ def _build_threshold_metrics_sql(rounding_expr: str) -> str:
     truth_space AS (
         SELECT
             truth_threshold,
-            p                                             AS p,
-            n                                             AS n,
-            CAST(tp                    AS DOUBLE)         AS tp,
-            CAST(fp                    AS DOUBLE)         AS fp,
-            CAST(p - tp                AS DOUBLE)         AS fn,
-            CAST(n - fp                AS DOUBLE)         AS tn
+            p                                                          AS p,
+            n                                                          AS n,
+            CAST(tp              AS DOUBLE)                            AS tp,
+            CAST(fp              AS DOUBLE)                            AS fp,
+            CAST(fp_neg          AS DOUBLE)                            AS fp_neg,
+            CAST(p - tp          AS DOUBLE)                            AS fn,
+            CAST(GREATEST(n - fp_neg, 0) AS DOUBLE)                    AS tn
         FROM stats
     )
     SELECT
@@ -93,10 +108,11 @@ def _build_threshold_metrics_sql(rounding_expr: str) -> str:
         tp                                                              AS tp,
         tn                                                              AS tn,
         fp                                                              AS fp,
+        fp_neg                                                          AS fp_neg,
         fn                                                              AS fn,
         tp / NULLIF(p, 0)                                               AS tp_rate,
-        tn / NULLIF(n, 0)                                               AS tn_rate,
-        fp / NULLIF(n, 0)                                               AS fp_rate,
+        tn / NULLIF(CAST(n AS DOUBLE), 0)                               AS tn_rate,
+        fp_neg / NULLIF(CAST(n AS DOUBLE), 0)                           AS fp_rate,
         fn / NULLIF(p, 0)                                               AS fn_rate,
         CASE WHEN tp + fp = 0 THEN 1.0 ELSE tp / (tp + fp) END         AS precision,
         tp / NULLIF(p, 0)                                               AS recall,
@@ -238,8 +254,14 @@ class MatchResult:
 
         Returns:
             List of dicts with keys: ``truth_threshold``, ``match_probability``,
-            ``tp``, ``tn``, ``fp``, ``fn``, ``tp_rate``, ``tn_rate``,
-            ``fp_rate``, ``fn_rate``, ``precision``, ``recall``, ``f1``.
+            ``tp``, ``tn``, ``fp``, ``fp_neg``, ``fn``, ``tp_rate``,
+            ``tn_rate``, ``fp_rate``, ``fn_rate``, ``precision``, ``recall``,
+            ``f1``.
+
+            ``fp`` is every accepted non-TP row (used by ``precision``).
+            ``fp_neg`` counts only the accepted rows whose label is absent from
+            the canonical dataset; it is used to derive ``tn``, ``tn_rate``,
+            and ``fp_rate``.
         """
         if "ukam_label" not in self._relation.columns:
             raise ValueError(
@@ -284,7 +306,8 @@ class MatchResult:
         ),
         add_metrics: List[
             Literal["specificity", "npv", "accuracy", "f1", "f2", "f0_5", "p4", "phi"]
-        ] = [],
+        ]
+        | None = None,
     ) -> Any:
         """Generate an accuracy chart or table from labelled match results.
 
@@ -318,6 +341,9 @@ class MatchResult:
             precision_recall_chart as _splink_pr_chart,
             threshold_selection_tool as _splink_threshold_tool,
         )
+
+        if add_metrics is None:
+            add_metrics = []
 
         records = self.accuracy_data(
             match_weight_round_to_nearest=match_weight_round_to_nearest

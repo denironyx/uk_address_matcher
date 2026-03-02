@@ -136,7 +136,7 @@ def test_tp_fp_fn_tn_basic():
     assert (r["tp"], r["fp"], r["fn"], r["tn"]) == (1.0, 0.0, 1.0, 1.0)
 
 
-def test_wrong_canonical_match_uses_emitted_score():
+def test_wrong_canonical_match_keeps_emitted_weight_and_counts_fp():
     """Wrong canonical IDs keep the emitted splink score and count as FP.
 
     With top-1 semantics, wrong-ID rows are false positives at their emitted
@@ -253,6 +253,65 @@ def test_wrong_match_threshold_transition_fp_then_fn_only():
     assert r["tp"] == 1.0
     assert r["fp"] == 0.0
     assert r["fn"] == 1.0
+
+
+def test_fp_all_vs_fp_neg_differ_for_wrong_id():
+    """fp (fp_all) and fp_neg diverge when a matchable row gets a wrong-ID decision.
+
+    The wrong-ID row is a matchable record (clerical_positive=1) matched to a
+    different canonical ID.  It counts in ``fp`` (accepted non-TP) but NOT in
+    ``fp_neg`` (only genuine negatives wrongly accepted), so:
+
+        fp > fp_neg  at the score where the wrong decision is accepted.
+    """
+    rows = _run_threshold_metrics(
+        matches=[
+            {
+                "unique_id": "a",
+                "resolved_canonical_id": "2",  # wrong canonical
+                "ukam_label": "1",  # should be "1"
+                "match_weight": 10.0,
+                "match_reason": "splink: probabilistic match",
+            },
+        ],
+        canonical_ids=["1", "2"],
+    )
+
+    r = rows[10.0]
+    # fp_all = 1 (wrong-ID accepted); fp_neg = 0 (no genuine negatives accepted)
+    assert r["fp"] == 1.0
+    assert r["fp_neg"] == 0.0
+    assert r["tn"] == 0.0  # n=0, so tn=GREATEST(0-0,0)=0, never negative
+
+
+def test_tn_never_negative():
+    """TN must be >= 0 at every threshold, including when all rows are matchable.
+
+    When the entire dataset is matchable (no genuine negatives, n=0), the old
+    formula tn = n - fp would yield 0 - fp < 0.  The fix clamps with GREATEST.
+    """
+    rows = _run_threshold_metrics(
+        matches=[
+            {
+                "unique_id": "a",
+                "resolved_canonical_id": "2",  # wrong canonical
+                "ukam_label": "1",
+                "match_weight": 5.0,
+                "match_reason": "splink: probabilistic match",
+            },
+            {
+                "unique_id": "b",
+                "resolved_canonical_id": "2",
+                "ukam_label": "2",
+                "match_weight": None,
+                "match_reason": "exact: full match",
+            },
+        ],
+        canonical_ids=["1", "2"],  # all rows are matchable → n=0
+    )
+
+    for threshold, row in rows.items():
+        assert row["tn"] >= 0.0, f"tn < 0 at threshold {threshold}: {row['tn']}"
 
 
 def test_accuracy_analysis_rejects_roc_output_type():
