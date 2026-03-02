@@ -31,8 +31,8 @@ def test_parse_out_flat_positional():
         ("BASEMENT FLAT A 11 SPITFIRE COURT BIRMINGHAM", "BASEMENT", "A", None),
         ("BASEMENT FLAT 11 243 SPITFIRE COURT BIRMINGHAM", "BASEMENT", None, "11"),
         ("GARDEN FLAT 11 243 SPITFIRE COURT BIRMINGHAM", "GARDEN", None, "11"),
-        ("TOP FLOOR FLAT 12A HIGH STREET", "TOP FLOOR", "A", None),
-        ("SECOND FLOOR FLAT 12 A HIGH STREET", "SECOND FLOOR", "A", None),
+        ("TOP FLOOR FLAT 12A HIGH STREET", "TOP FLOOR", "A", "12"),
+        ("SECOND FLOOR FLAT 12 A HIGH STREET", "SECOND FLOOR", "A", "12"),
         ("GROUND FLOOR FLAT B 25 MAIN ROAD", "GROUND FLOOR", "B", None),
         ("FIRST FLOOR 15B LONDON ROAD", "FIRST FLOOR", "B", None),
         ("FLAT C MY HOUSE 120 MY ROAD", None, "C", None),
@@ -52,8 +52,14 @@ def test_parse_out_flat_positional():
             "FLAT 12A HIGH STREET",
             None,
             "A",
+            "12",
+        ),
+        (
+            "FLAT 2B 10 KINGS ROAD LONDON",
             None,
-        ),  # adjacent letter after FLAT number, letter is the flat determinant
+            "B",
+            "2",
+        ),
         (
             "15B LONDON ROAD",
             None,
@@ -69,10 +75,10 @@ def test_parse_out_flat_positional():
         ),
         # Only one number - indicates that it's a house number, not flat number
         ("UPPER FLOOR FLAT 120 TEST", "UPPER FLOOR", None, None),
-        # LOWER GROUND variants
-        ("FLAT LOWER GROUND 35 ATOP THE HILL LONDON", "LOWER GROUND", None, None),
-        ("LOWER GROUND FLAT 35 ATOP THE HILL LONDON", "LOWER GROUND", None, None),
-        ("LOWER GROUND 35 ATOP THE HILL LONDON", "LOWER GROUND", None, None),
+        # LOWER GROUND variants (canonicalised to GROUND FLOOR)
+        ("FLAT LOWER GROUND 35 ATOP THE HILL LONDON", "GROUND FLOOR", None, None),
+        ("LOWER GROUND FLAT 35 ATOP THE HILL LONDON", "GROUND FLOOR", None, None),
+        ("LOWER GROUND 35 ATOP THE HILL LONDON", "GROUND FLOOR", None, None),
         ("LOWER FLOOR FLAT 10 TEST ROAD", "LOWER FLOOR", None, None),
         # UPPER GROUND variant
         ("UPPER GROUND FLAT 20 EXAMPLE STREET", "UPPER GROUND", None, None),

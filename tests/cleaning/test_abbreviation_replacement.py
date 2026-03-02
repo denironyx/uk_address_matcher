@@ -23,6 +23,8 @@ def test_abbr_data(duck_con):
             ('MUSEUM GALLERY THEATRE THEA CIVIC CENTRE'),
             ('FLAT 3D 12B BAKER AVE LONDON'),
             ('PENTHOUSE 1A OXFORD CLS LONDON'),
+            ('UPPER FLOOR FLAT 2 EXAMPLE ROAD LONDON'),
+            ('FLAT LOWER GROUND 2 EXAMPLE ROAD LONDON'),
         ) AS t(clean_full_address)
     """
     )
@@ -49,6 +51,8 @@ def test_abbreviation_normalisation_sql(duck_con, test_abbr_data):
         "MUSEUM GALLERY THEATRE THEATRE CIVIC CENTRE",
         "FLAT 3D 12B BAKER AVENUE LONDON",
         "TOP FLOOR FLAT 1A OXFORD CLOSE LONDON",
+        "TOP FLOOR FLAT 2 EXAMPLE ROAD LONDON",
+        "FLAT LOWER GROUND 2 EXAMPLE ROAD LONDON",
     ]
     for row, expected in zip(rows, expected_addresses):
         assert row[clean_idx] == expected

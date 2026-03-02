@@ -214,8 +214,8 @@ EQUIVALENCE_TEST_CASES = [
         "c_flat_number_mismatch",
     ),
     (
-        "m_basement",
-        "BASEMENT FLAT 20 HIGH STREET LONDON",
+        "m_ground_floor",
+        "GROUND FLOOR FLAT 20 HIGH STREET LONDON",
         "E1 6AA",
         "c_lower_ground_equiv",
         "c_first_floor_mismatch",
@@ -227,6 +227,15 @@ EQUIVALENCE_CANONICAL_ADDRESSES = [
     ("c_flat_number_mismatch", "FLAT D 10 KINGS ROAD LONDON", "SW3 4ND"),
     ("c_lower_ground_equiv", "LOWER GROUND FLAT 20 HIGH STREET LONDON", "E1 6AA"),
     ("c_first_floor_mismatch", "FIRST FLOOR FLAT 20 HIGH STREET LONDON", "E1 6AA"),
+]
+
+ONE_SIDED_NUMBER_LETTER_MESSY = [
+    ("m_fuzzy_reference", "FLAT B 10 KINGS ROAD LONDON", "SW3 4ND"),
+    ("m_one_sided_2b", "FLAT 2B 10 KINGS ROAD LONDON", "SW3 4ND"),
+]
+
+ONE_SIDED_NUMBER_LETTER_CANONICAL = [
+    ("c_flat_2_reference", "FLAT 2 10 KINGS ROAD LONDON", "SW3 4ND"),
 ]
 
 
@@ -292,3 +301,94 @@ def test_flat_equivalence_soft_boost():
             )
 
     assert not failures, "Flat equivalence boost failures:\n" + "\n".join(failures)
+
+
+def test_flat_number_letter_one_sided_penalty_not_fuzzy_equivalence():
+    """FLAT 2B vs FLAT 2 should get one-sided letter penalty, not fuzzy boost."""
+    con = duckdb.connect()
+
+    messy_values = ", ".join(
+        f"('{uid}'::VARCHAR, '{addr}'::VARCHAR, '{pc}'::VARCHAR)"
+        for uid, addr, pc in ONE_SIDED_NUMBER_LETTER_MESSY
+    )
+    messy_rel = con.sql(f"""
+        SELECT * FROM (VALUES {messy_values})
+        AS t(unique_id, address_concat, postcode)
+    """)
+
+    canon_values = ", ".join(
+        f"('{uid}'::VARCHAR, '{addr}'::VARCHAR, '{pc}'::VARCHAR)"
+        for uid, addr, pc in ONE_SIDED_NUMBER_LETTER_CANONICAL
+    )
+    canon_rel = con.sql(f"""
+        SELECT * FROM (VALUES {canon_values})
+        AS t(unique_id, address_concat, postcode)
+    """)
+
+    messy_cleaned = prepare_data_for_matching(messy_rel, con=con)
+    canon_cleaned = prepare_data_for_matching(canon_rel, con=con)
+
+    linker = _get_linker(
+        messy_cleaned,
+        canon_cleaned,
+        con=con,
+        include_outside_postcode_block=False,
+        retain_intermediate_calculation_columns=True,
+    )
+    predictions = linker.inference.predict(threshold_match_probability=0.00001)
+    results_df = predictions.as_pandas_dataframe()
+
+    match_weights = {}
+    for _, row in results_df.iterrows():
+        key = (row["unique_id_l"], row["unique_id_r"])
+        match_weights[key] = row["match_weight"]
+        match_weights[(row["unique_id_r"], row["unique_id_l"])] = row["match_weight"]
+
+    fuzzy_reference_weight = match_weights.get(
+        ("m_fuzzy_reference", "c_flat_2_reference")
+    )
+    one_sided_weight = match_weights.get(("m_one_sided_2b", "c_flat_2_reference"))
+
+    assert fuzzy_reference_weight is not None, (
+        "m_fuzzy_reference -> c_flat_2_reference: no prediction found"
+    )
+    assert one_sided_weight is not None, (
+        "m_one_sided_2b -> c_flat_2_reference: no prediction found"
+    )
+
+    one_sided_row = results_df[
+        (results_df["unique_id_l"] == "m_one_sided_2b")
+        & (results_df["unique_id_r"] == "c_flat_2_reference")
+        | (
+            (results_df["unique_id_r"] == "m_one_sided_2b")
+            & (results_df["unique_id_l"] == "c_flat_2_reference")
+        )
+    ]
+    fuzzy_reference_row = results_df[
+        (results_df["unique_id_l"] == "m_fuzzy_reference")
+        & (results_df["unique_id_r"] == "c_flat_2_reference")
+        | (
+            (results_df["unique_id_r"] == "m_fuzzy_reference")
+            & (results_df["unique_id_l"] == "c_flat_2_reference")
+        )
+    ]
+
+    assert not one_sided_row.empty, "Missing one-sided comparison row"
+    assert not fuzzy_reference_row.empty, "Missing fuzzy reference comparison row"
+
+    one_sided_bf = float(one_sided_row.iloc[0]["bf_flat_identity"])
+    fuzzy_reference_bf = float(fuzzy_reference_row.iloc[0]["bf_flat_identity"])
+
+    assert one_sided_bf == 0.25, (
+        "Expected FLAT 2B vs FLAT 2 to hit 'Same number, letter one-sided' "
+        f"(bf=0.25), got bf_flat_identity={one_sided_bf:.6f}."
+    )
+    assert fuzzy_reference_bf == 13.0, (
+        "Expected FLAT B vs FLAT 2 to hit fuzzy letter-number equivalence "
+        f"(bf=13), got bf_flat_identity={fuzzy_reference_bf:.6f}."
+    )
+    assert one_sided_bf < fuzzy_reference_bf, (
+        "Expected one-sided letter case to score lower than fuzzy equivalence; "
+        f"got one_sided={one_sided_bf:.6f}, "
+        f"fuzzy_reference={fuzzy_reference_bf:.6f}."
+    )

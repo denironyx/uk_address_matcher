@@ -4,6 +4,7 @@ from uk_address_matcher import (
     ExactMatchStage,
     PeeledAddressStage,
 )
+from uk_address_matcher.linking_model.matching import runner as matching_runner
 from uk_address_matcher.linking_model.matching.runner import _run_matching
 
 
@@ -455,6 +456,22 @@ def test_peeled_address_matching_finds_matches(duck_con, peeled_test_data):
 
     # Case 6: Canonical has peeling, fuzzy doesn't - should still match
     assert matched_dict.get(6) == 1006, "Case 6 should match canonical 1006"
+
+
+def test_run_matching_handles_non_identifier_uid(duck_con, peeled_test_data, monkeypatch):
+    """Ensure temporary table names remain SQL-safe even for unusual run IDs."""
+    df_fuzzy, df_canonical = peeled_test_data
+
+    monkeypatch.setattr(matching_runner, "_uid", lambda n=6: "abc-def")
+
+    results = matching_runner._run_matching(
+        con=duck_con,
+        df_messy_clean=df_fuzzy,
+        df_canonical_clean=df_canonical,
+        stages=[ExactMatchStage(), PeeledAddressStage()],
+    )
+
+    assert results.count("*").fetchone()[0] == df_fuzzy.count("*").fetchone()[0]
 
 
 def test_peeled_address_matching_preserves_row_count(duck_con, peeled_test_data):
