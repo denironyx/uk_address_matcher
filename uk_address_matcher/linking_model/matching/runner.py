@@ -58,10 +58,10 @@ def _create_results_table(
 
     enum_values = str(MatchReason.enum_values())
 
-    con.execute(f"DROP TABLE IF EXISTS {results_table}")
+    con.execute(f'DROP TABLE IF EXISTS "{results_table}"')
     con.execute(
         f"""
-        CREATE TABLE {results_table} AS
+        CREATE TABLE \"{results_table}\" AS
         SELECT
             messy.ukam_address_id,
             messy.unique_id
@@ -83,7 +83,7 @@ def _get_unmatched(
         f"""
         SELECT messy.*
         FROM {_relation_sql(df_messy_clean)} AS messy
-        INNER JOIN {results_table} AS results
+        INNER JOIN \"{results_table}\" AS results
             ON results.ukam_address_id = messy.ukam_address_id
         WHERE results.resolved_canonical_id IS NULL
         """
@@ -96,7 +96,7 @@ def _build_final_output(
     df_canonical_clean: duckdb.DuckDBPyRelation,
     results_table: str,
 ) -> duckdb.DuckDBPyRelation:
-    results_columns = con.table(results_table).columns
+    results_columns = con.table(f'"{results_table}"').columns
 
     excluded = {
         "ukam_address_id",
@@ -124,7 +124,7 @@ def _build_final_output(
             canonical.original_address_concat AS original_address_concat_canonical,
             canonical.postcode AS postcode_canonical
         FROM {_relation_sql(df_messy_clean)} AS messy
-        INNER JOIN {results_table} AS results
+        INNER JOIN \"{results_table}\" AS results
             ON results.ukam_address_id = messy.ukam_address_id
         LEFT JOIN {_relation_sql(df_canonical_clean)} AS canonical
             ON canonical.ukam_address_id = results.canonical_ukam_address_id
@@ -184,7 +184,7 @@ def _run_matching(
         stage_name = _stage_name_for_instance(stage)
 
         unmatched_count = con.execute(
-            f"SELECT COUNT(*) FROM {results_table} WHERE resolved_canonical_id IS NULL"
+            f'SELECT COUNT(*) FROM "{results_table}" WHERE resolved_canonical_id IS NULL'
         ).fetchone()[0]
 
         if unmatched_count == 0:
@@ -216,7 +216,7 @@ def _run_matching(
             continue
 
         remaining = con.execute(
-            f"SELECT COUNT(*) FROM {results_table} WHERE resolved_canonical_id IS NULL"
+            f'SELECT COUNT(*) FROM "{results_table}" WHERE resolved_canonical_id IS NULL'
         ).fetchone()[0]
         matched_this_stage = unmatched_count - remaining
         logger.info(
@@ -227,7 +227,7 @@ def _run_matching(
         )
 
     if explain:
-        con.execute(f"DROP TABLE IF EXISTS {results_table}")
+        con.execute(f'DROP TABLE IF EXISTS "{results_table}"')
         return None
 
     result = _build_final_output(
@@ -238,11 +238,11 @@ def _run_matching(
     )
 
     final_table = f"__ukam_final_matches_{run_id}"
-    con.execute(f"DROP TABLE IF EXISTS {final_table}")
-    result.to_table(final_table)
-    final_result = con.table(final_table)
+    con.execute(f'DROP TABLE IF EXISTS "{final_table}"')
+    result.to_table(f'"{final_table}"')
+    final_result = con.table(f'"{final_table}"')
 
-    con.execute(f"DROP TABLE IF EXISTS {results_table}")
+    con.execute(f'DROP TABLE IF EXISTS "{results_table}"')
 
     return final_result
 

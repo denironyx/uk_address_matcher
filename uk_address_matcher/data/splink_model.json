@@ -208,6 +208,14 @@
                     "fix_u_probability": true
                 },
                 {
+                    "sql_condition": "has_flat_indicator_l = TRUE\n    AND has_flat_indicator_r = TRUE\n    AND flat_identity_l IS NOT NULL\n    AND flat_identity_r IS NOT NULL\n    AND flat_identity_l != flat_identity_r\n    AND (\n        (\n            CASE\n                WHEN regexp_matches(UPPER(flat_letter_l), '^[A-Z]$')\n                    THEN unicode(UPPER(flat_letter_l)) - 64\n                ELSE NULL\n            END IS NOT NULL\n            AND TRY_CAST(flat_number_r AS INTEGER) IS NOT NULL\n            AND flat_number_l IS NULL\n            AND flat_letter_r IS NULL\n            AND CASE\n                WHEN regexp_matches(UPPER(flat_letter_l), '^[A-Z]$')\n                    THEN unicode(UPPER(flat_letter_l)) - 64\n                ELSE NULL\n            END = TRY_CAST(flat_number_r AS INTEGER)\n        )\n        OR\n        (\n            CASE\n                WHEN regexp_matches(UPPER(flat_letter_r), '^[A-Z]$')\n                    THEN unicode(UPPER(flat_letter_r)) - 64\n                ELSE NULL\n            END IS NOT NULL\n            AND TRY_CAST(flat_number_l AS INTEGER) IS NOT NULL\n            AND flat_number_r IS NULL\n            AND flat_letter_l IS NULL\n            AND CASE\n                WHEN regexp_matches(UPPER(flat_letter_r), '^[A-Z]$')\n                    THEN unicode(UPPER(flat_letter_r)) - 64\n                ELSE NULL\n            END = TRY_CAST(flat_number_l AS INTEGER)\n        )\n    )",
+                    "label_for_charts": "Fuzzy flat equivalence",
+                    "m_probability": 13,
+                    "u_probability": 1,
+                    "fix_m_probability": true,
+                    "fix_u_probability": true
+                },
+                {
                     "sql_condition": "flat_positional_l IS NOT NULL\n    AND flat_positional_r IS NOT NULL\n    AND flat_positional_l != flat_positional_r",
                     "label_for_charts": "Both positional but different floors",
                     "m_probability": 0.00390625,
@@ -226,7 +234,7 @@
                 {
                     "sql_condition": "flat_number_l IS NOT NULL\n    AND flat_number_l = flat_number_r",
                     "label_for_charts": "Same number, letters both differ",
-                    "m_probability": 0.00390625,
+                    "m_probability": 0.0009765625,
                     "u_probability": 1,
                     "fix_m_probability": true,
                     "fix_u_probability": true

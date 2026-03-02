@@ -139,6 +139,7 @@
   { "token": "TOWNHALL", "replacement": "TOWN HALL" },
   { "token": "TOWNHSE", "replacement": "TOWNHOUSE" },
   { "token": "UNIV", "replacement": "UNIVERSITY" },
+  { "token": "UPPER", "replacement": "TOP" },
   { "token": "VAL", "replacement": "VALLEY" },
   { "token": "VIAD", "replacement": "VIADUCT" },
   { "token": "VON", "replacement": "VIADUCT" },

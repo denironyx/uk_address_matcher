@@ -245,10 +245,10 @@ class MatchingStage(ABC):
         # The stage returns a lazy DuckDBPyRelation.  Shouldn't be too big because
         # it's one row per messy ID, not many columns
         # Materialising it just runs the pipeline (the stage's actual calculation).
-        con.execute(f"DROP TABLE IF EXISTS {tmp_table}")
+        con.execute(f'DROP TABLE IF EXISTS "{tmp_table}"')
         con.execute(
             f"""
-            CREATE TABLE {tmp_table} AS
+            CREATE TABLE \"{tmp_table}\" AS
             SELECT
                 ukam_address_id,
                 canonical_ukam_address_id,
@@ -265,14 +265,14 @@ class MatchingStage(ABC):
             """
         )
 
-        tmp_relation = con.table(tmp_table)
+        tmp_relation = con.table(f'"{tmp_table}"')
         tmp_types = tmp_relation.dtypes
         temp_column_types = {
             column_name: str(column_type)
             for column_name, column_type in zip(tmp_relation.columns, tmp_types)
         }
 
-        results_columns = set(con.table(results_table).columns)
+        results_columns = set(con.table(f'"{results_table}"').columns)
 
         additional_columns = [
             col
@@ -290,7 +290,8 @@ class MatchingStage(ABC):
             if column_name not in results_columns:
                 column_type = temp_column_types[column_name]
                 con.execute(
-                    f"ALTER TABLE {results_table} ADD COLUMN {column_name} {column_type}"
+                    f'ALTER TABLE "{results_table}" '
+                    f"ADD COLUMN {column_name} {column_type}"
                 )
 
         set_clauses = [
@@ -305,13 +306,13 @@ class MatchingStage(ABC):
 
         con.execute(
             f"""
-            UPDATE {results_table} AS dst
+            UPDATE \"{results_table}\" AS dst
             SET
                 {set_sql}
-            FROM {tmp_table} AS src
+            FROM \"{tmp_table}\" AS src
             WHERE dst.ukam_address_id = src.ukam_address_id
               AND dst.resolved_canonical_id IS NULL
             """
         )
 
-        con.execute(f"DROP TABLE IF EXISTS {tmp_table}")
+        con.execute(f'DROP TABLE IF EXISTS "{tmp_table}"')

@@ -106,6 +106,7 @@ def get_flat_identity_comparison(
     WEIGHT_MATCH=6.57,
     WEIGHT_SAME_POSITIONAL=-2,
     WEIGHT_CROSS_TYPE=-2,
+    WEIGHT_FUZZY_EQUIVALENT=4.0,
     WEIGHT_BOTH_POSITIONAL_DIFFER=-8,
     WEIGHT_SAME_NUMBER_LETTER_ONESIDED=-2,
     WEIGHT_SAME_NUMBER_LETTERS_DIFFER=-8,
@@ -137,22 +138,25 @@ def get_flat_identity_comparison(
        letter/number (FLAT A, FLAT 1).  These naming conventions
        are interchangeable in practice (BASEMENT = FLAT 1,
        GROUND FLOOR = FLAT A), so we treat this as near-neutral.
-    6. **Both positional differ** — both sides have a positional
+     6. **Fuzzy equivalence** — letter/number mappings (A=1, B=2)
+         or positional groups (BASEMENT/LOWER GROUND/GROUND FLOOR,
+         TOP/UPPER FLOOR).  Soft boost only.
+     7. **Both positional differ** — both sides have a positional
        descriptor but they name different floors (e.g. TOP FLOOR vs
        FIRST FLOOR, LOWER GROUND vs BASEMENT).  This is more
        penalising than cross-type but less severe than a complete
        mismatch because informal labels like TOP FLOOR can refer to
        different canonical floors.
-    7. **Same number, letter one-sided** — both sides share the
+     8. **Same number, letter one-sided** — both sides share the
        same flat number but only one side has a flat letter (e.g.
        FLAT 2 vs FLAT 2A).  Messy data commonly drops the letter,
        so this deserves a mild penalty rather than the full ELSE.
-    8. **Same number, letters both differ** — both sides share the
+     9. **Same number, letters both differ** — both sides share the
        same flat number and both have a flat letter, but the letters
        differ (e.g. FLAT 2A vs FLAT 2B).  These are genuinely
        different flats in the same building so the penalty is
        heavier than one-sided but lighter than a full mismatch.
-    9. **ELSE** — flat identities differ and no partial match
+     10. **ELSE** — flat identities differ and no partial match
        applies (e.g. FLAT 1 vs FLAT 2); very heavy penalty.
     """
     # Same positional condition: both sides share the same positional
@@ -178,6 +182,123 @@ def get_flat_identity_comparison(
     both_positional_differ_sql = """flat_positional_l IS NOT NULL
     AND flat_positional_r IS NOT NULL
     AND flat_positional_l != flat_positional_r"""
+
+    letter_to_number_l = """
+        CASE UPPER(flat_letter_l)
+            WHEN 'A' THEN 1
+            WHEN 'B' THEN 2
+            WHEN 'C' THEN 3
+            WHEN 'D' THEN 4
+            WHEN 'E' THEN 5
+            WHEN 'F' THEN 6
+            WHEN 'G' THEN 7
+            WHEN 'H' THEN 8
+            WHEN 'I' THEN 9
+            WHEN 'J' THEN 10
+            WHEN 'K' THEN 11
+            WHEN 'L' THEN 12
+            WHEN 'M' THEN 13
+            WHEN 'N' THEN 14
+            WHEN 'O' THEN 15
+            WHEN 'P' THEN 16
+            WHEN 'Q' THEN 17
+            WHEN 'R' THEN 18
+            WHEN 'S' THEN 19
+            WHEN 'T' THEN 20
+            WHEN 'U' THEN 21
+            WHEN 'V' THEN 22
+            WHEN 'W' THEN 23
+            WHEN 'X' THEN 24
+            WHEN 'Y' THEN 25
+            WHEN 'Z' THEN 26
+            ELSE NULL
+        END
+    """
+
+    letter_to_number_r = """
+        CASE UPPER(flat_letter_r)
+            WHEN 'A' THEN 1
+            WHEN 'B' THEN 2
+            WHEN 'C' THEN 3
+            WHEN 'D' THEN 4
+            WHEN 'E' THEN 5
+            WHEN 'F' THEN 6
+            WHEN 'G' THEN 7
+            WHEN 'H' THEN 8
+            WHEN 'I' THEN 9
+            WHEN 'J' THEN 10
+            WHEN 'K' THEN 11
+            WHEN 'L' THEN 12
+            WHEN 'M' THEN 13
+            WHEN 'N' THEN 14
+            WHEN 'O' THEN 15
+            WHEN 'P' THEN 16
+            WHEN 'Q' THEN 17
+            WHEN 'R' THEN 18
+            WHEN 'S' THEN 19
+            WHEN 'T' THEN 20
+            WHEN 'U' THEN 21
+            WHEN 'V' THEN 22
+            WHEN 'W' THEN 23
+            WHEN 'X' THEN 24
+            WHEN 'Y' THEN 25
+            WHEN 'Z' THEN 26
+            ELSE NULL
+        END
+    """
+
+    positional_group_l = """
+        CASE
+            WHEN flat_positional_l IN ('BASEMENT', 'LOWER GROUND', 'GROUND FLOOR')
+                THEN 'LOWER_GROUND_GROUP'
+            WHEN flat_positional_l IN ('TOP FLOOR', 'UPPER FLOOR')
+                THEN 'TOP_UPPER_GROUP'
+            ELSE flat_positional_l
+        END
+    """
+
+    positional_group_r = """
+        CASE
+            WHEN flat_positional_r IN ('BASEMENT', 'LOWER GROUND', 'GROUND FLOOR')
+                THEN 'LOWER_GROUND_GROUP'
+            WHEN flat_positional_r IN ('TOP FLOOR', 'UPPER FLOOR')
+                THEN 'TOP_UPPER_GROUP'
+            ELSE flat_positional_r
+        END
+    """
+
+    positional_equivalence_sql = f"""
+        flat_positional_l IS NOT NULL
+        AND flat_positional_r IS NOT NULL
+        AND flat_positional_l != flat_positional_r
+        AND {positional_group_l} = {positional_group_r}
+    """
+
+    letter_number_equivalence_sql = f"""
+        (
+            {letter_to_number_l} IS NOT NULL
+            AND TRY_CAST(flat_number_r AS INTEGER) IS NOT NULL
+            AND {letter_to_number_l} = TRY_CAST(flat_number_r AS INTEGER)
+        )
+        OR
+        (
+            {letter_to_number_r} IS NOT NULL
+            AND TRY_CAST(flat_number_l AS INTEGER) IS NOT NULL
+            AND {letter_to_number_r} = TRY_CAST(flat_number_l AS INTEGER)
+        )
+    """
+
+    flat_equivalence_sql = f"""
+        has_flat_indicator_l = TRUE
+        AND has_flat_indicator_r = TRUE
+        AND flat_identity_l IS NOT NULL
+        AND flat_identity_r IS NOT NULL
+        AND flat_identity_l != flat_identity_r
+        AND (
+            {letter_number_equivalence_sql}
+            OR ({positional_equivalence_sql})
+        )
+    """
 
     # Same flat number, letter one-sided: both sides share the same flat
     # number but only one has a flat letter.  E.g. FLAT 2 vs FLAT 2A.
@@ -244,6 +365,14 @@ def get_flat_identity_comparison(
                 "sql_condition": cross_type_sql,
                 "label_for_charts": "Cross-type flat (positional vs letter/number)",
                 "m_probability": match_weight_to_bayes_factor(WEIGHT_CROSS_TYPE),
+                "u_probability": 1,
+                "fix_m_probability": toggle_m_probability_fix,
+                "fix_u_probability": toggle_u_probability_fix,
+            },
+            {
+                "sql_condition": flat_equivalence_sql,
+                "label_for_charts": "Fuzzy flat equivalence",
+                "m_probability": match_weight_to_bayes_factor(WEIGHT_FUZZY_EQUIVALENT),
                 "u_probability": 1,
                 "fix_m_probability": toggle_m_probability_fix,
                 "fix_u_probability": toggle_u_probability_fix,
