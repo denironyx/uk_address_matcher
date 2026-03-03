@@ -1,0 +1,75 @@
+site_name: uk_address_matcher
+site_url: https://moj-analytical-services.github.io/uk_address_matcher/
+repo_url: https://github.com/moj-analytical-services/uk_address_matcher
+docs_dir: docs/site
+edit_uri: edit/main/docs/site/
+
+theme:
+  name: material
+  logo: assets/images/icon.png
+  favicon: assets/images/icon.png
+  features:
+    - content.code.annotate
+    - content.code.copy
+    - content.action.edit
+    - navigation.footer
+    - navigation.top
+    - search.highlight
+    - search.suggest
+    - toc.follow
+  palette:
+    - scheme: default
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/toggle-switch
+        name: Switch to dark mode
+    - scheme: slate
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/toggle-switch-off-outline
+        name: Switch to light mode
+
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          options:
+            show_source: false
+            show_root_heading: true
+            show_root_full_path: false
+            heading_level: 3
+            members_order: source
+            allow_inspection: true
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: python
+          class: python
+          validator: !!python/name:markdown_exec.validator
+          format: !!python/name:markdown_exec.formatter
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
+  - attr_list
+  - tables
+  - footnotes
+
+extra_css:
+  - stylesheets/extra.css
+
+exclude_docs: |
+  adr/
+
+nav:
+  - Overview: index.md
+  - Get started: get_started.md
+  - Ordnance Survey data: ordnance_survey.md
+  - API reference: api_reference.md
