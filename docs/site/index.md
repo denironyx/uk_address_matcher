@@ -4,14 +4,14 @@
 
 Fast, simple address matching (geocoding) in Python.
 
-## Why this library
+## Why use this library
 
 - **Simple.** Setup in seconds, runs on a laptop. No separate infrastructure of services needed.
 - **Fast.** Match 100,000 addresses in ~30 seconds.[^1]
 - **Proven accuracy.** We use public, labelled datasets to measure and document accuracy.
-- **Support for Ordnance Survey data** We provde support for matching to Ordnance Survey data.  Matching against any other datasets is also supported.
+- **Support for Ordnance Survey data.** We provde support for matching to Ordnance Survey data.  Matching against any other datasets is also supported.
 
-The end-to-end process of matching 100k addresses to Ordnance Survey data, including all software downloads, and data processing takes:[^2]
+The end-to-end process of matching 100,000 addresses to Ordnance Survey data, including all software downloads, and data processing takes:[^2]
 
 - Less than a minute if you are matching to a small area such as a local council region.
 - If matching to the whole UK, there's a one-time preprocessing step that takes around 10 minutes.  Subsequent matching of 100k records takes less than a minute.
@@ -24,12 +24,17 @@ pip install uk_address_matcher
 
 ## What does it do?
 
-We assume you have:
+Given the following data:
 
 -  a "messy" dataset of addresses that you want to match
 -  a "canonical" dataset of known addresses, often an Ordnance Survey dataset such as AddressBase or NGD.
 
-Your data should be in the following format.[^3]
+this package will find the best matching canonical address for each messy address.
+
+
+## Example:
+
+Your data should be in the following format[^3]:
 
 ### Messy data
 
@@ -48,7 +53,7 @@ Your data should be in the following format.[^3]
 | ...more rows |
 
 
-The data can then be matched as follows:
+You can match it as follows:
 
 ```python
 import duckdb
@@ -74,7 +79,7 @@ Example output:
 | m_1 | c_2 | Flat A Example Court, 10 Demo Road, Townton | Flat A, 10 Demo Road, Townton | splink: probabilistic match | 13.5885 | 11.5033 |
 
 
-
+The above is recommended if your canonical dataset is relatively small, say, under 1 million rows. If you're matching to larger canonical dataset, a preprocessing step is recommended. See the [preprocessing large datasets](preprocessing.md) for details.
 
 ## Licence
 
