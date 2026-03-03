@@ -35,8 +35,6 @@ In this section, we set out `uk_address_matcher`'s accuracy against these labell
 The Hackney Council dataset is available from https://www.datadaptive.com/addr/.
 
 
-We have several datasets of labelled addresses that we can use to benchmark accuracy.
-
 <details>
   <summary>Expand to see Hackney benchmarking script</summary>
 
