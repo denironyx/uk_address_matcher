@@ -42,9 +42,30 @@ class UKAMDatasets:
         self._specs = {spec.name: spec for spec in specs}
         self._cache_dir = (cache_dir or default_cache_dir()).resolve()
         self._con: DuckDBPyConnection | None = None
+        self._in_memory_relations: dict[str, DuckDBPyRelation] = {}
 
     def available(self) -> list[str]:
         return sorted(self._specs)
+
+    def metadata(self) -> list[DatasetSpec]:
+        return [self._specs[name] for name in self.available()]
+
+    def info(self, name: str) -> DatasetSpec:
+        return self._get_spec(name)
+
+    def catalog(self) -> list[dict[str, str]]:
+        return [
+            {
+                "name": spec.name,
+                "file_name": spec.file_name,
+                "data_format": spec.data_format,
+                "rows": spec.rows,
+                "unique_entities": spec.unique_entities,
+                "description": spec.description,
+                "url": spec.url,
+            }
+            for spec in self.metadata()
+        ]
 
     @property
     def cache_dir(self) -> Path:
@@ -65,23 +86,45 @@ class UKAMDatasets:
         con: DuckDBPyConnection | None = None,
         refresh: bool = False,
     ) -> DuckDBPyRelation:
+        if con is None and not refresh and name in self._in_memory_relations:
+            return self._in_memory_relations[name]
+
         path = self.path(name, refresh=refresh)
         reader = infer_duckdb_reader(path)
         use_con = con or self._get_default_con()
         escaped = path.as_posix().replace("'", "''")
-        return use_con.sql(f"SELECT * FROM {reader}('{escaped}')")
+        rel = use_con.sql(f"SELECT * FROM {reader}('{escaped}')")
+
+        if con is None:
+            self._in_memory_relations[name] = rel
+
+        return rel
+
+    def load_dataset(
+        self,
+        name: str,
+        *,
+        con: DuckDBPyConnection | None = None,
+        refresh: bool = False,
+    ) -> DuckDBPyRelation:
+        return self.as_relation(name, con=con, refresh=refresh)
 
     @property
     def fictional_london(self) -> tuple[DuckDBPyRelation, DuckDBPyRelation]:
-        return self.load_fictional_london()
+        messy_rel = self.as_relation("fictional_london_messy")
+        canonical_rel = self.as_relation("fictional_london_canonical")
+        return messy_rel, canonical_rel
 
     def clear_cache(self, name: str | None = None) -> None:
         if name is None:
+            self._in_memory_relations.clear()
             if self.cache_dir.exists():
                 for child in self.cache_dir.iterdir():
                     if child.is_file():
                         child.unlink()
             return
+
+        self._in_memory_relations.pop(name, None)
 
         target = self.cache_dir / self._get_spec(name).file_name
         if target.exists():
@@ -102,9 +145,8 @@ class UKAMDatasets:
     def _get_spec(self, name: str) -> DatasetSpec:
         spec = self._specs.get(name)
         if spec is None:
-            raise KeyError(
-                f"Unknown dataset '{name}'. Available datasets: {', '.join(self.available())}"
-            )
+            available = ", ".join(self.available())
+            raise KeyError(f"Unknown dataset '{name}'. Available datasets: {available}")
         return spec
 
     @staticmethod
@@ -114,6 +156,8 @@ class UKAMDatasets:
             raise ValueError(
                 f"Unsupported URL scheme '{parsed.scheme}' for dataset URL: {url}"
             )
+
+        print(f"downloading: {url}")  # noqa: T201
 
         target.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
