@@ -5,7 +5,8 @@ import os
 from uk_address_matcher.datasets.specs import DatasetSpec
 
 DEFAULT_DATASETS_BASE_URL = (
-    "https://raw.githubusercontent.com/robinL/uk_address_matcher/main/example_data"
+    "https://raw.githubusercontent.com/moj-analytical-services/"
+    "uk_address_matcher/main/example_data"
 )
 DATASETS_BASE_URL_ENV = "UKAM_DATASETS_BASE_URL"
 
