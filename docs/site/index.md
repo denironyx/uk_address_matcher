@@ -9,8 +9,12 @@ Fast, simple address matching (geocoding) in Python.
 - **Simple.** Setup in seconds, runs on a laptop. No separate infrastructure of services needed.
 - **Fast.** Match 100,000 addresses in ~30 seconds.[^1]
 - **Proven accuracy.** We use public, labelled datasets to measure and document accuracy.
-- **End-to-end matching** We provde end-to-end support for matching to Ordnance Survey data.  Matching against any other datasets is also supported.
+- **Support for Ordnance Survey data** We provde support for matching to Ordnance Survey data.  Matching against any other datasets is also supported.
 
+The end-to-end process of matching 100k addresses to Ordnance Survey data, including all software downloads, and data processing takes:[^2]
+
+- Less than a minute if you are matching to a small area such as a local council region.
+- If matching to the whole UK, there's a one-time preprocessing step that takes around 10 minutes.  Subsequent matching of 100k records takes less than a minute.
 
 ## Installation
 
@@ -21,10 +25,11 @@ pip install uk_address_matcher
 ## What does it do?
 
 We assume you have:
+
 -  a "messy" dataset of addresses that you want to match
 -  a "canonical" dataset of known addresses, often an Ordnance Survey dataset such as AddressBase or NGD.
 
-Your data should be in the following format.[^2]
+Your data should be in the following format.[^3]
 
 ### Messy data
 
@@ -77,9 +82,10 @@ This project is free and open source and is released under the MIT licence.
 
 ## Next steps
 
-[Get started](get_started.md){ .md-button .md-button--primary }
-[Ordnance Survey data](ordnance_survey.md){ .md-button }
-[API reference](api_reference.md){ .md-button }
+- [Get started](get_started.md)
+- [Working with Ordnance Survey data](ordnance_survey.md)
+- [API reference](api_reference.md)
 
 [^1]: Timings on a MacBook Pro M4 Max.
-[^2]: The `postcode` column is optional. If you include it, the matcher will use it directly. If you do not, the matcher will attempt to detect and extract postcodes from `address_concat`.  `uk_address_matcher` also supports matching addresses that lack a postcode.
+[^2]: Does not include the time taken to download Ordnance Survey data since this depends on the speed of your internet connection.
+[^3]: The `postcode` column is optional. If you include it, the matcher will use it directly. If you do not, the matcher will attempt to detect and extract postcodes from `address_concat`.  `uk_address_matcher` also supports matching addresses that lack a postcode.
