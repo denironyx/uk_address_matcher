@@ -308,12 +308,15 @@ def _validate_prepared_folder(
 def load_prepared_canonical_data(
     folder: str | Path,
     con: duckdb.DuckDBPyConnection,
+    canonical_address_filter: str | None = None,
 ) -> _PreparedCanonical:
     """Load prepared canonical artefacts from a folder.
 
     Args:
         folder: Path to the prepared canonical data folder.
         con: DuckDB connection.
+        canonical_address_filter: Optional DuckDB SQL filter expression
+            applied to the loaded canonical addresses relation.
 
     Returns:
         A `_PreparedCanonical` containing `addresses`, `term_frequencies`,
@@ -325,6 +328,9 @@ def load_prepared_canonical_data(
     addresses = con.read_parquet(str(folder / PREPARED_ADDRESSES_FILENAME))
     term_frequencies = con.read_parquet(str(folder / PREPARED_TERM_FREQUENCIES_FILENAME))
     inverted_index = con.read_parquet(str(folder / PREPARED_INVERTED_INDEX_FILENAME))
+
+    if canonical_address_filter is not None:
+        addresses = addresses.filter(canonical_address_filter)
 
     logger.debug("Loaded prepared canonical data from '%s'", folder)
 

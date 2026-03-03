@@ -71,6 +71,9 @@ class AddressMatcher:
     Args:
         canonical_addresses: Canonical dataset to match against. Can be a
             `DuckDBPyRelation` or a path to a prepared canonical folder.
+        canonical_address_filter: Optional DuckDB SQL expression used to
+            filter canonical addresses after load (for prepared folders)
+            or directly on the provided canonical relation.
         addresses_to_match: Messy addresses to resolve. Can be a
             `DuckDBPyRelation`, a list of `AddressRecord`, or a list of dicts
             with `address_concat`, `postcode`, and `unique_id` fields.
@@ -133,6 +136,7 @@ class AddressMatcher:
             list[dict],
         ],
         *,
+        canonical_address_filter: str | None = None,
         con: duckdb.DuckDBPyConnection,
         stages: Optional[list[MatchingStage]] = None,
         debug_options: Optional[DebugOptions] = None,
@@ -141,14 +145,25 @@ class AddressMatcher:
         _ensure_splink_udfs(self.con)
         self.stages = stages if stages is not None else _default_stages()
         self.debug_options = debug_options
+        self.canonical_address_filter = canonical_address_filter
+
+        if self.canonical_address_filter is not None and not isinstance(
+            self.canonical_address_filter, str
+        ):
+            raise TypeError("canonical_address_filter must be a SQL string or None.")
 
         if isinstance(canonical_addresses, (str, Path)):
             self._raw_canonical = canonical_addresses
         else:
-            self._raw_canonical = self._register_input_relation_once(
+            canonical_relation = self._register_input_relation_once(
                 canonical_addresses,
                 role="canonical",
             )
+            if self.canonical_address_filter is not None:
+                canonical_relation = canonical_relation.filter(
+                    self.canonical_address_filter
+                )
+            self._raw_canonical = canonical_relation
 
         coerced_messy = self._coerce_addresses_to_match(addresses_to_match)
         self._raw_messy = self._register_input_relation_once(
@@ -202,7 +217,11 @@ class AddressMatcher:
 
         if isinstance(self._raw_canonical, (str, Path)):
             logger.debug("Loading prepared canonical data from '%s'", self._raw_canonical)
-            prepared = load_prepared_canonical_data(self._raw_canonical, self.con)
+            prepared = load_prepared_canonical_data(
+                self._raw_canonical,
+                self.con,
+                canonical_address_filter=self.canonical_address_filter,
+            )
             self._canonical_clean = prepared.addresses
             self._tf_table = prepared.term_frequencies
             self._inverted_index = prepared.inverted_index
