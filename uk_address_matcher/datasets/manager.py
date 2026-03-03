@@ -13,6 +13,9 @@ from uk_address_matcher.datasets.specs import DatasetSpec
 
 DATASETS_CACHE_DIR_ENV = "UKAM_DATASETS_CACHE_DIR"
 
+PyRelationMessy = DuckDBPyRelation
+PyRelationCanonical = DuckDBPyRelation
+
 
 def default_cache_dir() -> Path:
     configured = os.getenv(DATASETS_CACHE_DIR_ENV)
@@ -110,7 +113,7 @@ class UKAMDatasets:
         return self.as_relation(name, con=con, refresh=refresh)
 
     @property
-    def fictional_london(self) -> tuple[DuckDBPyRelation, DuckDBPyRelation]:
+    def fictional_london(self) -> tuple[PyRelationMessy, PyRelationCanonical]:
         messy_rel = self.as_relation("fictional_london_messy")
         canonical_rel = self.as_relation("fictional_london_canonical")
         return messy_rel, canonical_rel
