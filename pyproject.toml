@@ -1,6 +1,6 @@
 [project]
 name = "uk_address_matcher"
-version = "v1.0.0.dev26"
+version = "v1.0.0.dev27"
 description = "A package for matching UK addresses using a pretrained Splink model"
 authors = [{name = "Robin Linacre", email = "robinlinacre@hotmail.com"}]
 readme = "readme.md"
@@ -27,6 +27,7 @@ dev = [
 docs = [
     "mkdocs>=1.6",
     "mkdocs-material>=9.6",
+    "mkdocs-charts-plugin>=0.0.12",
     "pymdown-extensions>=10.15",
     "mkdocstrings[python]>=0.29",
     "markdown-exec[ansi]>=1.9",

@@ -1,6 +1,12 @@
 # UK Address Matcher
 
-![UK Address Matcher logo](assets/images/uk_address_matcher_web_wide.png){ width="75%" }
+
+<div style="text-align: center; margin: 0; padding: 0;">
+
+   <img src="assets/images/uk_address_matcher_web_wide.png" alt="UK Address Matcher logo" width="100%" style=" margin: 0; padding: 0;">
+
+</div>
+
 
 Fast, simple address matching (geocoding) in Python.
 
@@ -9,16 +15,16 @@ Fast, simple address matching (geocoding) in Python.
 - **Simple.** Setup in seconds, runs on a laptop. No separate infrastructure of services needed.
 - **Fast.** Match 100,000 addresses in ~30 seconds.[^1]
 - **Proven accuracy.** We use public, labelled datasets to measure and document accuracy.
-- **Support for Ordnance Survey data.** We provde support for matching to Ordnance Survey data.  Matching against any other datasets is also supported.
+- **Support for Ordnance Survey data.**  We provide a automated build pipeline for users wishing to match to Ordnance Survey data.  Matching to any other canonical dataset is also supported.
 
-The end-to-end process of matching 100,000 addresses to Ordnance Survey data, including all software downloads, and data processing takes:[^2]
+The end-to-end process of matching 100,000 addresses to Ordnance Survey data, including all software downloads and data processing takes:[^2]
 
 - Less than a minute if you are matching to a small area such as a local council region.
 - If matching to the whole UK, there's a one-time preprocessing step that takes around 10 minutes.  Subsequent matching of 100k records takes less than a minute.
 
 ## Installation
 
-```
+```bash
 pip install --pre uk_address_matcher
 ```
 
@@ -79,7 +85,7 @@ Example output:
 | m_1 | c_2 | Flat A Example Court, 10 Demo Road, Townton | Flat A, 10 Demo Road, Townton | splink: probabilistic match | 13.5885 | 11.5033 |
 
 
-The above is recommended if your canonical dataset is relatively small, say, under 1 million rows. If you're matching to a larger canonical dataset, a preprocessing step is recommended. See [Get started](get_started.md) for details.
+The above is recommended if your canonical dataset is relatively small, say, under 1 million rows. If you're matching to larger canonical dataset, a preprocessing step is recommended. See [choose whether to pre-process your canonical dataset](get_started.md#choose-whether-to-pre-process-your-canonical-dataset) for details.
 
 ## Licence
 

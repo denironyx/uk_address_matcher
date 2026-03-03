@@ -2,7 +2,6 @@ site_name: uk_address_matcher
 site_url: https://moj-analytical-services.github.io/uk_address_matcher/
 repo_url: https://github.com/moj-analytical-services/uk_address_matcher
 docs_dir: docs/site
-edit_uri: edit/main/docs/site/
 
 theme:
   name: material
@@ -11,7 +10,6 @@ theme:
   features:
     - content.code.annotate
     - content.code.copy
-    - content.action.edit
     - navigation.footer
     - navigation.top
     - search.highlight
@@ -33,6 +31,7 @@ theme:
 
 plugins:
   - search
+  - charts
   - mkdocstrings:
       default_handler: python
       handlers:
@@ -50,6 +49,9 @@ markdown_extensions:
   - pymdownx.details
   - pymdownx.superfences:
       custom_fences:
+        - name: vegalite
+          class: vegalite
+          format: !!python/name:mkdocs_charts_plugin.fences.fence_vegalite
         - name: python
           class: python
           validator: !!python/name:markdown_exec.validator
@@ -70,6 +72,11 @@ extra:
 extra_css:
   - stylesheets/extra.css
 
+extra_javascript:
+  - https://cdn.jsdelivr.net/npm/vega@5
+  - https://cdn.jsdelivr.net/npm/vega-lite@5
+  - https://cdn.jsdelivr.net/npm/vega-embed@6
+
 exclude_docs: |
   adr/
 
@@ -77,5 +84,5 @@ nav:
   - Overview: index.md
   - Getting started: get_started.md
   - Working with Ordnance Survey data: ordnance_survey.md
-  - Timing overview: performance.md
+  - Performance and benchmarking: performance.md
   - API reference: api_reference.md
