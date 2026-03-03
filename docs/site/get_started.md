@@ -163,6 +163,6 @@ If you're linking to a large canonical dataset (for example, national-scale NGD)
 
 If you know the correct match for each address, add a `ukam_label` column to
 your messy data. It propagates through to results, enabling accuracy analysis
-with `calculate_match_metrics`.
+with `MatchResult.match_metrics()`.
 
 

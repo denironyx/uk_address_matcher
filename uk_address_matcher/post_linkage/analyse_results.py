@@ -4,16 +4,16 @@ from typing import Literal
 from duckdb import DuckDBPyConnection, DuckDBPyRelation
 
 
-def calculate_match_metrics(
+def _calculate_match_metrics(
     exact_match_results: DuckDBPyRelation,
     *,
     order: Literal["descending", "ascending"] = "descending",
 ) -> DuckDBPyRelation:
-    """Summarise deterministic match counts grouped by ``match_method``.
+    """Summarise deterministic match counts grouped by ``match_reason``.
 
     Args:
         exact_match_results: Relation produced by the deterministic match pass
-            containing a ``match_method`` column.
+            containing a ``match_reason`` column.
         order: Sort direction for the returned ``match_count`` column. Defaults
             to "descending".
 
@@ -27,7 +27,7 @@ def calculate_match_metrics(
 
     if "match_reason" not in exact_match_results.columns:
         raise ValueError(
-            "Expected column 'match_method' to be present in relation; "
+            "Expected column 'match_reason' to be present in relation; "
             f"available columns are {exact_match_results.columns}."
         )
 

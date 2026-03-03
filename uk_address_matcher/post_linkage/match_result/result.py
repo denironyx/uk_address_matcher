@@ -5,9 +5,7 @@ from typing import Any, List, Literal
 
 from duckdb import DuckDBPyConnection, DuckDBPyRelation
 
-from uk_address_matcher.post_linkage.analyse_results import (
-    calculate_match_metrics,
-)
+from uk_address_matcher.post_linkage.analyse_results import _calculate_match_metrics
 from uk_address_matcher.post_linkage.match_result.splink_inspector import (
     _SplinkInspector,
 )
@@ -187,7 +185,7 @@ class MatchResult:
     ) -> DuckDBPyRelation:
         """Match-reason breakdown with counts and percentages"""
 
-        return calculate_match_metrics(self._relation, order=order)
+        return _calculate_match_metrics(self._relation, order=order)
 
     def _has_splink(self) -> bool:
         """True when a Splink stage ran and inspection helpers are available."""
