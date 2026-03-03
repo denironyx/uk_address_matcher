@@ -4,6 +4,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional, Union
 
+import duckdb
+
 from uk_address_matcher.cleaning.chunking_strategies import (
     prepare_data_for_matching,
 )
@@ -203,7 +205,13 @@ class AddressMatcher:
         while _duckdb_table_exists(self.con, alias):
             alias = f"__ukam_input_{role}_{_uid()}"
 
-        self.con.register(alias, relation)
+        try:
+            self.con.register(alias, relation)
+        except duckdb.InvalidInputException as exc:
+            if "created by another Connection" not in str(exc):
+                raise
+            self.con.register(alias, relation.to_arrow_table())
+
         registration_cache[relation_sql] = alias
         return self.con.table(alias)
 
