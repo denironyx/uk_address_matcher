@@ -46,9 +46,13 @@ jobs:
 
             - name: Prepare docs example_data fixtures
               run: |
-                  mkdir -p docs/site/example_data
-                  cp example_data/messy_example.csv docs/site/example_data/messy_example.csv
-                  cp example_data/canonical_example.csv docs/site/example_data/canonical_example.csv
+                  src_dir="${GITHUB_WORKSPACE}/example_data"
+                  dest_dir="${GITHUB_WORKSPACE}/docs/site/example_data"
+
+                  ls -la "${src_dir}"
+                  mkdir -p "${dest_dir}"
+                  cp "${src_dir}/messy_example.csv" "${dest_dir}/messy_example.csv"
+                  cp "${src_dir}/canonical_example.csv" "${dest_dir}/canonical_example.csv"
 
             - name: Build site
               run: uv run mkdocs build --strict
