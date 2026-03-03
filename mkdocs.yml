@@ -62,6 +62,11 @@ markdown_extensions:
   - tables
   - footnotes
 
+extra:
+  analytics:
+    provider: google
+    property: G-L6JT8NK528
+
 extra_css:
   - stylesheets/extra.css
 
