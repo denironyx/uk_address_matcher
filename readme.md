@@ -2,7 +2,7 @@
 <img src="https://raw.githubusercontent.com/moj-analytical-services/uk_address_matcher/4c9f0cab71225a8b370c594d7f5c300b7f7a72b0/docs/site/assets/images/uk_address_matcher_web_wide.png" alt="UK Address Matcher Logo" height="150px">
 </p>
 
-[![pypi](https://img.shields.io/github/v/release/moj-analytical-services/uk_address_matcher?include_prereleases)](https://pypi.org/project/uk_address_matcher/#history)
+[![pypi](https://img.shields.io/github/v/release/moj-analytical-services/uk_address_matcher)](https://pypi.org/project/uk_address_matcher/#history)
 [![Documentation](https://img.shields.io/badge/API-documentation-blue)](https://moj-analytical-services.github.io/uk_address_matcher/)
 
 # High performance UK addresses matcher (geocoder)
