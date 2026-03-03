@@ -240,6 +240,22 @@ ONE_SIDED_NUMBER_LETTER_CANONICAL = [
     ("c_flat_2_reference", "FLAT 2 10 KINGS ROAD LONDON", "SW3 4ND"),
 ]
 
+CARDIFF_ROOM_VS_BUILDING_MESSY = [
+    (
+        "m_cardiff_room_23",
+        ("ROOM 23 MY COMPANY 2-6 TESTING STCARDIFF CITY AND COUNTY OF CARDIFF"),
+        "CF22 1AA",
+    ),
+]
+
+CARDIFF_ROOM_VS_BUILDING_CANONICAL = [
+    (
+        "c_cardiff_ambassador",
+        "MY COMPANY, 2-6, TESTING ST, CARDIFF",
+        "CF22 1AA",
+    ),
+]
+
 
 def test_flat_equivalence_soft_boost():
     """Fuzzy flat equivalence should apply a modest uplift versus mismatches."""
@@ -395,4 +411,60 @@ def test_flat_number_letter_one_sided_penalty_not_fuzzy_equivalence():
         "Expected one-sided letter case to score lower than fuzzy equivalence; "
         f"got one_sided={one_sided_bf:.6f}, "
         f"fuzzy_reference={fuzzy_reference_bf:.6f}."
+    )
+
+
+def test_cardiff_room_vs_ambassador_scores_plus_five_or_more():
+    """Fictional Cardiff-style room vs building comparison should score +5+."""
+    con = duckdb.connect()
+
+    messy_values = ", ".join(
+        f"('{uid}'::VARCHAR, '{addr}'::VARCHAR, '{pc}'::VARCHAR)"
+        for uid, addr, pc in CARDIFF_ROOM_VS_BUILDING_MESSY
+    )
+    messy_rel = con.sql(f"""
+        SELECT * FROM (VALUES {messy_values})
+        AS t(unique_id, address_concat, postcode)
+    """)
+
+    canon_values = ", ".join(
+        f"('{uid}'::VARCHAR, '{addr}'::VARCHAR, '{pc}'::VARCHAR)"
+        for uid, addr, pc in CARDIFF_ROOM_VS_BUILDING_CANONICAL
+    )
+    canon_rel = con.sql(f"""
+        SELECT * FROM (VALUES {canon_values})
+        AS t(unique_id, address_concat, postcode)
+    """)
+
+    messy_cleaned = prepare_data_for_matching(messy_rel, con=con)
+    canon_cleaned = prepare_data_for_matching(canon_rel, con=con)
+
+    linker = _get_linker(
+        messy_cleaned,
+        canon_cleaned,
+        con=con,
+        include_full_postcode_block=True,
+        include_outside_postcode_block=False,
+        retain_intermediate_calculation_columns=True,
+    )
+    predictions = linker.inference.predict(threshold_match_probability=0.00001)
+    results_df = predictions.as_pandas_dataframe()
+
+    row = results_df[
+        (
+            (results_df["unique_id_l"] == "m_cardiff_room_23")
+            & (results_df["unique_id_r"] == "c_cardiff_ambassador")
+        )
+        | (
+            (results_df["unique_id_r"] == "m_cardiff_room_23")
+            & (results_df["unique_id_l"] == "c_cardiff_ambassador")
+        )
+    ]
+
+    assert not row.empty, "Missing Cardiff room-vs-building prediction row"
+
+    match_weight = float(row.iloc[0]["match_weight"])
+    assert match_weight >= 5.0, (
+        "Expected Cardiff room-vs-building case to score at least +5; "
+        f"got match_weight={match_weight:.6f}."
     )
