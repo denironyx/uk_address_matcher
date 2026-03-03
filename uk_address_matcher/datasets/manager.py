@@ -71,24 +71,6 @@ class UKAMDatasets:
         escaped = path.as_posix().replace("'", "''")
         return use_con.sql(f"SELECT * FROM {reader}('{escaped}')")
 
-    def load_fictional_london(
-        self,
-        *,
-        con: DuckDBPyConnection | None = None,
-        refresh: bool = False,
-    ) -> tuple[DuckDBPyRelation, DuckDBPyRelation]:
-        messy_rel = self.as_relation(
-            "fictional_london_messy",
-            con=con,
-            refresh=refresh,
-        )
-        canonical_rel = self.as_relation(
-            "fictional_london_canonical",
-            con=con,
-            refresh=refresh,
-        )
-        return messy_rel, canonical_rel
-
     @property
     def fictional_london(self) -> tuple[DuckDBPyRelation, DuckDBPyRelation]:
         return self.load_fictional_london()
