@@ -55,8 +55,7 @@ from uk_address_matcher import AddressMatcher, ukam_datasets
 con = duckdb.connect()
 
 # Download + load fictional London dummy datasets (cached locally)
-df_messy = ukam_datasets.as_relation("fictional_london_messy", con=con)
-df_canonical = ukam_datasets.as_relation("fictional_london_canonical", con=con)
+df_messy, df_canonical = ukam_datasets.fictional_london
 
 matcher = AddressMatcher(
     canonical_addresses=df_canonical,
@@ -141,22 +140,22 @@ You can pass a list of `AddressRecord` entries directly as
 ```python
 import duckdb
 
-from uk_address_matcher import AddressMatcher, AddressRecord
+from uk_address_matcher import AddressMatcher, AddressRecord, ukam_datasets
 
 con = duckdb.connect()
 
-df_canonical = con.read_parquet("your_canonical_addresses.parquet")
+df_canonical = ukam_datasets.as_relation("fictional_london_canonical", con=con)
 
 records = [
     AddressRecord(
         unique_id="m_1",
-        address_concat="10 downing street westminster london",
-        postcode="SW1A 2AA",
+        address_concat="96 Marlowhill Street, Kingsford, London",
+        postcode="NW24 2CW",
     ),
     AddressRecord(
         unique_id="m_2",
-        address_concat="11 downing street westminster london",
-        postcode="SW1A 2AB",
+        address_concat="46 Vespergate Road, Maple Green",
+        postcode="NW26 6MU",
     ),
 ]
 
@@ -167,6 +166,7 @@ matcher = AddressMatcher(
 )
 
 result = matcher.match()
+result.matches().show(max_width=500)
 ```
 
 
