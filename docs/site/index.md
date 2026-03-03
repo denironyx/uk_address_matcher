@@ -19,7 +19,7 @@ The end-to-end process of matching 100,000 addresses to Ordnance Survey data, in
 ## Installation
 
 ```
-pip install uk_address_matcher
+pip install --pre uk_address_matcher
 ```
 
 ## What does it do?

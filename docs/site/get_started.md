@@ -5,7 +5,7 @@
 `uk_address_matcher` is a Python package available on PyPI. You can install with `pip`:
 
 ```bash
-pip install uk_address_matcher
+pip install --pre uk_address_matcher
 ```
 
 

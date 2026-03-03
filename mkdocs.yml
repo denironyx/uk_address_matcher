@@ -70,6 +70,8 @@ exclude_docs: |
 
 nav:
   - Overview: index.md
-  - Get started: get_started.md
-  - Ordnance Survey data: ordnance_survey.md
+  - Getting started: get_started.md
+  - Pre-processing large datasets: preprocessing.md
+  - Working with Ordnance Survey data: ordnance_survey.md
+  - Timing overview: timing.md
   - API reference: api_reference.md
