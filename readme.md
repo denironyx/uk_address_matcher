@@ -38,17 +38,18 @@ Generally one dataset will be a dataset of 'messy addresses' which need matching
 > - [`examples/example_matching.py`](./examples/example_matching.py): End-to-end matching example, including loading data, running the matcher, and previewing results.
 > - [`examples/example_prepare_canonical.py`](./examples/example_prepare_canonical.py): Example of preparing a canonical dataset for repeated use, demonstrating how to persist prepared data to disk and load it for matching.
 >
-> Both use parquet files in [`example_data/`](./example_data/) so you can run and adapt them immediately. You will need to download the example data from the releases page to run them, or you can adapt the code to use your own data.
+> The package also provides downloadable demo datasets via `ukam_datasets`.
 
 ```python
 import duckdb
 
-from uk_address_matcher import AddressMatcher, ExactMatchStage, SplinkStage
+from uk_address_matcher import AddressMatcher, ukam_datasets
 
 con = duckdb.connect()
 
-df_canonical = con.read_parquet("your_canonical_addresses.parquet")
-df_messy = con.read_parquet("your_messy_addresses.parquet")
+# Download + load fictional London dummy datasets (cached locally)
+df_messy = ukam_datasets.as_relation("fictional_london_messy", con=con)
+df_canonical = ukam_datasets.as_relation("fictional_london_canonical", con=con)
 
 matcher = AddressMatcher(
     canonical_addresses=df_canonical,
@@ -56,8 +57,8 @@ matcher = AddressMatcher(
     con=con,
 )
 
-result = matcher.match()  # returns a DuckDBPyRelation
-result.limit(10).show(max_width=500)
+result = matcher.match()
+result.matches().show(max_width=500)
 ```
 
 The default stages are `ExactMatchStage` followed by `SplinkStage`. You can
@@ -83,6 +84,7 @@ matcher = AddressMatcher(
 )
 
 result = matcher.match()
+result.matches().show(max_width=500)
 ```
 
 ### Additional columns
@@ -118,6 +120,7 @@ matcher = AddressMatcher(
 )
 
 result = matcher.match()
+result.matches().show(max_width=500)
 ```
 
 ### Matching one or more AddressRecord entries
