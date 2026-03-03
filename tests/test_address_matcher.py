@@ -96,6 +96,24 @@ def test_match_with_explicit_stages(con, canonical_data, messy_data):
     assert result.matches().count("*").fetchone()[0] > 0
 
 
+def test_match_with_relations_from_different_connection(con):
+    source_con = duckdb.connect(database=":memory:")
+    canonical_data = _make_addresses(source_con, CANONICAL_RECORDS)
+    messy_data = _make_addresses(source_con, MESSY_RECORDS)
+
+    matcher = AddressMatcher(
+        canonical_addresses=canonical_data,
+        addresses_to_match=messy_data,
+        con=con,
+        stages=[ExactMatchStage()],
+    )
+
+    result = matcher.match()
+
+    assert isinstance(result, MatchResult)
+    assert result.matches().count("*").fetchone()[0] > 0
+
+
 def test_match_result_has_expected_columns(con, canonical_data, messy_data):
     matcher = AddressMatcher(
         canonical_addresses=canonical_data,

@@ -14,7 +14,9 @@ def _write_csv(path: Path, values: list[str]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def test_dataset_path_download_and_cache(tmp_path: Path):
+def test_dataset_path_download_and_cache(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
     source = tmp_path / "demo.csv"
     _write_csv(source, ["1,10 Demo Street,AB1 2CD"])
 
@@ -32,6 +34,9 @@ def test_dataset_path_download_and_cache(tmp_path: Path):
     downloaded = datasets.path("demo")
     assert downloaded.exists()
     assert "10 Demo Street" in downloaded.read_text(encoding="utf-8")
+    captured = capsys.readouterr()
+    assert "downloading:" in captured.out
+    assert source.as_uri() in captured.out
 
     _write_csv(source, ["1,20 Changed Street,AB1 2CD"])
     cached = datasets.path("demo")
@@ -80,6 +85,70 @@ def test_unknown_dataset_errors(tmp_path: Path):
 
     with pytest.raises(AttributeError, match="Unknown dataset"):
         _ = datasets.missing
+
+
+def test_dataset_spec_invalid_format_raises():
+    with pytest.raises(ValueError, match="data_format"):
+        DatasetSpec(
+            name="bad",
+            file_name="bad.json",
+            base_url="https://example.com",
+            data_format="json",
+        )
+
+
+def test_catalog_and_info_expose_metadata(tmp_path: Path):
+    source = tmp_path / "demo.csv"
+    _write_csv(source, ["1,10 Demo Street,AB1 2CD"])
+
+    datasets = UKAMDatasets(
+        specs=[
+            DatasetSpec(
+                name="demo",
+                file_name="demo.csv",
+                base_url=source.parent.as_uri(),
+                rows="1",
+                unique_entities="1",
+                description="Demo dataset",
+                data_format="csv",
+            )
+        ],
+        cache_dir=tmp_path / "cache",
+    )
+
+    info = datasets.info("demo")
+    assert info.name == "demo"
+    assert info.data_format == "csv"
+
+    catalog = datasets.catalog()
+    assert len(catalog) == 1
+    assert catalog[0]["name"] == "demo"
+    assert catalog[0]["description"] == "Demo dataset"
+
+
+def test_default_connection_uses_in_memory_relation_cache(tmp_path: Path):
+    source = tmp_path / "demo.csv"
+    _write_csv(source, ["1,10 Demo Street,AB1 2CD"])
+
+    datasets = UKAMDatasets(
+        specs=[
+            DatasetSpec(
+                name="demo",
+                file_name="demo.csv",
+                base_url=source.parent.as_uri(),
+                data_format="csv",
+            )
+        ],
+        cache_dir=tmp_path / "cache",
+    )
+
+    rel_1 = datasets.as_relation("demo")
+    rel_2 = datasets.as_relation("demo")
+
+    assert rel_1 is rel_2
+
+    rel_3 = datasets.as_relation("demo", refresh=True)
+    assert rel_3 is not rel_1
 
 
 def test_default_registry_includes_fictional_london_datasets():
