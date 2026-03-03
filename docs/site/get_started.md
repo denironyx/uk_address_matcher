@@ -27,7 +27,7 @@ Optionally you can provide:
 | `ukam_label` | The unique ID of the true match. If provided, it enables accuracy analysis output |
 
 
-## Choose your workflow
+## Choose whether to pre-process your canonical dataset
 
 If you're linking to a small canonical dataset (of say, less than 500,000 rows), then it's simplest to process the data on-the-fly.
 
