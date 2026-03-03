@@ -39,15 +39,30 @@ If you're linking to a large canonical dataset (for example, national-scale NGD)
 
     ```python exec="true" source="tabbed-left" tabs="Source code|Output"
     import duckdb
+    import pyarrow as pa
     from uk_address_matcher import AddressMatcher
 
     con = duckdb.connect()
-    messy = con.read_csv("example_data/messy_example.csv")
-    canonical = con.read_csv("example_data/canonical_example.csv")
+
+    # Usually data would be loaded from files.
+    # It's hard coded here so this example can be easily run
+    messy = pa.Table.from_pylist([
+        {"unique_id": "m_1", "address_concat": "Flat A Example Court, 10 Demo Road, Townton", "postcode": "AB1 2BC"},
+    ])
+    messy_df = con.from_arrow(messy)
+
+    canonical = pa.Table.from_pylist([
+        {"unique_id": "c_1", "address_concat": "9 Demo Road, Townton", "postcode": "AB1 2BC"},
+        {"unique_id": "c_2", "address_concat": "Flat A, 10 Demo Road, Townton", "postcode": "AB1 2BC"},
+        {"unique_id": "c_3", "address_concat": "Flat B, 10 Demo Road, Townton", "postcode": "AB1 2BC"},
+        {"unique_id": "c_4", "address_concat": "Flat C, 10 Demo Road, Townton", "postcode": "AB1 2BC"},
+        {"unique_id": "c_5", "address_concat": "Basement Flat, 10 Demo Road, Townton", "postcode": "AB1 2BC"},
+    ])
+    canonical_df = con.from_arrow(canonical)
 
     matcher = AddressMatcher(
-        canonical_addresses=canonical,
-        addresses_to_match=messy,
+        canonical_addresses=canonical_df,
+        addresses_to_match=messy_df,
         con=con,
     )
     result = matcher.match()
