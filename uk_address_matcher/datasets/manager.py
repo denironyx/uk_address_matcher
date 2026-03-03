@@ -133,9 +133,8 @@ class UKAMDatasets:
     def __getattr__(self, name: str) -> DuckDBPyRelation:
         if name in self._specs:
             return self.as_relation(name)
-        raise AttributeError(
-            f"Unknown dataset '{name}'. Available datasets: {', '.join(self.available())}"
-        )
+        available = ", ".join(self.available())
+        raise AttributeError(f"Unknown dataset '{name}'. Available datasets: {available}")
 
     def _get_default_con(self) -> DuckDBPyConnection:
         if self._con is None:
