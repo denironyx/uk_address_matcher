@@ -85,7 +85,7 @@ Example output:
 | m_1 | c_2 | Flat A Example Court, 10 Demo Road, Townton | Flat A, 10 Demo Road, Townton | splink: probabilistic match | 13.5885 | 11.5033 |
 
 
-The above is recommended if your canonical dataset is relatively small, say, under 1 million rows. If you're matching to larger canonical dataset, a preprocessing step is recommended. See the [preprocessing large datasets](preprocessing.md) for details.
+The above is recommended if your canonical dataset is relatively small, say, under 1 million rows. If you're matching to larger canonical dataset, a preprocessing step is recommended. See [choose whether to pre-process your canonical dataset](get_started.md#choose-whether-to-pre-process-your-canonical-dataset) for details.
 
 ## Licence
 
