@@ -1,4 +1,6 @@
-from uk_address_matcher import clean_data_pre_term_frequencies
+from uk_address_matcher.cleaning.chunking_strategies import (
+    clean_data_pre_term_frequencies,
+)
 
 
 def test_duplicate_records_get_unique_ukam_address_id(duck_con):

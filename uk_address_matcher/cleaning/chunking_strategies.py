@@ -567,8 +567,5 @@ def prepare_data_for_matching(
 
 
 __all__ = [
-    "clean_data_pre_term_frequencies",
-    "derive_inverted_index",
-    "derive_term_frequencies_table",
     "prepare_data_for_matching",
 ]
