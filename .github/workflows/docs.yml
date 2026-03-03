@@ -44,16 +44,6 @@ jobs:
             - name: Install docs dependencies
               run: uv sync --group docs
 
-            - name: Prepare docs example_data fixtures
-              run: |
-                  src_dir="${GITHUB_WORKSPACE}/example_data"
-                  dest_dir="${GITHUB_WORKSPACE}/docs/site/example_data"
-
-                  ls -la "${src_dir}"
-                  mkdir -p "${dest_dir}"
-                  cp "${src_dir}/messy_example.csv" "${dest_dir}/messy_example.csv"
-                  cp "${src_dir}/canonical_example.csv" "${dest_dir}/canonical_example.csv"
-
             - name: Build site
               run: uv run mkdocs build --strict
 
