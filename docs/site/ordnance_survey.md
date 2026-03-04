@@ -178,5 +178,14 @@ Run with:
 uv run match.py
 ```
 
+## Video
+
+The following video shows the end-to-end process of matching council tax data from a local council to the full Ordnance Survey dataset for that council.
+
+<video controls preload="metadata" width="100%">
+    <source src="../assets/videos/end_to_end_hackney.mp4" type="video/mp4">
+    Your browser does not support the video tag.
+</video>
+
 
 

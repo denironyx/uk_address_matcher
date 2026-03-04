@@ -9,12 +9,19 @@
 
 Fast, simple address matching (geocoding) in Python.
 
-The key features are:
-- **Simple**: Python only, set up in seconds on any laptop, no infrastructure needed
-- **Fast**: Match 100,000 addresses in around 30 seconds*
-- **Reproducible benchmarks**:  High accuracy, demonstrated with reproducible examples
+For full documentation, see our [main documentation site](https://moj-analytical-services.github.io/uk_address_matcher/).
 
-\* Timings based on a Macbook M4 Max.
+## Why use this library
+
+- **Simple.** Setup in seconds, runs on a laptop. No separate infrastructure of services needed.
+- **Fast.** Match 100,000 addresses in ~30 seconds.[^1]
+- **Proven accuracy.** We use public, labelled datasets to measure and document accuracy.
+- **Support for Ordnance Survey data.**  We provide a automated build pipeline for users wishing to match to Ordnance Survey data.  Matching to any other canonical dataset is also supported.
+
+The end-to-end process of matching 100,000 addresses to Ordnance Survey data, including all software downloads and data processing takes:[^2]
+
+- Less than a minute if you are matching to a small area such as a local council region.
+- If matching to the whole UK, there's a one-time preprocessing step that takes around 10 minutes.  Subsequent matching of 100k records takes less than a minute.
 
 ## Installation
 
@@ -22,166 +29,67 @@ The key features are:
 pip install --pre uk_address_matcher
 ```
 
-## Usage
+## What does it do?
 
-`uk_address_matcher` assumes you have two tables in the following format:
+Given the following data:
 
-| unique_id | address_concat                          |
-|-----------|-----------------------------------------|
-| 1         | 123 Fake Street, Faketown, FA1 2KE      |
-| 2         | 456 Other Road, Otherville, NO1 3WY     |
-| ...       | ...                                     |
+-  a "messy" dataset of addresses that you want to match
+-  a "canonical" dataset of known addresses, often an Ordnance Survey dataset such as AddressBase or NGD.
+
+this package will find the best matching canonical address for each messy address.
+
+## Example:
+
+Your address files need, at minimum, two columns: `unique_id` and `address_concat`.
+
+`postcode` is optional by recommended. If not provided an attempt is made to parsee them out of `address_concat`
+
+Given the following data:
+
+### Messy data
+
+| unique_id | address_concat | postcode |
+|----------|----------------|----------|
+| m_1 | Flat A Example Court, 10 Demo Road, Townton | AB1 2BC |
+| ...more rows |
+
+### Canonical data
+
+| unique_id | address_concat | postcode |
+|----------|----------------|----------|
+| c_1 | Flat A, 10 Demo Road, Townton | AB1 2BC |
+| c_2 | Flat B, 10 Demo Road, Townton | AB1 2BC |
+| c_3 | Basement Flat, 10 Demo Road, Townton | AB1 2BC |
+| ...more rows |
 
 
-Generally one dataset will be a dataset of 'messy addresses' which need matching, and the second will be a 'canonical dataset' of addresses to match to, such as Ordnance Survey Addressbase or NGD.
-
-
-
-
-### Basic Matching
-
-> [!NOTE]
-> Two runnable examples with live sample data are included for experimentation:
-> - [`examples/example_matching.py`](./examples/example_matching.py): End-to-end matching example, including loading data, running the matcher, and previewing results.
-> - [`examples/example_prepare_canonical.py`](./examples/example_prepare_canonical.py): Example of preparing a canonical dataset for repeated use, demonstrating how to persist prepared data to disk and load it for matching.
->
-> The package also provides downloadable demo datasets via `ukam_datasets`.
-
-```python
-import duckdb
-
-from uk_address_matcher import AddressMatcher, ukam_datasets
-
-con = duckdb.connect()
-
-# Download + load fictional London dummy datasets (cached locally)
-df_messy, df_canonical = ukam_datasets.fictional_london
-
-matcher = AddressMatcher(
-    canonical_addresses=df_canonical,
-    addresses_to_match=df_messy,
-    con=con,
-)
-
-result = matcher.match()
-result.matches().show(max_width=500)
-```
-
-The default stages are `ExactMatchStage` followed by `SplinkStage`. You can
-customise them by passing your own `stages` list:
-
-```python
-from uk_address_matcher import (
-    AddressMatcher,
-    ExactMatchStage,
-    SplinkStage,
-    UniqueTrigramStage,
-)
-
-matcher = AddressMatcher(
-    canonical_addresses=df_canonical,
-    addresses_to_match=df_messy,
-    con=con,
-    stages=[
-        ExactMatchStage(),
-        UniqueTrigramStage(),
-        SplinkStage(),
-    ],
-)
-
-result = matcher.match()
-result.matches().show(max_width=500)
-```
-
-### Additional columns
-
-You may also provide a separate column called `postcode`, which, if provided will take precidence over any postcode information provided in `address_concat`.
-
-If you have labelled data (you know the ground truth), you may provide a column called `ukam_label`, if provided, this will propagate through your results for accuracy analysis.
-
-### Pre-preparing canonical data
-
-Cleaning a large canonical dataset (e.g. AddressBase) is expensive. Use
-`prepare_canonical_folder` to do it once and write the artefacts to disk.
-Subsequent runs load the prepared folder directly, skipping cleaning entirely.
-
-```python
-from uk_address_matcher import AddressMatcher, prepare_canonical_folder
-
-# One-time preparation
-prepare_canonical_folder(
-    df_canonical,
-    output_folder="./ukam_prepared_canonical",
-    con=con,
-    overwrite=True,
-)
-
-print("Prepared canonical data written to ./ukam_prepared_canonical/")
-
-# Fast matching — pass the folder path instead of a relation
-matcher = AddressMatcher(
-    canonical_addresses="./ukam_prepared_canonical",
-    addresses_to_match=df_messy,
-    con=con,
-)
-
-result = matcher.match()
-result.matches().show(max_width=500)
-```
-
-### Matching one or more AddressRecord entries
-
-If you want to match a small number of addresses, or you have them in-memory as Python dictionaries, you can pass them directly as `addresses_to_match` without needing to create a DuckDB relation first.
-
-You can pass a list of `AddressRecord` entries directly as
-`addresses_to_match`. The matcher also accepts a list of dicts with
-`address_concat`, `postcode`, and `unique_id`, or a DuckDB relation.
+You can match it as follows:
 
 ```python
 import duckdb
-
-from uk_address_matcher import AddressMatcher, AddressRecord, ukam_datasets
+from uk_address_matcher import AddressMatcher
 
 con = duckdb.connect()
-
-df_canonical = ukam_datasets.as_relation("fictional_london_canonical", con=con)
-
-records = [
-    AddressRecord(
-        unique_id="m_1",
-        address_concat="96 Marlowhill Street, Kingsford, London",
-        postcode="NW24 2CW",
-    ),
-    AddressRecord(
-        unique_id="m_2",
-        address_concat="46 Vespergate Road, Maple Green",
-        postcode="NW26 6MU",
-    ),
-]
+messy = con.read_csv("example_data/messy_example.csv")
+canonical = con.read_csv("example_data/canonical_example.csv")
 
 matcher = AddressMatcher(
-    canonical_addresses=df_canonical,
-    addresses_to_match=records,
+    canonical_addresses=canonical,
+    addresses_to_match=messy,
     con=con,
 )
-
 result = matcher.match()
-result.matches().show(max_width=500)
+result.matches().show(max_width=10000)
 ```
 
+Example output:
 
-## Methodology
+| unique_id | resolved_canonical_id | original_address_concat | original_address_concat_canonical | match_reason | match_weight | distinguishability |
+|----------|------------------------|-------------------------|-----------------------------------|--------------|--------------|--------------------|
+| m_1 | c_2 | Flat A Example Court, 10 Demo Road, Townton | Flat A, 10 Demo Road, Townton | splink: probabilistic match | 13.5885 | 11.5033 |
 
-The Splink phase uses a two-pass approach to achieve high accuracy matching:
 
-1. **First Pass**: A standard probabilistic linkage model using Splink generates candidate matches for each input address.
 
-2. **Second Pass**: Within each candidate group, the model analyzes distinguishing tokens to refine matches:
-   - Identifies tokens that uniquely distinguish addresses within a candidate group
-   - Detects "punishment tokens" (tokens in the messy address that don't match the current candidate but do match other candidates)
-   - Uses this contextual information to improve match scores
-
-This approach is particularly effective when matching to a canonical (deduplicated) address list, as it can identify subtle differences between very similar addresses.
 
 
 
