@@ -12,6 +12,10 @@ permissions:
   pull-requests: write
   issues: write # PR comments are issue comments under the hood; this avoids permission surprises
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test-address-matcher:
     runs-on: ubuntu-latest
