@@ -8,6 +8,7 @@ import pytest
 
 from uk_address_matcher import prepare_canonical_folder
 from uk_address_matcher.prepare_canonical import (
+    MAX_CHUNK_COUNT,
     _PreparedCanonical,
     load_prepared_canonical_data,
 )
@@ -57,6 +58,80 @@ def test_prepare_creates_expected_files(prepared_folder):
     assert (prepared_folder / "ukam_manifest.json").exists()
 
 
+def test_prepare_can_create_chunked_canonical_output(con, canonical_data, tmp_path):
+    prepare_canonical_folder(
+        canonical_data,
+        output_folder=tmp_path,
+        con=con,
+        output_chunk_count=3,
+        overwrite=True,
+    )
+
+    chunk_dir = tmp_path / "ukam_canonical_addresses_chunks"
+    chunk_files = sorted(chunk_dir.glob("*.parquet"))
+
+    assert chunk_dir.exists()
+    assert len(chunk_files) == 3
+    assert chunk_files[0].name == "canonical_addresses_chunk_00001_of_00003.parquet"
+    assert chunk_files[1].name == "canonical_addresses_chunk_00002_of_00003.parquet"
+    assert chunk_files[2].name == "canonical_addresses_chunk_00003_of_00003.parquet"
+    assert not (tmp_path / "ukam_canonical_addresses.parquet").exists()
+
+
+@pytest.mark.parametrize("invalid_chunk_count", [0, -1, -10])
+def test_prepare_rejects_non_positive_output_chunk_count(
+    con, canonical_data, tmp_path, invalid_chunk_count
+):
+    with pytest.raises(ValueError, match="output_chunk_count must be at least 1"):
+        prepare_canonical_folder(
+            canonical_data,
+            output_folder=tmp_path,
+            con=con,
+            output_chunk_count=invalid_chunk_count,
+            overwrite=True,
+        )
+
+
+def test_prepare_rejects_output_chunk_count_above_supported_digits(
+    con, canonical_data, tmp_path
+):
+    with pytest.raises(ValueError, match="output_chunk_count must be at most"):
+        prepare_canonical_folder(
+            canonical_data,
+            output_folder=tmp_path,
+            con=con,
+            output_chunk_count=MAX_CHUNK_COUNT + 1,
+            overwrite=True,
+        )
+
+
+@pytest.mark.parametrize("invalid_chunk_count", [0, -1, -10])
+def test_prepare_rejects_non_positive_num_of_chunks(
+    con, canonical_data, tmp_path, invalid_chunk_count
+):
+    with pytest.raises(ValueError, match="num_of_chunks must be at least 1"):
+        prepare_canonical_folder(
+            canonical_data,
+            output_folder=tmp_path,
+            con=con,
+            num_of_chunks=invalid_chunk_count,
+            overwrite=True,
+        )
+
+
+def test_prepare_rejects_num_of_chunks_above_supported_digits(
+    con, canonical_data, tmp_path
+):
+    with pytest.raises(ValueError, match="num_of_chunks must be at most"):
+        prepare_canonical_folder(
+            canonical_data,
+            output_folder=tmp_path,
+            con=con,
+            num_of_chunks=MAX_CHUNK_COUNT + 1,
+            overwrite=True,
+        )
+
+
 def test_prepare_overwrite_false_raises(con, canonical_data):
     with tempfile.TemporaryDirectory() as tmp:
         prepare_canonical_folder(
@@ -90,11 +165,16 @@ def test_overwrite_clears_stale_files(con, canonical_data):
         stale.write_text("stale")
         assert stale.exists()
 
+        stale_chunk_dir = Path(tmp) / "ukam_canonical_addresses_chunks"
+        stale_chunk_dir.mkdir(parents=True, exist_ok=True)
+        (stale_chunk_dir / "old_chunk.parquet").write_text("stale")
+
         prepare_canonical_folder(
             canonical_data, output_folder=tmp, con=con, overwrite=True
         )
 
         assert not stale.exists()
+        assert not stale_chunk_dir.exists()
         assert (Path(tmp) / "ukam_manifest.json").exists()
         assert (Path(tmp) / "ukam_canonical_addresses.parquet").exists()
 
@@ -106,6 +186,7 @@ def test_manifest_contains_expected_fields(prepared_folder):
     assert "created_at" in manifest
     assert "created_with_duckdb_version" in manifest
     assert manifest["row_counts"]["canonical_addresses"] == 3
+    assert manifest["row_counts"]["canonical_output_chunks"] == 1
 
     # Per-file metadata
     assert "files" in manifest
@@ -161,6 +242,43 @@ def test_load_prepared_data_has_expected_row_counts(con, prepared_folder):
     assert result.addresses.count("*").fetchone()[0] == 3
     assert result.term_frequencies.count("*").fetchone()[0] > 0
     assert result.inverted_index.count("*").fetchone()[0] > 0
+
+
+def test_chunked_canonical_manifest_row_audit(con, canonical_data, tmp_path):
+    prepare_canonical_folder(
+        canonical_data,
+        output_folder=tmp_path,
+        con=con,
+        output_chunk_count=3,
+        overwrite=True,
+    )
+
+    manifest = json.loads((tmp_path / "ukam_manifest.json").read_text())
+    chunk_files = sorted((tmp_path / "ukam_canonical_addresses_chunks").glob("*.parquet"))
+
+    total_rows_across_chunks = sum(
+        con.read_parquet(str(chunk_path)).count("*").fetchone()[0]
+        for chunk_path in chunk_files
+    )
+
+    assert manifest["row_counts"]["canonical_addresses"] == 3
+    assert manifest["row_counts"]["canonical_output_chunks"] == 3
+    assert total_rows_across_chunks == manifest["row_counts"]["canonical_addresses"]
+
+
+def test_load_reads_chunked_canonical_layout(con, canonical_data, tmp_path):
+    prepare_canonical_folder(
+        canonical_data,
+        output_folder=tmp_path,
+        con=con,
+        output_chunk_count=4,
+        overwrite=True,
+    )
+
+    result = load_prepared_canonical_data(tmp_path, con=con)
+
+    assert isinstance(result, _PreparedCanonical)
+    assert result.addresses.count("*").fetchone()[0] == 3
 
 
 def test_load_accepts_string_path(con, prepared_folder):

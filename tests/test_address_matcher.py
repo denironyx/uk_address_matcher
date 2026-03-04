@@ -184,6 +184,37 @@ def test_match_from_prepared_folder_path_object(con, canonical_data, messy_data)
         assert result.matches().count("*").fetchone()[0] > 0
 
 
+@pytest.mark.parametrize("output_chunk_count", [1, 5])
+def test_match_from_prepared_folder_e2e_chunked_output(
+    con,
+    canonical_data,
+    messy_data,
+    tmp_path,
+    output_chunk_count,
+):
+    """Prepare canonical artefacts, load from folder path, then run match()."""
+    prepare_canonical_folder(
+        canonical_data,
+        output_folder=tmp_path,
+        con=con,
+        output_chunk_count=output_chunk_count,
+        overwrite=True,
+    )
+
+    matcher = AddressMatcher(
+        canonical_addresses=tmp_path,
+        addresses_to_match=messy_data,
+        con=con,
+        stages=[ExactMatchStage()],
+    )
+
+    result = matcher.match()
+
+    assert isinstance(result, MatchResult)
+    assert isinstance(result.matches(), duckdb.DuckDBPyRelation)
+    assert result.matches().count("*").fetchone()[0] > 0
+
+
 def test_canonical_address_filter_applies_to_prepared_folder(con):
     canonical_records = [
         {
