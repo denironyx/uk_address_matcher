@@ -2,11 +2,9 @@ from unittest.mock import patch
 
 import pytest
 
-from uk_address_matcher import (
+from uk_address_matcher.cleaning.chunking_strategies import (
     clean_data_pre_term_frequencies,
     derive_term_frequencies_table,
-)
-from uk_address_matcher.cleaning.chunking_strategies import (
     prepare_data_for_matching,
 )
 

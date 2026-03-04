@@ -2,7 +2,7 @@ import duckdb
 import pytest
 
 from uk_address_matcher.post_linkage.analyse_results import (
-    calculate_match_metrics,
+    _calculate_match_metrics,
 )
 
 
@@ -19,7 +19,7 @@ def test_calculate_exact_match_metrics_basic_counts():
         """
     )
 
-    result_df = calculate_match_metrics(relation).df()
+    result_df = _calculate_match_metrics(relation).df()
 
     assert set(result_df.columns) == {
         "match_reason",
@@ -48,7 +48,7 @@ def test_calculate_exact_match_metrics_supports_ascending_order():
         """
     )
 
-    result_df = calculate_match_metrics(relation, order="ascending").df()
+    result_df = _calculate_match_metrics(relation, order="ascending").df()
 
     assert list(result_df["match_reason"]) == ["method_a", "method_b"]
 
@@ -66,7 +66,7 @@ def test_calculate_exact_match_metrics_accepts_match_reason_column():
         """
     )
 
-    result_df = calculate_match_metrics(relation).df()
+    result_df = _calculate_match_metrics(relation).df()
 
     assert set(result_df["match_reason"]) == {
         "exact: postcode",
@@ -81,4 +81,4 @@ def test_calculate_exact_match_metrics_requires_column():
     relation = con.sql("SELECT 1 AS different_column")
 
     with pytest.raises(ValueError):
-        calculate_match_metrics(relation)
+        _calculate_match_metrics(relation)

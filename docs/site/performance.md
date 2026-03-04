@@ -32,8 +32,9 @@ In this section, we set out `uk_address_matcher`'s accuracy against these labell
 
 ### Hackney Council data
 
-The Hackney Council dataset is available from https://www.datadaptive.com/addr/.
+The Hackney Council dataset is available [here](https://www.datadaptive.com/addr/.)
 
+The following script takes 26 seconds to run against 114,544 labelled records.
 
 <details>
   <summary>Expand to see Hackney benchmarking script</summary>
@@ -107,12 +108,13 @@ con.sql("select * from df").show(max_width=100000, max_rows=100000)
 ```
 
 Note that we:
+
 - Filter out any rows from the messy dataset where the label UPRN does not exist in our canonical dataset. We could not be expected to match these
 - Filter the canonical dataset down to the Hackney council region, and to residential properties.
 
 </details>
 
-This script takes 26 seconds to run against 114,544 labelled records.
+
 
 It achieves:
 
@@ -128,3 +130,176 @@ The full precision-recall curve is shown below:
 ```
 
 Manual review of the 'false positives' suggests many may in fact be true positives (that the "ground truth" labels contains errors).  So the true precision is likely higher than indicated in this chart.
+
+### Suppressing the postcode from the Hackney data
+
+
+The following chart shows how much performance is degraded if we suppress the postcode from the messy data, and re-match.
+
+```vegalite
+{
+    "schema-url": "assets/charts/hackney_precision_recall_postcode_suppressed.json"
+}
+```
+
+The region of recall between 0% and 25% is now populated because there are no longer any exact matches (which requires a match on postcode); all matches are now Splink matches.
+
+### Mid Sussex District Council business rates data
+
+This dataset is available [here](https://www.midsussex.gov.uk/housing-council-tax/council-tax-benefits-and-business-rates/business-rates/open-data-business-rates/)
+
+The following script takes 2 seconds to run against 3,756 labelled records.
+
+<details>
+  <summary>Expand to see Mid Sussex benchmarking script</summary>
+
+```python
+import time
+
+import altair as alt
+import duckdb
+import pyarrow as pa
+
+from uk_address_matcher import (
+    AddressMatcher,
+    ExactMatchStage,
+    SplinkStage,
+    UniqueTrigramStage,
+)
+
+start_time = time.time()
+
+
+con = duckdb.connect()
+con.execute("INSTALL excel;")
+con.execute("LOAD excel;")
+
+
+path_to_all_canonical = "path_to_output_from_ukam-os-builder_tool"
+
+sql = f"""
+SELECT *
+FROM read_parquet('{path_to_all_canonical}')
+WHERE lowertierlocalauthoritygsscode = 'E07000228'
+  AND SUBSTR(classificationcode, 1, 1) = 'C'
+"""
+df_canonical = con.sql(sql)
+
+
+sql = """
+SELECT *
+FROM read_xlsx(
+	'path_to_mid_sussex_business_rates_data.xlsx',
+	all_varchar = true
+)
+"""
+business_rates_data = con.sql(sql)
+
+
+sql = """
+WITH cleaned AS (
+	SELECT
+		NULLIF(NULLIF(TRIM("Property Reference"), ''), 'NULL') AS property_reference,
+		NULLIF(NULLIF(TRIM("UPRN"), ''), 'NULL') AS uprn_raw,
+		NULLIF(NULLIF(TRIM("Post Code"), ''), 'NULL') AS postcode,
+		NULLIF(NULLIF(TRIM("Property Name 1"), ''), 'NULL') AS property_name_1,
+		NULLIF(NULLIF(TRIM("Property Name 2"), ''), 'NULL') AS property_name_2,
+		NULLIF(NULLIF(TRIM("Address 1"), ''), 'NULL') AS address_1,
+		NULLIF(NULLIF(TRIM("Address 2"), ''), 'NULL') AS address_2,
+		NULLIF(NULLIF(TRIM("Address 3"), ''), 'NULL') AS address_3,
+		NULLIF(NULLIF(TRIM("Address 4"), ''), 'NULL') AS address_4
+	FROM business_rates_data
+),
+uprn_normalised AS (
+	SELECT
+		property_reference,
+		TRY_CAST(NULLIF(LTRIM(uprn_raw, '0'), '') AS BIGINT) AS uprn_bigint,
+		postcode,
+		property_name_1,
+		property_name_2,
+		address_1,
+		address_2,
+		address_3,
+		address_4
+	FROM cleaned
+)
+SELECT
+	property_reference AS unique_id,
+	CONCAT_WS(
+		' ',
+		property_name_1,
+		property_name_2,
+		address_1,
+		address_2
+	) AS address_concat,
+	uprn_bigint AS ukam_label,
+	UPPER(REPLACE(postcode, ' ', '')) AS postcode
+FROM uprn_normalised
+WHERE property_reference IS NOT NULL
+  AND uprn_bigint IS NOT NULL
+  AND uprn_bigint IN (SELECT unique_id FROM df_canonical)
+  AND (
+	  property_name_1 IS NOT NULL
+	  OR property_name_2 IS NOT NULL
+	  OR address_1 IS NOT NULL
+	  OR address_2 IS NOT NULL
+	  OR address_3 IS NOT NULL
+	  OR address_4 IS NOT NULL
+  )
+"""
+df_messy = con.sql(sql)
+df_messy.count("*").show()
+
+
+matcher = AddressMatcher(
+    canonical_addresses=df_canonical,
+    addresses_to_match=df_messy,
+    con=con,
+    stages=[
+        ExactMatchStage(),
+        UniqueTrigramStage(),
+        SplinkStage(
+            final_distinguishability_threshold=2,
+        ),
+    ],
+)
+
+
+result = matcher.match()
+
+end_time = time.time()
+print(f"Execution time: {end_time - start_time} seconds")
+
+
+chart = result.accuracy_analysis(
+    output_type="precision_recall",
+    add_metrics=["f1"],
+    match_weight_round_to_nearest=1,
+)
+
+
+
+accuracy_table = result.accuracy_analysis(
+    output_type="table",
+    add_metrics=["f1"],
+    match_weight_round_to_nearest=1,
+)
+
+df = pa.Table.from_pylist(accuracy_table)
+
+```
+
+Note that we:
+
+- Filter out any rows from the messy dataset where the label UPRN does not exist in our canonical dataset. We could not be expected to match these
+- Filter the canonical dataset down to the Mid Sussex District Counil region, and to commercial properties.
+
+</details>
+
+The full precision-recall curve is shown below:
+
+```vegalite
+{
+	"schema-url": "assets/charts/mid_sussex_precision_recall.json"
+}
+```
