@@ -130,10 +130,10 @@ def _clean_data_pre_term_frequencies(
     debug_options: Optional[DebugOptions] = None,
 ) -> DuckDBPyRelation:
     # Ensure postcode column exists before pipeline entry
-    address_table = _ensure_postcode_column(address_table)
+    address_table_with_postcode = _ensure_postcode_column(address_table)
     pipeline = create_sql_pipeline(
         con,
-        input_rel=address_table,
+        input_rel=address_table_with_postcode,
         stage_specs=QUEUE_PRE_TF,
         pipeline_name="Clean data pre term frequencies",
         pipeline_description="The cleaning pipeline pre the term frequency steps",

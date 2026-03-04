@@ -80,9 +80,11 @@ class InputBinding(NamedTuple):
             alias_candidate = f"root_{_uid(4)}"
 
         if use_relation_alias and _duckdb_table_exists(con, alias_candidate):
-            registration_cache[relation_sql] = alias_candidate
-            registered_aliases.add(alias_candidate)
-            return alias_candidate
+            existing_cols = con.table(alias_candidate).columns
+            if self.relation.columns == existing_cols:
+                registration_cache[relation_sql] = alias_candidate
+                registered_aliases.add(alias_candidate)
+                return alias_candidate
 
         alias = alias_candidate
         while alias in registered_aliases or _duckdb_table_exists(con, alias):
