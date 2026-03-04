@@ -131,6 +131,19 @@ The full precision-recall curve is shown below:
 
 Manual review of the 'false positives' suggests many may in fact be true positives (that the "ground truth" labels contains errors).  So the true precision is likely higher than indicated in this chart.
 
+### Suppressing the postcode from the Hackney data
+
+
+The following chart shows how much performance is degraded if we suppress the postcode from the messy data, and re-match.
+
+```vegalite
+{
+    "schema-url": "assets/charts/hackney_precision_recall_postcode_suppressed.json"
+}
+```
+
+The region of recall between 0% and 25% is now populated because there are no longer any exact matches (which requires a match on postcode); all matches are now Splink matches.
+
 ### Mid Sussex District Council business rates data
 
 This dataset is available [here](https://www.midsussex.gov.uk/housing-council-tax/council-tax-benefits-and-business-rates/business-rates/open-data-business-rates/)
