@@ -14,11 +14,11 @@ For full documentation, see our [main documentation site](https://moj-analytical
 ## Why use this library
 
 - **Simple.** Setup in seconds, runs on a laptop. No separate infrastructure of services needed.
-- **Fast.** Match 100,000 addresses in ~30 seconds.[^1]
+- **Fast.** Match 100,000 addresses in ~30 seconds.
 - **Proven accuracy.** We use public, labelled datasets to measure and document accuracy.
 - **Support for Ordnance Survey data.**  We provide a automated build pipeline for users wishing to match to Ordnance Survey data.  Matching to any other canonical dataset is also supported.
 
-The end-to-end process of matching 100,000 addresses to Ordnance Survey data, including all software downloads and data processing takes:[^2]
+The end-to-end process of matching 100,000 addresses to Ordnance Survey data, including all software downloads and data processing takes:
 
 - Less than a minute if you are matching to a small area such as a local council region.
 - If matching to the whole UK, there's a one-time preprocessing step that takes around 10 minutes.  Subsequent matching of 100k records takes less than a minute.
@@ -42,7 +42,7 @@ this package will find the best matching canonical address for each messy addres
 
 Your address files need, at minimum, two columns: `unique_id` and `address_concat`.
 
-`postcode` is optional by recommended. If not provided an attempt is made to parsee them out of `address_concat`
+`postcode` is optional by recommended. If not provided an attempt is made to parse them out of `address_concat`
 
 Given the following data:
 
