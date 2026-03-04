@@ -62,3 +62,16 @@ def test_addresses_to_match_dicts(duck_con, canonical_relation):
     ]
 
     _run_matcher(duck_con, canonical_relation, records)
+
+
+def test_addresses_to_match_without_postcode_column(duck_con, canonical_relation):
+    """addresses_to_match with no postcode column should work; postcode is derived
+    from address_concat by the pipeline."""
+    messy_relation = duck_con.sql(
+        """
+        SELECT
+            10::BIGINT AS unique_id,
+            '10 DOWNING STREET SW1A 2AA'::VARCHAR AS address_concat
+        """
+    )
+    _run_matcher(duck_con, canonical_relation, messy_relation)

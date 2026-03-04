@@ -130,3 +130,24 @@ def test_materialise_debug_parity(duck_con, base_rel):
     pipe2.add_step(name_tuple_stage())
     run_vals = pipe2.run().df().sort_values("id").val.tolist()
     assert debug_vals == run_vals
+
+
+@pipeline_stage()
+def select_extra_col():
+    return "SELECT * EXCLUDE (extra), extra FROM {input}"
+
+
+def test_projected_input_relation_columns_preserved(duck_con):
+    """A projected relation (e.g. _ensure_postcode_column) must not be silently
+    collapsed back to the base table alias, which would drop the new column."""
+    duck_con.execute("CREATE TABLE src_tbl (id INTEGER, val INTEGER)")
+    duck_con.execute("INSERT INTO src_tbl VALUES (1, 10)")
+    base = duck_con.table("src_tbl")
+    # Project an extra column on top of the base table
+    projected = base.select("*, 99 AS extra")
+
+    pipe = DuckDBPipeline(duck_con, projected)
+    pipe.add_step(select_extra_col())
+    result = pipe.run()
+    assert "extra" in result.columns
+    assert result.fetchone()[2] == 99
