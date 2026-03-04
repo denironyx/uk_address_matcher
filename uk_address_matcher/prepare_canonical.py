@@ -3,11 +3,14 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import shutil
+import time
 import warnings
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 if TYPE_CHECKING:
     import duckdb
@@ -15,18 +18,26 @@ if TYPE_CHECKING:
 logger = logging.getLogger("uk_address_matcher")
 
 PREPARED_ADDRESSES_FILENAME = "ukam_canonical_addresses.parquet"
+PREPARED_ADDRESSES_CHUNK_DIRNAME = "ukam_canonical_addresses_chunks"
 PREPARED_TERM_FREQUENCIES_FILENAME = "ukam_term_frequencies.parquet"
 PREPARED_INVERTED_INDEX_FILENAME = "ukam_inverted_index.parquet"
 MANIFEST_FILENAME = "ukam_manifest.json"
+CHUNK_FILE_INDEX_DIGITS = 5
+MAX_CHUNK_COUNT = (10**CHUNK_FILE_INDEX_DIGITS) - 1
 
 REQUIRED_FILES = [
-    PREPARED_ADDRESSES_FILENAME,
     PREPARED_TERM_FREQUENCIES_FILENAME,
     PREPARED_INVERTED_INDEX_FILENAME,
 ]
 
 # All files managed by the preparation step (parquets + manifest + temps)
-_MANAGED_FILES = REQUIRED_FILES + [MANIFEST_FILENAME, f"{MANIFEST_FILENAME}.tmp"]
+_MANAGED_FILES = [
+    PREPARED_ADDRESSES_FILENAME,
+    PREPARED_ADDRESSES_CHUNK_DIRNAME,
+    *REQUIRED_FILES,
+    MANIFEST_FILENAME,
+    f"{MANIFEST_FILENAME}.tmp",
+]
 
 
 @dataclass(frozen=True)
@@ -44,6 +55,14 @@ class _PreparedCanonical:
     inverted_index: duckdb.DuckDBPyRelation
 
 
+@dataclass(frozen=True)
+class _PreparedFolderLayout:
+    """Resolved prepared-data layout information for a folder."""
+
+    folder: Path
+    canonical_paths: list[Path]
+
+
 def _sha256_file(path: Path) -> str:
     """Return the hex SHA-256 digest of a file."""
     h = hashlib.sha256()
@@ -58,7 +77,69 @@ def _clear_stale_artefacts(folder: Path) -> None:
     for name in _MANAGED_FILES:
         p = folder / name
         if p.exists():
-            p.unlink()
+            if p.is_dir():
+                shutil.rmtree(p)
+            else:
+                p.unlink()
+
+
+def _format_elapsed(elapsed_seconds: float) -> str:
+    total_seconds = int(round(max(0.0, elapsed_seconds)))
+    minutes, seconds = divmod(total_seconds, 60)
+    return f"{minutes}m {seconds:02d}s"
+
+
+def _chunk_file_name(chunk_index: int, total_chunks: int) -> str:
+    return (
+        "canonical_addresses_chunk_"
+        f"{chunk_index + 1:0{CHUNK_FILE_INDEX_DIGITS}d}_"
+        f"of_{total_chunks:0{CHUNK_FILE_INDEX_DIGITS}d}.parquet"
+    )
+
+
+def _validate_chunk_count(value: int, *, name: str) -> None:
+    if value < 1:
+        raise ValueError(f"{name} must be at least 1")
+    if value > MAX_CHUNK_COUNT:
+        raise ValueError(
+            f"{name} must be at most {MAX_CHUNK_COUNT} "
+            f"(supports {CHUNK_FILE_INDEX_DIGITS}-digit chunk numbering)."
+        )
+
+
+def _resolve_chunk_hash_key(columns: list[str]) -> str:
+    """Pick a stable hash-partition key present in cleaned canonical output."""
+    preferred_keys = [
+        "address_concat",
+        "clean_full_address",
+        "address_to_parse",
+        "unique_id",
+        "address_id",
+    ]
+    for key in preferred_keys:
+        if key in columns:
+            return key
+
+    raise ValueError(
+        "Unable to chunk canonical output: no suitable hash key column found. "
+        "Expected one of address_concat, clean_full_address, address_to_parse, "
+        "unique_id, or address_id."
+    )
+
+
+def _resolve_canonical_parquet_paths(folder: Path) -> list[Path]:
+    """Resolve canonical addresses parquet paths for single-file or chunked layouts."""
+    chunk_dir = folder / PREPARED_ADDRESSES_CHUNK_DIRNAME
+    if chunk_dir.is_dir():
+        chunk_paths = sorted(chunk_dir.glob("*.parquet"))
+        if chunk_paths:
+            return chunk_paths
+
+    single_path = folder / PREPARED_ADDRESSES_FILENAME
+    if single_path.exists():
+        return [single_path]
+
+    return []
 
 
 def prepare_canonical_folder(
@@ -67,15 +148,20 @@ def prepare_canonical_folder(
     *,
     con: duckdb.DuckDBPyConnection,
     num_of_chunks: int = 10,
+    output_chunk_count: int = 1,
     overwrite: bool = False,
 ) -> None:
     """Prepare canonical data and persist to a folder for later use.
 
     Performs address cleaning and tokenisation, term frequency computation,
-    and inverted index generation. Writes three Parquet files and a manifest
+    and inverted index generation. Writes two Parquet files, canonical
+    addresses (single-file or chunked), and a manifest
     to `output_folder`:
 
-    - `ukam_canonical_addresses.parquet` — cleaned and tokenised addresses
+        - `ukam_canonical_addresses.parquet` — cleaned and tokenised addresses
+            or
+          `ukam_canonical_addresses_chunks/`
+          `canonical_addresses_chunk_XXXXX_of_YYYYY.parquet`
     - `ukam_term_frequencies.parquet` — term frequency lookup table
     - `ukam_inverted_index.parquet` — inverted index for candidate retrieval
     - `ukam_manifest.json` — provenance metadata (version, row counts, hashes)
@@ -86,6 +172,10 @@ def prepare_canonical_folder(
         con: DuckDB connection.
         num_of_chunks: Number of chunks to split the data into for cleaning
             and term frequency derivation. Set to 1 for no chunking.
+        output_chunk_count: Number of output chunks to write for canonical
+            addresses. Set to 1 to write `ukam_canonical_addresses.parquet`.
+            Set above 1 to write hash-partitioned chunks under
+            `ukam_canonical_addresses_chunks/`.
         overwrite: Whether to overwrite existing files in the folder. When
             `True`, all known artefacts are removed before writing to ensure
             the folder ends up in a consistent state.
@@ -102,8 +192,13 @@ def prepare_canonical_folder(
 
     output_folder = Path(output_folder)
 
+    _validate_chunk_count(num_of_chunks, name="num_of_chunks")
+    _validate_chunk_count(output_chunk_count, name="output_chunk_count")
+
     if output_folder.exists() and not overwrite:
         existing = [f for f in REQUIRED_FILES if (output_folder / f).exists()]
+        if _resolve_canonical_parquet_paths(output_folder):
+            existing.append("canonical_addresses")
         if existing:
             raise FileExistsError(
                 f"Output folder '{output_folder}' already contains prepared files: "
@@ -131,13 +226,50 @@ def prepare_canonical_folder(
     inverted_index = derive_inverted_index(df_clean, con=con, num_of_chunks=num_of_chunks)
 
     # Write parquet files
-    addr_path = output_folder / PREPARED_ADDRESSES_FILENAME
     tf_path = output_folder / PREPARED_TERM_FREQUENCIES_FILENAME
     idx_path = output_folder / PREPARED_INVERTED_INDEX_FILENAME
 
-    df_clean.write_parquet(str(addr_path))
     tf_table.write_parquet(str(tf_path))
     inverted_index.write_parquet(str(idx_path))
+
+    canonical_paths: list[Path]
+    if output_chunk_count == 1:
+        addr_path = output_folder / PREPARED_ADDRESSES_FILENAME
+        df_clean.write_parquet(str(addr_path))
+        canonical_paths = [addr_path]
+    else:
+        chunk_dir = output_folder / PREPARED_ADDRESSES_CHUNK_DIRNAME
+        chunk_dir.mkdir(parents=True, exist_ok=True)
+
+        uid = uuid4().hex
+        input_table = f"__ukam_prepare_canonical_clean_{uid}"
+        hash_key = _resolve_chunk_hash_key(df_clean.columns)
+        con.execute(f"DROP VIEW IF EXISTS {input_table}")
+        con.execute(f"DROP TABLE IF EXISTS {input_table}")
+        df_clean.create(input_table)
+
+        canonical_paths = []
+        for chunk_index in range(output_chunk_count):
+            started_at = time.perf_counter()
+            chunk_query = con.sql(f"""
+                SELECT *
+                FROM {input_table}
+                WHERE (abs(hash({hash_key})) % {output_chunk_count}) = {chunk_index}
+            """)
+            chunk_path = chunk_dir / _chunk_file_name(chunk_index, output_chunk_count)
+            chunk_query.write_parquet(str(chunk_path))
+            chunk_count = chunk_query.count("*").fetchone()[0]
+            canonical_paths.append(chunk_path)
+            logger.info(
+                "Wrote canonical output chunk %d/%d to '%s' (%d rows) - took %s",
+                chunk_index + 1,
+                output_chunk_count,
+                chunk_path,
+                chunk_count,
+                _format_elapsed(time.perf_counter() - started_at),
+            )
+
+        con.execute(f"DROP TABLE IF EXISTS {input_table}")
 
     # Compute row counts once (avoids repeated full scans)
     addr_count = df_clean.count("*").fetchone()[0]
@@ -152,18 +284,31 @@ def prepare_canonical_folder(
         idx_count,
     )
 
+    if output_chunk_count > 1:
+        logger.info(
+            "Wrote %d canonical output chunks to '%s'",
+            output_chunk_count,
+            output_folder / PREPARED_ADDRESSES_CHUNK_DIRNAME,
+        )
+
+    artefact_columns: dict[str, list[str]] = {
+        PREPARED_TERM_FREQUENCIES_FILENAME: tf_table.columns,
+        PREPARED_INVERTED_INDEX_FILENAME: inverted_index.columns,
+    }
+    for canonical_path in canonical_paths:
+        relative_name = str(canonical_path.relative_to(output_folder))
+        artefact_columns[relative_name] = df_clean.columns
+
     _write_manifest(
         output_folder,
         con=con,
-        artefact_columns={
-            PREPARED_ADDRESSES_FILENAME: df_clean.columns,
-            PREPARED_TERM_FREQUENCIES_FILENAME: tf_table.columns,
-            PREPARED_INVERTED_INDEX_FILENAME: inverted_index.columns,
-        },
+        artefact_paths=[*canonical_paths, tf_path, idx_path],
+        artefact_columns=artefact_columns,
         row_counts={
             "canonical_addresses": addr_count,
             "term_frequencies": tf_count,
             "inverted_index": idx_count,
+            "canonical_output_chunks": output_chunk_count,
         },
     )
 
@@ -172,6 +317,7 @@ def _write_manifest(
     folder: Path,
     *,
     con: duckdb.DuckDBPyConnection,
+    artefact_paths: list[Path],
     artefact_columns: dict[str, list[str]],
     row_counts: dict[str, int],
 ) -> None:
@@ -185,8 +331,8 @@ def _write_manifest(
     from uk_address_matcher import __version__
 
     files_meta = {}
-    for name in REQUIRED_FILES:
-        p = folder / name
+    for p in artefact_paths:
+        name = str(p.relative_to(folder))
         stat = p.stat()
         files_meta[name] = {
             "size_bytes": stat.st_size,
@@ -270,7 +416,7 @@ def _check_manifest(folder: Path) -> None:
 def _validate_prepared_folder(
     folder: str | Path,
     con: duckdb.DuckDBPyConnection,
-) -> Path:
+) -> _PreparedFolderLayout:
     """Validate that a folder contains readable prepared Parquet files."""
     folder = Path(folder)
 
@@ -290,19 +436,29 @@ def _validate_prepared_folder(
             "Re-run prepare_canonical_folder() to regenerate."
         )
 
+    canonical_paths = _resolve_canonical_parquet_paths(folder)
+    if not canonical_paths:
+        raise FileNotFoundError(
+            f"Prepared canonical folder '{folder}' is missing canonical addresses "
+            "artefacts. Expected either ukam_canonical_addresses.parquet or "
+            "parquet chunks in ukam_canonical_addresses_chunks/. Re-run "
+            "prepare_canonical_folder() to regenerate."
+        )
+
     # Verify each file is a readable Parquet file
-    for name in REQUIRED_FILES:
-        path = folder / name
+    required_paths = [folder / f for f in REQUIRED_FILES]
+    for path in [*canonical_paths, *required_paths]:
+        relative_name = str(path.relative_to(folder))
         try:
             con.read_parquet(str(path)).limit(1).fetchone()
         except Exception as exc:
             raise FileNotFoundError(
-                f"Artefact '{name}' in '{folder}' exists but is not a valid "
+                f"Artefact '{relative_name}' in '{folder}' exists but is not a valid "
                 f"Parquet file: {exc}. Re-run prepare_canonical_folder() "
                 f"to regenerate."
             ) from exc
 
-    return folder
+    return _PreparedFolderLayout(folder=folder, canonical_paths=canonical_paths)
 
 
 def load_prepared_canonical_data(
@@ -322,17 +478,21 @@ def load_prepared_canonical_data(
         A `_PreparedCanonical` containing `addresses`, `term_frequencies`,
         and `inverted_index` relations.
     """
-    folder = _validate_prepared_folder(folder, con=con)
-    _check_manifest(folder)
+    layout = _validate_prepared_folder(folder, con=con)
+    _check_manifest(layout.folder)
 
-    addresses = con.read_parquet(str(folder / PREPARED_ADDRESSES_FILENAME))
-    term_frequencies = con.read_parquet(str(folder / PREPARED_TERM_FREQUENCIES_FILENAME))
-    inverted_index = con.read_parquet(str(folder / PREPARED_INVERTED_INDEX_FILENAME))
+    addresses = con.read_parquet([str(path) for path in layout.canonical_paths])
+    term_frequencies = con.read_parquet(
+        str(layout.folder / PREPARED_TERM_FREQUENCIES_FILENAME)
+    )
+    inverted_index = con.read_parquet(
+        str(layout.folder / PREPARED_INVERTED_INDEX_FILENAME)
+    )
 
     if canonical_address_filter is not None:
         addresses = addresses.filter(canonical_address_filter)
 
-    logger.debug("Loaded prepared canonical data from '%s'", folder)
+    logger.debug("Loaded prepared canonical data from '%s'", layout.folder)
 
     return _PreparedCanonical(
         addresses=addresses,
