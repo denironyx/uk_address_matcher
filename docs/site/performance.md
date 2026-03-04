@@ -32,8 +32,9 @@ In this section, we set out `uk_address_matcher`'s accuracy against these labell
 
 ### Hackney Council data
 
-The Hackney Council dataset is available from https://www.datadaptive.com/addr/.
+The Hackney Council dataset is available [here](https://www.datadaptive.com/addr/.)
 
+The following script takes 26 seconds to run against 114,544 labelled records.
 
 <details>
   <summary>Expand to see Hackney benchmarking script</summary>
@@ -107,12 +108,13 @@ con.sql("select * from df").show(max_width=100000, max_rows=100000)
 ```
 
 Note that we:
+
 - Filter out any rows from the messy dataset where the label UPRN does not exist in our canonical dataset. We could not be expected to match these
 - Filter the canonical dataset down to the Hackney council region, and to residential properties.
 
 </details>
 
-This script takes 26 seconds to run against 114,544 labelled records.
+
 
 It achieves:
 
@@ -132,6 +134,8 @@ Manual review of the 'false positives' suggests many may in fact be true positiv
 ### Mid Sussex District Council business rates data
 
 This dataset is available [here](https://www.midsussex.gov.uk/housing-council-tax/council-tax-benefits-and-business-rates/business-rates/open-data-business-rates/)
+
+The following script takes 2 seconds to run against 3,756 labelled records.
 
 <details>
   <summary>Expand to see Mid Sussex benchmarking script</summary>
@@ -272,4 +276,17 @@ df = pa.Table.from_pylist(accuracy_table)
 
 ```
 
+Note that we:
+
+- Filter out any rows from the messy dataset where the label UPRN does not exist in our canonical dataset. We could not be expected to match these
+- Filter the canonical dataset down to the Mid Sussex District Counil region, and to commercial properties.
+
 </details>
+
+The full precision-recall curve is shown below:
+
+```vegalite
+{
+	"schema-url": "assets/charts/mid_sussex_precision_recall.json"
+}
+```
