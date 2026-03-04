@@ -9,6 +9,8 @@
 
 Fast, simple address matching (geocoding) in Python.
 
+For full documentation, see our [main documentation site](https://moj-analytical-services.github.io/uk_address_matcher/).
+
 ## Why use this library
 
 - **Simple.** Setup in seconds, runs on a laptop. No separate infrastructure of services needed.
@@ -35,11 +37,6 @@ Given the following data:
 -  a "canonical" dataset of known addresses, often an Ordnance Survey dataset such as AddressBase or NGD.
 
 this package will find the best matching canonical address for each messy address.
-
-For full documentation, see our [main documentation site](https://moj-analytical-services.github.io/uk_address_matcher/).
-
-
-
 
 ## Example:
 
