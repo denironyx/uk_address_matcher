@@ -1,6 +1,6 @@
 import duckdb
 
-from uk_address_matcher import AddressMatcher, prepare_canonical_folder
+from uk_address_matcher import AddressMatcher, prepare_canonical_folder, ukam_datasets
 
 con = duckdb.connect(database=":memory:")
 
@@ -12,9 +12,7 @@ con = duckdb.connect(database=":memory:")
 # folder directly, skipping cleaning entirely.
 
 # Step 1: Load raw canonical addresses
-df_canonical = con.read_parquet(
-    "./example_data/companies_house_addresess_postcode_overlap.parquet"
-)
+df_messy, df_canonical = ukam_datasets.fictional_london
 
 # Step 2: Prepare and persist to a folder (one-time operation)
 prepare_canonical_folder(
@@ -27,8 +25,6 @@ prepare_canonical_folder(
 print("Prepared canonical data written to ./ukam_prepared_canonical/")
 
 # Step 3: Match using the prepared folder
-df_messy = con.read_parquet("./example_data/fhrs_addresses_sample.parquet")
-
 matcher = AddressMatcher(
     canonical_addresses="./ukam_prepared_canonical",
     addresses_to_match=df_messy,

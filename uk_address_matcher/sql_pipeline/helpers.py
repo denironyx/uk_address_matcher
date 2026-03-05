@@ -12,6 +12,8 @@ import duckdb
 
 logger = logging.getLogger("uk_address_matcher")
 
+_CON_INPUT_RELATION_ALIAS_CACHE: dict[int, dict[str, str]] = {}
+
 
 @dataclass
 class StageTimingRecord:
@@ -157,6 +159,48 @@ def _duckdb_table_exists(con: duckdb.DuckDBPyConnection, table_name: str) -> boo
         f"WHERE table_name = '{table_name}'"
     ).fetchone()
     return result[0] > 0
+
+
+def _register_input_relation_once(
+    relation: duckdb.DuckDBPyRelation,
+    *,
+    con: duckdb.DuckDBPyConnection,
+    role: str = "input",
+) -> duckdb.DuckDBPyRelation:
+    """Ensure a relation is registered on ``con`` and reuse stable aliases.
+
+    Handles relations created by a different DuckDB connection by falling back
+    to Arrow registration.
+    """
+    registration_cache = _CON_INPUT_RELATION_ALIAS_CACHE.setdefault(id(con), {})
+
+    relation_sql = relation.sql_query()
+    cached_alias = registration_cache.get(relation_sql)
+    if cached_alias and _duckdb_table_exists(con, cached_alias):
+        return con.table(cached_alias)
+
+    relation_alias = getattr(relation, "alias", None)
+    if (
+        relation_alias
+        and not str(relation_alias).startswith("unnamed_relation_")
+        and _duckdb_table_exists(con, str(relation_alias))
+    ):
+        registration_cache[relation_sql] = str(relation_alias)
+        return con.table(str(relation_alias))
+
+    alias = f"__ukam_input_{role}_{_uid()}"
+    while _duckdb_table_exists(con, alias):
+        alias = f"__ukam_input_{role}_{_uid()}"
+
+    try:
+        con.register(alias, relation)
+    except duckdb.InvalidInputException as exc:
+        if "created by another Connection" not in str(exc):
+            raise
+        con.register(alias, relation.to_arrow_table())
+
+    registration_cache[relation_sql] = alias
+    return con.table(alias)
 
 
 def _explain_debug(con: duckdb.DuckDBPyConnection, sql: str) -> None:

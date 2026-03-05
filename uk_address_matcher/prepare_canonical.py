@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from uk_address_matcher.sql_pipeline.helpers import _register_input_relation_once
+
 if TYPE_CHECKING:
     import duckdb
 
@@ -191,6 +193,7 @@ def prepare_canonical_folder(
     )
 
     output_folder = Path(output_folder)
+    data = _register_input_relation_once(data, con=con, role="prepare_canonical")
 
     _validate_chunk_count(num_of_chunks, name="num_of_chunks")
     _validate_chunk_count(output_chunk_count, name="output_chunk_count")

@@ -1,5 +1,3 @@
-import os
-
 import duckdb
 
 from uk_address_matcher import (
@@ -7,6 +5,7 @@ from uk_address_matcher import (
     ExactMatchStage,
     PeeledAddressStage,
     SplinkStage,
+    ukam_datasets,
 )
 
 # -----------------------------------------------------------------------------
@@ -38,20 +37,15 @@ from uk_address_matcher import (
 # -----------------------------------------------------------------------------
 
 # Example input files (canonical addresses vs. addresses to match)
-p_ch = "./example_data/companies_house_addresess_postcode_overlap.parquet"
-p_fhrs = "./example_data/fhrs_addresses_sample.parquet"
+messy, canonical = ukam_datasets.fictional_london
+print("=== Sample input data ===")
+print("Messy addresses:")
+messy.show(max_rows=1, max_width=500)
+print("\nCanonical addresses:")
+canonical.show(max_rows=5, max_width=500)
 
 # DuckDB connection used for all processing (in-memory for convenience)
 con = duckdb.connect(database=":memory:")
-
-# Load inputs
-df_ch = con.read_parquet(p_ch)
-df_fhrs = con.read_parquet(p_fhrs)
-
-# Optional: limit rows for quick local testing (set TEST_LIMIT to any value)
-if os.getenv("TEST_LIMIT"):
-    df_ch = df_ch.limit(250)
-    df_fhrs = df_fhrs.limit(250)
 
 # -----------------------------------------------------------------------------
 # Configure and run the matcher
@@ -63,8 +57,8 @@ print(AddressMatcher.available_stages())
 # - ExactMatchStage(): deterministic rules / exact matches
 # - SplinkStage(): probabilistic matching for fuzzier cases (typos, formatting)
 matcher = AddressMatcher(
-    canonical_addresses=df_ch,
-    addresses_to_match=df_fhrs,
+    canonical_addresses=canonical,
+    addresses_to_match=messy,
     con=con,
     stages=[
         ExactMatchStage(),
