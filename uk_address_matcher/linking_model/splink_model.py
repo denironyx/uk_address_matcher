@@ -4,15 +4,43 @@ import json
 from duckdb import DuckDBPyConnection, DuckDBPyRelation
 from splink import DuckDBAPI, Linker, SettingsCreator
 
-from uk_address_matcher.sql_pipeline.helpers import package_resource_read_sql
+from uk_address_matcher.sql_pipeline.helpers import _uid, package_resource_read_sql
+
+
+def _materialise_relation(
+    con: DuckDBPyConnection,
+    relation: DuckDBPyRelation,
+    table_name: str,
+) -> DuckDBPyRelation:
+    con.execute(f"DROP VIEW IF EXISTS {table_name}")
+    con.execute(f"DROP TABLE IF EXISTS {table_name}")
+    relation.create(table_name)
+    return con.table(table_name)
 
 
 def _ensure_column(
-    rel: DuckDBPyRelation, column_name: str, column_type: str
+    rel: DuckDBPyRelation,
+    column_name: str,
+    column_type: str,
+    *,
+    con: DuckDBPyConnection,
+    table_name_prefix: str,
 ) -> DuckDBPyRelation:
+    source_query = rel.sql_query()
+
     if column_name in rel.columns:
-        return rel
-    return rel.select(f"*, CAST(NULL AS {column_type}) AS {column_name}")
+        ensured_relation = con.sql(f"""
+            SELECT *
+            FROM ({source_query}) AS src
+        """)
+    else:
+        ensured_relation = con.sql(f"""
+            SELECT *, CAST(NULL AS {column_type}) AS {column_name}
+            FROM ({source_query}) AS src
+        """)
+
+    table_name = f"{table_name_prefix}_{_uid()}"
+    return _materialise_relation(con, ensured_relation, table_name)
 
 
 def _get_model_settings_dict():
@@ -154,10 +182,18 @@ def _get_linker(
             )
 
     df_addresses_to_match = _ensure_column(
-        df_addresses_to_match, "address_without_numbers", "VARCHAR"
+        df_addresses_to_match,
+        "address_without_numbers",
+        "VARCHAR",
+        con=con,
+        table_name_prefix="__ukam__tmp_splink_messy_input",
     )
     df_addresses_to_search_within = _ensure_column(
-        df_addresses_to_search_within, "address_without_numbers", "VARCHAR"
+        df_addresses_to_search_within,
+        "address_without_numbers",
+        "VARCHAR",
+        con=con,
+        table_name_prefix="__ukam__tmp_splink_canonical_input",
     )
 
     settings_as_dict["retain_intermediate_calculation_columns"] = (
@@ -186,8 +222,7 @@ def _get_linker(
 
     db_api = DuckDBAPI(connection=con)
 
-    con.register("df_addresses_to_match_fix", df_addresses_to_match)
-    df_addresses_to_match_fix = con.table("df_addresses_to_match_fix")
+    df_addresses_to_match_fix = df_addresses_to_match
 
     # See https://github.com/moj-analytical-services/uk_address_matcher/issues/253
     # con.register("df_addresses_to_search_within_fix", df_addresses_to_search_within)
@@ -195,7 +230,12 @@ def _get_linker(
     df_addresses_to_search_within_fix = df_addresses_to_search_within
 
     # Drop stale Splink views/tables from any prior linker on this connection.
-    for tbl in ("m_", "c_"):
+    messy_name, canonical_name = (
+        "__splink__df_messy_addresses",
+        "__splink__df_canonical_addresses",
+    )
+
+    for tbl in (messy_name, canonical_name):
         con.execute(f"DROP VIEW IF EXISTS {tbl}")
         con.execute(f"DROP TABLE IF EXISTS {tbl}")
 
@@ -203,7 +243,7 @@ def _get_linker(
         [df_addresses_to_match_fix, df_addresses_to_search_within_fix],
         settings=settings,
         db_api=db_api,
-        input_table_aliases=["m_", "c_"],
+        input_table_aliases=[messy_name, canonical_name],
     )
 
     if precomputed_numeric_tf_table is None:
@@ -223,13 +263,15 @@ def _get_linker(
 
     cols_to_select = df_addresses_to_match.columns
     select_expr = ", ".join(cols_to_select)
+    messy_subquery = df_addresses_to_match_fix.sql_query()
+    canonical_subquery = df_addresses_to_search_within_fix.sql_query()
 
     sql = f"""
     select {select_expr}, 'm_' as source_dataset
-    from df_addresses_to_match_fix
+    from ({messy_subquery}) as df_addresses_to_match_fix
     UNION ALL
     select {select_expr}, 'c_' as source_dataset
-    from df_addresses_to_search_within_fix
+    from ({canonical_subquery}) as df_addresses_to_search_within_fix
 
     """
 

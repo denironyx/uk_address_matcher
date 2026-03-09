@@ -190,7 +190,7 @@ def _resolve_with_trigrams(
             m.numeric_tokens,
             m.{unit_fields.replace(chr(10), " ")},
             {_ngram_expression(messy_tokens_expr, ngram_size)} AS ngrams
-        FROM {{messy_addresses}} AS m
+        FROM {{__ukam__tmp_messy_addresses}} AS m
         WHERE length({messy_tokens_expr}) >= {ngram_size}
     """
 
