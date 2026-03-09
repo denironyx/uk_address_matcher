@@ -5,13 +5,19 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional, Union
 
 from uk_address_matcher.cleaning.chunking_strategies import (
+    derive_inverted_index,
+    derive_term_frequencies_table,
     prepare_data_for_matching,
 )
 from uk_address_matcher.linking_model.address_record import AddressRecord
 from uk_address_matcher.linking_model.matching.runner import _run_matching
 from uk_address_matcher.linking_model.matching.stages.base_stage import MatchingStage
 from uk_address_matcher.post_linkage.match_result import MatchResult
-from uk_address_matcher.sql_pipeline.helpers import _register_input_relation_once
+from uk_address_matcher.prepare_canonical import load_prepared_canonical_data
+from uk_address_matcher.sql_pipeline.helpers import (
+    _drop_table_and_registered_aliases,
+    _register_input_relation_once,
+)
 
 if TYPE_CHECKING:
     import duckdb
@@ -178,11 +184,6 @@ class AddressMatcher:
 
     def _resolve_canonical_data(self) -> None:
         """Loads or cleans canonical data depending on the input type."""
-        from uk_address_matcher.cleaning.chunking_strategies import (
-            derive_inverted_index,
-            derive_term_frequencies_table,
-        )
-        from uk_address_matcher.prepare_canonical import load_prepared_canonical_data
 
         if isinstance(self._raw_canonical, (str, Path)):
             logger.debug("Loading prepared canonical data from '%s'", self._raw_canonical)
@@ -215,6 +216,7 @@ class AddressMatcher:
                 self._raw_canonical,
                 con=self.con,
                 term_frequency_lookup=self._tf_table,
+                dataset_role="canonical",
                 debug_options=self.debug_options,
             )
 
@@ -239,6 +241,7 @@ class AddressMatcher:
                 # If nothing was loaded from disk, these will be None — but that's fine,
                 term_frequency_lookup=self._tf_table,
                 inverted_index=self._inverted_index,
+                dataset_role="messy",
                 debug_options=self.debug_options,
             )
 
@@ -314,12 +317,44 @@ class AddressMatcher:
         if splink_stage is not None:
             splink_linker = splink_stage.linker
 
+        self._cleanup_intermediate_tables(result)
+
         return MatchResult(
             result,
             con=self.con,
             _splink_linker=splink_linker,
             _canonical_relation=self._canonical_clean,
         )
+
+    def _cleanup_intermediate_tables(self, result: duckdb.DuckDBPyRelation) -> None:
+        """A simple cleaning utility to drop transient tables created during
+        matching, while keeping the final result and canonical/messy tables."""
+        keep_names = {
+            getattr(result, "alias", None),
+            getattr(self._canonical_clean, "alias", None),
+            getattr(self._messy_clean, "alias", None),
+        }
+        keep_names = {name for name in keep_names if isinstance(name, str) and name}
+
+        transient_prefixes = (
+            "__ukam_input_messy_",
+            "__ukam_input_canonical_",
+            "__ukam__messy_addresses",
+            "__ukam__canonical_addresses",
+            "__ukam__splink__messy_input_",
+            "__ukam__splink__canonical_input_",
+            "__ukam_rel_tok_freq",
+            "__ukam_numeric_term_frequencies",
+        )
+
+        table_names = [name for (name,) in self.con.execute("SHOW TABLES").fetchall()]
+        for table_name in table_names:
+            if table_name in keep_names:
+                continue
+            if not table_name.startswith(transient_prefixes):
+                continue
+
+            _drop_table_and_registered_aliases(self.con, table_name)
 
     def _find_splink_stage(self):
         """Return the first SplinkStage instance from the stage list, or None."""

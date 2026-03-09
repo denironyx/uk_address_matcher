@@ -28,6 +28,7 @@ def improve_predictions_using_distinguishing_tokens(
     Returns:
         DuckDBPyRelation: Table with improved match predictions
     """
+    _distinguishing_token_matches_table = "__ukam__distinguishability_matches"
 
     add_cols_select = ""
     if additional_columns_to_retain:
@@ -420,7 +421,7 @@ def improve_predictions_using_distinguishing_tokens(
     # Calculate new match weights based on distinguishing tokens and bigrams
 
     sql = f"""
-    CREATE OR REPLACE TABLE matches AS
+    CREATE OR REPLACE TABLE {_distinguishing_token_matches_table} AS
 
     SELECT
         unique_id_l,
@@ -487,5 +488,5 @@ def improve_predictions_using_distinguishing_tokens(
     """
 
     con.execute(sql)
-    matches = con.table("matches")
+    matches = con.table(_distinguishing_token_matches_table)
     return matches

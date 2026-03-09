@@ -37,6 +37,8 @@ from uk_address_matcher.cleaning.steps.term_frequencies import (
 from uk_address_matcher.sql_pipeline.helpers import package_resource_read_sql
 from uk_address_matcher.sql_pipeline.runner import DebugOptions, create_sql_pipeline
 
+_NUMERIC_TOKENS_WORK_NAME = "__ukam__numeric_tokens_work"
+
 
 def _ensure_postcode_column(rel: DuckDBPyRelation) -> DuckDBPyRelation:
     """Ensure the relation has a postcode column, adding NULL if missing.
@@ -147,10 +149,9 @@ def _clean_data_pre_term_frequencies(
         exclude_columns.append("address_without_numbers")
 
     if exclude_columns:
-        con.register("__temp_result_for_exclude", result)
         exclude_sql = ", ".join(exclude_columns)
         result = con.sql(
-            f"SELECT * EXCLUDE ({exclude_sql}) FROM __temp_result_for_exclude"
+            f"SELECT * EXCLUDE ({exclude_sql}) FROM ({result.sql_query()}) AS cleaned"
         )
 
     return result
@@ -202,10 +203,9 @@ def _clean_data_using_precomputed_rel_tok_freq(
         exclude_columns.append("address_without_numbers")
 
     if exclude_columns:
-        con.register("__temp_result_for_exclude", result)
         exclude_sql = ", ".join(exclude_columns)
         result = con.sql(
-            f"SELECT * EXCLUDE ({exclude_sql}) FROM __temp_result_for_exclude"
+            f"SELECT * EXCLUDE ({exclude_sql}) FROM ({result.sql_query()}) AS cleaned"
         )
 
     return result
@@ -238,14 +238,14 @@ def get_numeric_term_frequencies_from_address_table(
             ),
         )
         numeric_tokens_rel = pipeline.run(debug_options)
-        con.register("numeric_tokens_df", numeric_tokens_rel)
+        con.register(_NUMERIC_TOKENS_WORK_NAME, numeric_tokens_rel)
     else:
-        con.register("numeric_tokens_df", df_address_table)
+        con.register(_NUMERIC_TOKENS_WORK_NAME, df_address_table)
 
     sql = """
     with unnested as (
         select unnest(numeric_tokens) as numeric_token
-        from numeric_tokens_df
+        from ukam__numeric_tokens_work
     )
     select
         numeric_token,
@@ -325,7 +325,6 @@ def _create_term_frequency_tables(
     # when the underlying data is modified or dropped
     con.sql("DROP TABLE IF EXISTS __ukam_rel_tok_freq")
     address_token_frequencies_rel.create("__ukam_rel_tok_freq")
-    con.register("rel_tok_freq", con.table("__ukam_rel_tok_freq"))
 
     # Always load pre-baked NUMERIC term frequencies (see docstring)
     read_numeric_tf_sql = package_resource_read_sql(
@@ -334,7 +333,6 @@ def _create_term_frequency_tables(
     numeric_term_frequencies_rel = con.sql(read_numeric_tf_sql)
     con.sql("DROP TABLE IF EXISTS __ukam_numeric_term_frequencies")
     numeric_term_frequencies_rel.create("__ukam_numeric_term_frequencies")
-    con.register("numeric_term_frequencies", con.table("__ukam_numeric_term_frequencies"))
 
     return con.table("__ukam_rel_tok_freq")
 

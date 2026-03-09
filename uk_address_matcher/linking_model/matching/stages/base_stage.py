@@ -162,9 +162,9 @@ class MatchingStage(ABC):
 
             >>> MatchingStage.available_stages()
             Available matching stages (from uk_address_matcher):
-              ExactMatchStage  – Exact hash-join matching on
+              ExactMatchStage  - Exact hash-join matching on
                                   clean_full_address + postcode.
-              SplinkStage      – Splink probabilistic matching stage.
+              SplinkStage      - Splink probabilistic matching stage.
               ...
 
         The returned object is a regular ``list`` subclass, so you can iterate,
@@ -227,6 +227,7 @@ class MatchingStage(ABC):
             results_table=results_table,
             stage_matches=stage_matches,
         )
+        _cleanup_matching_input_aliases(con)
 
     def _write_matches_to_results(
         self,
@@ -316,3 +317,17 @@ class MatchingStage(ABC):
         )
 
         con.execute(f'DROP TABLE IF EXISTS "{tmp_table}"')
+
+
+def _cleanup_matching_input_aliases(con: duckdb.DuckDBPyConnection) -> None:
+    table_names = [name for (name,) in con.execute("SHOW TABLES").fetchall()]
+    for alias_name in table_names:
+        if not (
+            alias_name.startswith("__ukam__messy_addresses")
+            or alias_name.startswith("__ukam__canonical_addresses")
+        ):
+            continue
+        try:
+            con.unregister(alias_name)
+        except Exception:
+            pass

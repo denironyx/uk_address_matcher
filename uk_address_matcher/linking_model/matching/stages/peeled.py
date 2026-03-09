@@ -86,7 +86,7 @@ def _peeled_address_matches() -> list[CTEStep]:
     enum_values = str(MatchReason.enum_values())
 
     messy_peeled_sql = _build_regex_peel_sql(
-        source_placeholder="messy_addresses",
+        source_placeholder="__ukam__messy_addresses",
         id_column="ukam_address_id",
         canonical=False,
     )

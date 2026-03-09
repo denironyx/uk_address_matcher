@@ -75,10 +75,7 @@ def best_matches_with_distinguishability(
         distinguishability metrics.
     """
 
-    con.register("predict_for_distinguishability", df_predict)
-    con.register("addresses_to_match", df_addresses_to_match)
-
-    if "mw_adjustment" not in con.table("predict_for_distinguishability").columns:
+    if "mw_adjustment" not in df_predict.columns:
         warnings.warn(
             "\nMost users will wish to pass the result of "
             "improve_predictions_using_distinguishing_tokens to this function.\n"
@@ -134,7 +131,7 @@ def best_matches_with_distinguishability(
                     PARTITION BY unique_id_r ORDER BY match_weight DESC
                 ) AS distinguishability,
                 COUNT(*) OVER (PARTITION BY unique_id_r) AS match_count
-            FROM predict_for_distinguishability
+            FROM ({df_predict.sql_query()}) AS predict_for_distinguishability
             {rn_filter}
         ),
         categorized_matches AS (
@@ -165,7 +162,7 @@ def best_matches_with_distinguishability(
             t.distinguishability_category, '99: No match'
         ) AS distinguishability_category,
         {add_cols_select}
-    FROM addresses_to_match AS a
+    FROM ({df_addresses_to_match.sql_query()}) AS a
     LEFT JOIN categorized_matches AS t
     ON a.ukam_address_id = t.ukam_address_id_r
     {sort_str}
