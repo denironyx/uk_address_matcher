@@ -186,14 +186,14 @@ def _get_linker(
         "address_without_numbers",
         "VARCHAR",
         con=con,
-        table_name_prefix="__ukam__splink__messy_input",
+        table_name_prefix="__ukam__tmp_splink_messy_input",
     )
     df_addresses_to_search_within = _ensure_column(
         df_addresses_to_search_within,
         "address_without_numbers",
         "VARCHAR",
         con=con,
-        table_name_prefix="__ukam__splink__canonical_input",
+        table_name_prefix="__ukam__tmp_splink_canonical_input",
     )
 
     settings_as_dict["retain_intermediate_calculation_columns"] = (

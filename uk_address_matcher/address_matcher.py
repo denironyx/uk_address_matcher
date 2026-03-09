@@ -336,16 +336,7 @@ class AddressMatcher:
         }
         keep_names = {name for name in keep_names if isinstance(name, str) and name}
 
-        transient_prefixes = (
-            "__ukam_input_messy_",
-            "__ukam_input_canonical_",
-            "__ukam__messy_addresses",
-            "__ukam__canonical_addresses",
-            "__ukam__splink__messy_input_",
-            "__ukam__splink__canonical_input_",
-            "__ukam_rel_tok_freq",
-            "__ukam_numeric_term_frequencies",
-        )
+        transient_prefixes = ("__ukam__tmp_",)
 
         table_names = [name for (name,) in self.con.execute("SHOW TABLES").fetchall()]
         for table_name in table_names:

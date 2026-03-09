@@ -24,8 +24,8 @@ def run_sql_pipeline(
     pipeline = create_sql_pipeline(
         con,
         [
-            InputBinding("__ukam__messy_addresses", df_unmatched),
-            InputBinding("__ukam__canonical_addresses", df_canonical),
+            InputBinding("__ukam__tmp_messy_addresses", df_unmatched),
+            InputBinding("__ukam__tmp_canonical_addresses", df_canonical),
         ],
         list(pipeline_stages),
         pipeline_name=f"Deterministic Match Stage: {stage_name}",

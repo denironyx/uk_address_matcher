@@ -323,8 +323,8 @@ def _cleanup_matching_input_aliases(con: duckdb.DuckDBPyConnection) -> None:
     table_names = [name for (name,) in con.execute("SHOW TABLES").fetchall()]
     for alias_name in table_names:
         if not (
-            alias_name.startswith("__ukam__messy_addresses")
-            or alias_name.startswith("__ukam__canonical_addresses")
+            alias_name.startswith("__ukam__tmp_messy_addresses")
+            or alias_name.startswith("__ukam__tmp_canonical_addresses")
         ):
             continue
         try:

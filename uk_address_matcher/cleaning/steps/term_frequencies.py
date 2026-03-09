@@ -88,11 +88,11 @@ def _add_term_frequencies_to_address_tokens():
 
 @pipeline_stage(
     name="add_term_frequencies_to_address_tokens_using_registered_df",
-    description=("Attach precomputed token frequencies from __ukam_rel_tok_freq"),
+    description=("Attach precomputed token frequencies"),
     tags="term_frequency_analysis",
 )
 def _add_term_frequencies_to_address_tokens_using_registered_df():
-    """Attach precomputed token frequencies from ``__ukam_rel_tok_freq``."""
+    """Attach precomputed token frequencies from ``__ukam__tmp_rel_tok_freq``."""
 
     base_sql = """
     SELECT * FROM {input}
@@ -113,10 +113,10 @@ def _add_term_frequencies_to_address_tokens_using_registered_df():
     SELECT
         e.ukam_address_id,
         e.token_idx,
-        COALESCE(__ukam_rel_tok_freq.rel_freq, 5e-5) AS rel_freq
+        COALESCE(__ukam__tmp_rel_tok_freq.rel_freq, 5e-5) AS rel_freq
     FROM {exploded_tokens} e
-    LEFT JOIN __ukam_rel_tok_freq
-        ON e.token = __ukam_rel_tok_freq.token
+    LEFT JOIN __ukam__tmp_rel_tok_freq
+        ON e.token = __ukam__tmp_rel_tok_freq.token
     """
 
     # 3. Aggregate ONLY the frequencies
@@ -174,11 +174,11 @@ def _add_numeric_term_frequencies_using_registered_df():
         tf2.tf_numeric_token AS tf_numeric_token_2,
         tf3.tf_numeric_token AS tf_numeric_token_3
     FROM {base} AS base
-    LEFT JOIN __ukam_numeric_term_frequencies AS tf1
+    LEFT JOIN __ukam__tmp_numeric_term_frequencies AS tf1
         ON base.numeric_token_1 = tf1.numeric_token
-    LEFT JOIN __ukam_numeric_term_frequencies AS tf2
+    LEFT JOIN __ukam__tmp_numeric_term_frequencies AS tf2
         ON base.numeric_token_2 = tf2.numeric_token
-    LEFT JOIN __ukam_numeric_term_frequencies AS tf3
+    LEFT JOIN __ukam__tmp_numeric_term_frequencies AS tf3
         ON base.numeric_token_3 = tf3.numeric_token
     """
 

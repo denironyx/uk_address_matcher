@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
     from uk_address_matcher.sql_pipeline.runner import DebugOptions
 
-MessyInputName = Literal["__ukam__messy_addresses", "unmatched_records"]
+MessyInputName = Literal["__ukam__tmp_messy_addresses", "unmatched_records"]
 
 
 @dataclass(frozen=True, repr=False)
@@ -39,7 +39,7 @@ class ExactMatchStage(MatchingStage):
             con=con,
             pipeline_stages=[
                 _restrict_canonical_to_messy_postcodes("exact"),
-                _exact_matches("__ukam__messy_addresses"),
+                _exact_matches("__ukam__tmp_messy_addresses"),
             ],
             stage_name=stage_name,
             df_unmatched=df_unmatched,
@@ -56,7 +56,7 @@ class ExactMatchStage(MatchingStage):
     depends_on=["restrict_canonical_to_messy_postcodes"],
 )
 def _exact_matches(
-    messy_input_name: MessyInputName = "__ukam__messy_addresses",
+    messy_input_name: MessyInputName = "__ukam__tmp_messy_addresses",
 ) -> list[CTEStep]:
     """Find exact matches using hash-join on clean_full_address + postcode.
 
@@ -64,7 +64,7 @@ def _exact_matches(
     ----------
     messy_input_name:
         The placeholder name for the messy input table. Defaults to
-        "__ukam__messy_addresses" for the initial pass. Can be set
+        "__ukam__tmp_messy_addresses" for the initial pass. Can be set
         to "unmatched_records" when running after filtering.
     """
     match_condition = """

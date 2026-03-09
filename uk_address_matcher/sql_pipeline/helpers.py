@@ -208,9 +208,9 @@ def _register_input_relation_once(
         registration_cache[relation_sql] = str(relation_alias)
         return con.table(str(relation_alias))
 
-    alias = f"__ukam_input_{role}_{_uid()}"
+    alias = f"__ukam__tmp_input_{role}_{_uid()}"
     while _duckdb_table_exists(con, alias):
-        alias = f"__ukam_input_{role}_{_uid()}"
+        alias = f"__ukam__tmp_input_{role}_{_uid()}"
 
     try:
         con.register(alias, relation)

@@ -323,18 +323,18 @@ def _create_term_frequency_tables(
 
     # Materialise the term frequency table to avoid lazy evaluation issues
     # when the underlying data is modified or dropped
-    con.sql("DROP TABLE IF EXISTS __ukam_rel_tok_freq")
-    address_token_frequencies_rel.create("__ukam_rel_tok_freq")
+    con.sql("DROP TABLE IF EXISTS __ukam__tmp_rel_tok_freq")
+    address_token_frequencies_rel.create("__ukam__tmp_rel_tok_freq")
 
     # Always load pre-baked NUMERIC term frequencies (see docstring)
     read_numeric_tf_sql = package_resource_read_sql(
         "uk_address_matcher.data", "numeric_token_frequencies.parquet"
     )
     numeric_term_frequencies_rel = con.sql(read_numeric_tf_sql)
-    con.sql("DROP TABLE IF EXISTS __ukam_numeric_term_frequencies")
-    numeric_term_frequencies_rel.create("__ukam_numeric_term_frequencies")
+    con.sql("DROP TABLE IF EXISTS __ukam__tmp_numeric_term_frequencies")
+    numeric_term_frequencies_rel.create("__ukam__tmp_numeric_term_frequencies")
 
-    return con.table("__ukam_rel_tok_freq")
+    return con.table("__ukam__tmp_rel_tok_freq")
 
 
 def _register_inverted_index_table(
