@@ -157,9 +157,18 @@ def test_build_dataset_diagnostics_filters_unmatchable_incorrect_rows() -> None:
         SELECT *
         FROM (
             VALUES
-                ('s1', '100', '100', 'exact', '10 HIGH ST', '10 HIGH STREET', '10 HIGH ST', 20.0),
-                ('i1', '101', '999', 'splink', '11 HIGH ST', '11 HIGH STREET', '99 OTHER ST', 5.0),
-                ('i2', '404', '888', 'splink', '12 HIGH ST', '12 HIGH STREET', '88 OTHER ST', 3.0),
+                (
+                    's1', '100', '100', 'exact',
+                    '10 HIGH ST', '10 HIGH STREET', '10 HIGH ST', 20.0
+                ),
+                (
+                    'i1', '101', '999', 'splink',
+                    '11 HIGH ST', '11 HIGH STREET', '99 OTHER ST', 5.0
+                ),
+                (
+                    'i2', '404', '888', 'splink',
+                    '12 HIGH ST', '12 HIGH STREET', '88 OTHER ST', 3.0
+                ),
                 ('u1', '102', NULL, NULL, '13 HIGH ST', '13 HIGH STREET', NULL, NULL)
         ) AS t(
             unique_id,
@@ -313,8 +322,14 @@ def test_build_dataset_diagnostics_adds_top_splink_for_unmatched_by_ukam_id() ->
         SELECT *
         FROM (
             VALUES
-                ('u1', '200', NULL, NULL, '1 MAIN ROAD', '1 MAIN ROAD', NULL, NULL, 'addr-1'),
-                ('u2', '201', NULL, NULL, '2 MAIN ROAD', '2 MAIN ROAD', NULL, NULL, 'addr-2')
+                (
+                    'u1', '200', NULL, NULL,
+                    '1 MAIN ROAD', '1 MAIN ROAD', NULL, NULL, 'addr-1'
+                ),
+                (
+                    'u2', '201', NULL, NULL,
+                    '2 MAIN ROAD', '2 MAIN ROAD', NULL, NULL, 'addr-2'
+                )
         ) AS t(
             unique_id,
             ukam_label,
@@ -384,7 +399,13 @@ def test_build_dataset_diagnostics_rolls_up_canonical_variants() -> None:
         SELECT *
         FROM (
             VALUES
-                ('i1', '101', '999', 'splink', 'THREE SISTERS 35 QUEENSDOWN ROAD LONDON', 'THREE SISTERS 35 QUEENSDOWN ROAD LONDON', NULL, 5.0)
+                (
+                    'i1', '101', '999', 'splink',
+                    'THREE SISTERS 35 QUEENSDOWN ROAD LONDON',
+                    'THREE SISTERS 35 QUEENSDOWN ROAD LONDON',
+                    NULL,
+                    5.0
+                )
         ) AS t(
             unique_id,
             ukam_label,
@@ -411,9 +432,21 @@ def test_build_dataset_diagnostics_rolls_up_canonical_variants() -> None:
         SELECT *
         FROM (
             VALUES
-                ('101', 'THREE SISTERS 35 QUEENSDOWN ROAD LONDON', 'THREE SISTERS 35 QUEENSDOWN ROAD LONDON'),
-                ('999', 'THREE SISTERS 35 QUEENSDOWN ROAD LONDON', 'THREE SISTERS 35 QUEENSDOWN ROAD LONDON'),
-                ('999', 'STAR BY HACKNEY DOWNS THREE SISTERS QUEENSDOWN ROAD HACKNEY LONDON', 'STAR BY HACKNEY DOWNS THREE SISTERS QUEENSDOWN ROAD HACKNEY LONDON')
+                (
+                    '101',
+                    'THREE SISTERS 35 QUEENSDOWN ROAD LONDON',
+                    'THREE SISTERS 35 QUEENSDOWN ROAD LONDON'
+                ),
+                (
+                    '999',
+                    'THREE SISTERS 35 QUEENSDOWN ROAD LONDON',
+                    'THREE SISTERS 35 QUEENSDOWN ROAD LONDON'
+                ),
+                (
+                    '999',
+                    'STAR BY HACKNEY DOWNS THREE SISTERS QUEENSDOWN ROAD HACKNEY LONDON',
+                    'STAR BY HACKNEY DOWNS THREE SISTERS QUEENSDOWN ROAD HACKNEY LONDON'
+                )
         ) AS t(unique_id, clean_full_address, original_address_concat)
         """
     )
@@ -534,8 +567,14 @@ def test_print_diagnostics_respects_output_toggles(
         SELECT *
         FROM (
             VALUES
-                ('s1', '100', '100', 'exact', '10 HIGH ST', '10 HIGH STREET', '10 HIGH ST', 20.0),
-                ('i1', '101', '999', 'splink', '11 HIGH ST', '11 HIGH STREET', '99 OTHER ST', 5.0),
+                (
+                    's1', '100', '100', 'exact',
+                    '10 HIGH ST', '10 HIGH STREET', '10 HIGH ST', 20.0
+                ),
+                (
+                    'i1', '101', '999', 'splink',
+                    '11 HIGH ST', '11 HIGH STREET', '99 OTHER ST', 5.0
+                ),
                 ('u1', '102', NULL, NULL, '12 HIGH ST', '12 HIGH STREET', NULL, NULL)
         ) AS t(
             unique_id,
