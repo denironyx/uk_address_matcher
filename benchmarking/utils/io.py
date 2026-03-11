@@ -109,7 +109,6 @@ def load_duckdb_httpfs(con: duckdb.DuckDBPyConnection) -> None:
         con.execute(f"SET s3_session_token='{token}';")
 
 
-@lru_cache(maxsize=None)
 def setup_connection() -> duckdb.DuckDBPyConnection:
     """Initialise DuckDB connection with required extensions for benchmarking."""
     con = duckdb.connect(database=":memory:")
