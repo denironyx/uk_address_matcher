@@ -21,7 +21,7 @@ from uk_address_matcher import (
     PeeledAddressStage,
 )
 
-SELECTED_DATASETS: str | list[str] = "all"
+# SELECTED_DATASETS: str | list[str] = "all"
 SELECTED_DATASETS: str | list[str] = "hackney"
 STAGES = [
     ExactMatchStage(),
@@ -33,7 +33,13 @@ APPLY_CANONICAL_FILTER = True
 
 # Defaults: always print summary sections (match breakdown, run totals, timings),
 # with selected diagnostics enabled and successful/unmatched diagnostics opt-in.
-OUTPUT_OPTIONS = BenchmarkOutputOptions()
+# OUTPUT_OPTIONS = BenchmarkOutputOptions()
+OUTPUT_OPTIONS = BenchmarkOutputOptions(
+    show_incorrect_matches=False,
+    show_similarity_score_checks=False,
+    show_successful_matches=False,
+    show_unmatched_records=False,
+)
 
 print(f"Applying canonical filter: {APPLY_CANONICAL_FILTER}")
 
@@ -57,7 +63,7 @@ results = run_selected_datasets(
     canonical_address_filter=(CANONICAL_FILTER_SQL if APPLY_CANONICAL_FILTER else None),
     enable_diagnostics=OUTPUT_OPTIONS.enable_diagnostics(),
 )
-print_benchmark_summary(results, output_options=OUTPUT_OPTIONS)
+print_benchmark_summary(results)
 
 if OUTPUT_OPTIONS.enable_diagnostics():
     print_diagnostics(results, output_options=OUTPUT_OPTIONS)
