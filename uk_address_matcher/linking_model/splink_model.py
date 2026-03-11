@@ -231,8 +231,8 @@ def _get_linker(
 
     # Drop stale Splink views/tables from any prior linker on this connection.
     messy_name, canonical_name = (
-        "__splink__df_messy_addresses",
-        "__splink__df_canonical_addresses",
+        "m_",
+        "c_",
     )
 
     for tbl in (messy_name, canonical_name):
@@ -244,6 +244,7 @@ def _get_linker(
         settings=settings,
         db_api=db_api,
         input_table_aliases=[messy_name, canonical_name],
+        set_up_basic_logging=False,
     )
 
     if precomputed_numeric_tf_table is None:
