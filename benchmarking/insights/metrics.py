@@ -138,11 +138,23 @@ def summarise_run_totals(
                 2
             ) AS matched_pct,
             SUM(CASE WHEN is_matched AND is_correct THEN 1 ELSE 0 END) AS correct_matches,
+            SUM(CASE WHEN is_matched AND NOT is_correct THEN 1 ELSE 0 END)
+                AS mismatched_matches,
+            ROUND(
+                100.0 * SUM(CASE WHEN is_matched AND NOT is_correct THEN 1 ELSE 0 END)::DOUBLE
+                / NULLIF(SUM(CASE WHEN is_matched THEN 1 ELSE 0 END), 0),
+                2
+            ) AS mismatched_of_matched_pct,
             ROUND(
                 100.0 * SUM(CASE WHEN is_matched AND is_correct THEN 1 ELSE 0 END)::DOUBLE
                 / NULLIF(COUNT(*), 0),
                 2
             ) AS correct_of_input_pct,
+            ROUND(
+                100.0 * SUM(CASE WHEN is_matched AND NOT is_correct THEN 1 ELSE 0 END)::DOUBLE
+                / NULLIF(COUNT(*), 0),
+                2
+            ) AS mismatched_of_input_pct,
             ROUND({total_runtime_seconds}, 2) AS total_runtime_s
         FROM scored
         """

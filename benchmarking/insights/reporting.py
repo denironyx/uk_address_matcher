@@ -60,7 +60,6 @@ def _print_by_match_reason(
 
 def print_benchmark_summary(
     results: list[BenchmarkRunResult],
-    output_options: BenchmarkOutputOptions | None = None,
 ) -> None:
     print("\nBenchmark summary")
     for result in results:
@@ -76,6 +75,48 @@ def print_benchmark_summary(
             f"data_load={result.timings['data_load']:.2f}s, "
             f"match_pipeline={result.timings['match_pipeline']:.2f}s"
         )
+
+    # Show rolled-up totals only when benchmarking multiple datasets.
+    if len(results) <= 1:
+        return
+
+    total_input_rows = sum(result.total_rows for result in results)
+    matched_rows = sum(result.matched_rows for result in results)
+    correct_matches = sum(result.correct_matches for result in results)
+    total_runtime_s = sum(result.timings.get("total_runtime", 0.0) for result in results)
+
+    matched_pct = 100.0 * matched_rows / total_input_rows if total_input_rows > 0 else 0.0
+    mismatched_matches = matched_rows - correct_matches
+    mismatched_of_matched_pct = (
+        100.0 * mismatched_matches / matched_rows if matched_rows > 0 else 0.0
+    )
+    correct_of_input_pct = (
+        100.0 * correct_matches / total_input_rows if total_input_rows > 0 else 0.0
+    )
+    mismatched_of_input_pct = (
+        100.0 * mismatched_matches / total_input_rows if total_input_rows > 0 else 0.0
+    )
+    precision = correct_matches / matched_rows if matched_rows > 0 else 0.0
+    recall = correct_matches / total_input_rows if total_input_rows > 0 else 0.0
+
+    print("\nOverall totals across selected datasets:")
+    overall_totals = results[0].con.sql(
+        f"""
+        SELECT
+            {total_input_rows}::BIGINT AS total_input_rows,
+            {matched_rows}::BIGINT AS matched_rows,
+            ROUND({matched_pct}, 2) AS matched_pct,
+            {correct_matches}::BIGINT AS correct_matches,
+            {mismatched_matches}::BIGINT AS mismatched_matches,
+            ROUND({mismatched_of_matched_pct}, 2) AS mismatched_of_matched_pct,
+            ROUND({correct_of_input_pct}, 2) AS correct_of_input_pct,
+            ROUND({mismatched_of_input_pct}, 2) AS mismatched_of_input_pct,
+            ROUND({precision}, 6) AS precision,
+            ROUND({recall}, 6) AS recall,
+            ROUND({total_runtime_s}, 2) AS total_runtime_s
+        """
+    )
+    _show_via_sql(results[0], overall_totals)
 
 
 def print_diagnostics(

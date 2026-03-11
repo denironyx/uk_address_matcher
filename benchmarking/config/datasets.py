@@ -19,9 +19,14 @@ def maybe_enable_s3_for_path(
     load_duckdb_httpfs(con)
 
 
-def _strip_decimal_suffix(expr: str) -> str:
+def _normalise_uprn_expr(expr: str) -> str:
     pattern = r"\\.0+$"
-    return f"NULLIF(REGEXP_REPLACE(TRIM({expr}), '{pattern}', ''), '')"
+    return f"""
+        COALESCE(
+            NULLIF(CAST(TRY_CAST({expr} AS BIGINT) AS VARCHAR), ''),
+            NULLIF(REGEXP_REPLACE(TRIM(CAST({expr} AS VARCHAR)), '{pattern}', ''), '')
+        )
+    """
 
 
 _DATASETS: dict[str, dict[str, str]] = {
@@ -116,21 +121,29 @@ def _load_lambeth_council_tax(
     s3_key: str,
 ) -> duckdb.DuckDBPyRelation:
     reader = _file_reader_for(s3_key)
-    uprn_expr = _strip_decimal_suffix('CAST("UPRN" AS VARCHAR)')
+    uprn_expr = _normalise_uprn_expr('"UPRN"')
     address_expr = (
         'regexp_replace(trim(concat_ws(\' \', "ADDR1", "ADDR2", '
         "\"ADDR3\", \"ADDR4\")), '\\s+', ' ')"
     )
     relation = con.sql(
         f"""
+        WITH source_rows AS (
+            SELECT
+                {uprn_expr} AS unique_id,
+                {uprn_expr} AS ukam_label,
+                {address_expr} AS address_concat,
+                "POSTCODE" AS postcode
+            FROM {reader}('{base_path}{s3_key}')
+            WHERE "UPRN" IS NOT NULL
+        )
         SELECT
-            {uprn_expr} AS unique_id,
-            {uprn_expr} AS ukam_label,
-            {address_expr} AS address_concat,
-            "POSTCODE" AS postcode
-        FROM {reader}('{base_path}{s3_key}')
-        WHERE "UPRN" IS NOT NULL
-          AND CAST("UPRN" AS VARCHAR) != '10090204019'
+            unique_id,
+            ukam_label,
+            address_concat,
+            postcode
+        FROM source_rows
+        WHERE ukam_label != '10090204019'
         """
     )
     return _clean_output(con, relation)
@@ -148,7 +161,7 @@ def _load_lambeth_electoral_register(
     address_3 = _quote_identifier("Address 3")
     address_4 = _quote_identifier("Address 4")
     postcode = _quote_identifier("Postcode")
-    uprn_expr = _strip_decimal_suffix(f"CAST({uprn_column} AS VARCHAR)")
+    uprn_expr = _normalise_uprn_expr(uprn_column)
     address_expr = (
         "regexp_replace(trim(concat_ws(' ', "
         f"{address_1}, {address_2}, {address_3}, {address_4}"
