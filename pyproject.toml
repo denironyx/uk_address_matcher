@@ -43,7 +43,12 @@ requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.package-data]
-"uk_address_matcher" = ["data/*.parquet", "data/*.csv", "data/*.json"]
+"uk_address_matcher" = [
+    "data/*.parquet",
+    "data/*.csv",
+    "data/*.json",
+    "analysis/chart_defs/*.json",
+]
 
 [tool.setuptools.packages.find]
 include = ["uk_address_matcher*"]
