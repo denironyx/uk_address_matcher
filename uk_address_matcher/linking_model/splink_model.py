@@ -7,42 +7,6 @@ from splink import DuckDBAPI, Linker, SettingsCreator
 from uk_address_matcher.sql_pipeline.helpers import _uid, package_resource_read_sql
 
 
-def _materialise_relation(
-    con: DuckDBPyConnection,
-    relation: DuckDBPyRelation,
-    table_name: str,
-) -> DuckDBPyRelation:
-    con.execute(f"DROP VIEW IF EXISTS {table_name}")
-    con.execute(f"DROP TABLE IF EXISTS {table_name}")
-    relation.create(table_name)
-    return con.table(table_name)
-
-
-def _ensure_column(
-    rel: DuckDBPyRelation,
-    column_name: str,
-    column_type: str,
-    *,
-    con: DuckDBPyConnection,
-    table_name_prefix: str,
-) -> DuckDBPyRelation:
-    source_query = rel.sql_query()
-
-    if column_name in rel.columns:
-        ensured_relation = con.sql(f"""
-            SELECT *
-            FROM ({source_query}) AS src
-        """)
-    else:
-        ensured_relation = con.sql(f"""
-            SELECT *, CAST(NULL AS {column_type}) AS {column_name}
-            FROM ({source_query}) AS src
-        """)
-
-    table_name = f"{table_name_prefix}_{_uid()}"
-    return _materialise_relation(con, ensured_relation, table_name)
-
-
 def _get_model_settings_dict():
     with (
         pkg_resources.files("uk_address_matcher.data")
@@ -180,21 +144,6 @@ def _get_linker(
             df_addresses_to_search_within = df_addresses_to_search_within.select(
                 "*, NULL::VARCHAR AS ukam_label"
             )
-
-    df_addresses_to_match = _ensure_column(
-        df_addresses_to_match,
-        "address_without_numbers",
-        "VARCHAR",
-        con=con,
-        table_name_prefix="__ukam__tmp_splink_messy_input",
-    )
-    df_addresses_to_search_within = _ensure_column(
-        df_addresses_to_search_within,
-        "address_without_numbers",
-        "VARCHAR",
-        con=con,
-        table_name_prefix="__ukam__tmp_splink_canonical_input",
-    )
 
     settings_as_dict["retain_intermediate_calculation_columns"] = (
         retain_intermediate_calculation_columns
