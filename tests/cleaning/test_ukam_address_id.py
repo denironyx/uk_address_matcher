@@ -96,7 +96,7 @@ def test_chunking_with_duplicates_across_chunk_boundaries(duck_con):
     assert all(isinstance(ukam_address_id, int) for ukam_address_id in ukam_ids)
 
 
-def test_existing_ukam_address_id_is_preserved_as_integer(duck_con):
+def test_existing_ukam_address_id_is_replaced_with_fresh_integer(duck_con):
     duck_con.execute(
         """
         CREATE OR REPLACE TABLE test_data AS
@@ -117,4 +117,4 @@ def test_existing_ukam_address_id_is_preserved_as_integer(duck_con):
         "SELECT unique_id, ukam_address_id FROM cleaned ORDER BY unique_id"
     ).fetchall()
 
-    assert result == [("1", 101), ("2", 102)]
+    assert result == [("1", 1), ("2", 2)]

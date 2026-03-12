@@ -55,20 +55,15 @@ def _materialise_relation_with_ukam_address_id(
 ) -> DuckDBPyRelation:
     source_query = relation.sql_query()
 
-    if "ukam_address_id" in relation.columns:
-        relation_with_ids = con.sql(f"""
-            SELECT
-                * EXCLUDE (ukam_address_id),
-                CAST(ukam_address_id AS INTEGER) AS ukam_address_id
-            FROM ({source_query}) AS src
-        """)
-    else:
-        relation_with_ids = con.sql(f"""
-            SELECT
-                *,
-                CAST(ROW_NUMBER() OVER () + {id_offset} AS INTEGER) AS ukam_address_id
-            FROM ({source_query}) AS src
-        """)
+    exclude_existing_id = (
+        "* EXCLUDE (ukam_address_id)," if "ukam_address_id" in relation.columns else "*,"
+    )
+    relation_with_ids = con.sql(f"""
+        SELECT
+            {exclude_existing_id}
+            CAST(ROW_NUMBER() OVER () + {id_offset} AS INTEGER) AS ukam_address_id
+        FROM ({source_query}) AS src
+    """)
 
     return _materialise_relation(con, relation_with_ids, table_name)
 

@@ -1,8 +1,6 @@
 import duckdb
 
-from uk_address_matcher.cleaning.chunking_strategies import (
-    clean_data_pre_term_frequencies,
-)
+from uk_address_matcher.cleaning.pipelines import _clean_data_pre_term_frequencies
 
 
 def test_postcode_extraction_no_column_provided():
@@ -20,12 +18,11 @@ def test_postcode_extraction_no_column_provided():
 
     for input_address, expected_postcode, should_remove in test_cases:
         input_rel = connection.sql(
-            f"SELECT '1' as unique_id, '{input_address}' as address_concat"
+            f"SELECT '1' as unique_id, '{input_address}' as address_concat, "
+            "1 AS ukam_address_id"
         )
 
-        result_rel = clean_data_pre_term_frequencies(
-            input_rel, con=connection, num_of_chunks=1
-        )
+        result_rel = _clean_data_pre_term_frequencies(input_rel, connection)
         result = result_rel.select(
             "unique_id, original_address_concat, clean_full_address, postcode"
         ).fetchall()[0]
@@ -69,12 +66,10 @@ def test_postcode_extraction_with_column_provided():
     for input_address, provided_postcode, expected_postcode in test_cases:
         input_rel = connection.sql(
             f"SELECT '1' as unique_id, '{input_address}' as address_concat, "
-            f"'{provided_postcode}' as postcode"
+            f"'{provided_postcode}' as postcode, 1 AS ukam_address_id"
         )
 
-        result_rel = clean_data_pre_term_frequencies(
-            input_rel, con=connection, num_of_chunks=1
-        )
+        result_rel = _clean_data_pre_term_frequencies(input_rel, connection)
         result = result_rel.select(
             "unique_id, original_address_concat, clean_full_address, postcode"
         ).fetchall()[0]
@@ -123,17 +118,15 @@ def test_postcode_extraction_empty_column():
         if provided_postcode is None:
             input_rel = connection.sql(
                 f"SELECT '1' as unique_id, '{input_address}' as address_concat, "
-                f"NULL as postcode"
+                "NULL as postcode, 1 AS ukam_address_id"
             )
         else:
             input_rel = connection.sql(
                 f"SELECT '1' as unique_id, '{input_address}' as address_concat, "
-                f"'{provided_postcode}' as postcode"
+                f"'{provided_postcode}' as postcode, 1 AS ukam_address_id"
             )
 
-        result_rel = clean_data_pre_term_frequencies(
-            input_rel, con=connection, num_of_chunks=1
-        )
+        result_rel = _clean_data_pre_term_frequencies(input_rel, connection)
         result = result_rel.select(
             "unique_id, original_address_concat, clean_full_address, postcode"
         ).fetchall()[0]
@@ -173,12 +166,11 @@ def test_postcode_case_normalisation():
     # Test lowercase in address (no postcode column)
     for input_address, expected_postcode in test_cases:
         input_rel = connection.sql(
-            f"SELECT '1' as unique_id, '{input_address}' as address_concat"
+            f"SELECT '1' as unique_id, '{input_address}' as address_concat, "
+            "1 AS ukam_address_id"
         )
 
-        result_rel = clean_data_pre_term_frequencies(
-            input_rel, con=connection, num_of_chunks=1
-        )
+        result_rel = _clean_data_pre_term_frequencies(input_rel, connection)
         result = result_rel.select("postcode").fetchall()[0]
 
         extracted_postcode = result[0]
@@ -191,12 +183,10 @@ def test_postcode_case_normalisation():
     # Test lowercase in postcode column
     input_rel = connection.sql(
         "SELECT '1' as unique_id, '10 HIGH STREET' as address_concat, "
-        "'sw1a 1aa' as postcode"
+        "'sw1a 1aa' as postcode, 1 AS ukam_address_id"
     )
 
-    result_rel = clean_data_pre_term_frequencies(
-        input_rel, con=connection, num_of_chunks=1
-    )
+    result_rel = _clean_data_pre_term_frequencies(input_rel, connection)
     result = result_rel.select("postcode").fetchall()[0]
 
     extracted_postcode = result[0]
@@ -222,12 +212,10 @@ def test_postcode_spacing_normalisation():
     for input_postcode, expected_postcode in test_cases:
         input_rel = connection.sql(
             f"SELECT '1' as unique_id, '10 HIGH STREET' as address_concat, "
-            f"'{input_postcode}' as postcode"
+            f"'{input_postcode}' as postcode, 1 AS ukam_address_id"
         )
 
-        result_rel = clean_data_pre_term_frequencies(
-            input_rel, con=connection, num_of_chunks=1
-        )
+        result_rel = _clean_data_pre_term_frequencies(input_rel, connection)
         result = result_rel.select("postcode").fetchall()[0]
 
         extracted_postcode = result[0]
@@ -247,14 +235,13 @@ def test_postcode_extraction_preserves_other_columns():
         SELECT
             '1' as unique_id,
             '10 HIGH STREET LONDON SW1A 1AA' as address_concat,
+            1 AS ukam_address_id,
             'some_value' as other_column,
             123 as numeric_column
         """
     )
 
-    result_rel = clean_data_pre_term_frequencies(
-        input_rel, con=connection, num_of_chunks=1
-    )
+    result_rel = _clean_data_pre_term_frequencies(input_rel, connection)
 
     # Check that other columns are preserved
     assert "other_column" in result_rel.columns
@@ -282,13 +269,12 @@ def test_postcode_column_case_insensitive():
             SELECT
                 '1' as unique_id,
                 '10 HIGH STREET' as address_concat,
+                1 AS ukam_address_id,
                 '{postcode_value}' as {column_name}
             """
         )
 
-        result_rel = clean_data_pre_term_frequencies(
-            input_rel, con=connection, num_of_chunks=1
-        )
+        result_rel = _clean_data_pre_term_frequencies(input_rel, connection)
 
         # Check that the column was renamed to lowercase 'postcode'
         assert "postcode" in result_rel.columns, (
