@@ -110,14 +110,16 @@ result = matcher.match()
 
 ## Optimising match stages
 
+`uk_address_matcher` uses an 'ensemble' methodology, whereby it sequentially applies a number of  matching strategies called 'stages'.
+
+Stages run in order. Once a record is matched by one stage, later stages do not revisit it.  The results contain a column indicating which stage produced the match.
+
+As a result they are intended to be ordered from highest precision to lowest precision.  For example, the first stage is usually the `ExactMatchStage`, since it makes sense to find all exact matches (full address string and postcode) prior to applying any more sophisticated/fuzzy matching strategies.
 
 
 ### Matching stages
 
-Stages run in order. Once a record is matched by one stage, later stages do not
-revisit it.
-
-That makes stage order important:
+The available stages are as follows:
 
 | Stage | Type | What it is good at | Accuracy implication |
 |---|---|---|---|
@@ -126,17 +128,15 @@ That makes stage order important:
 | `UniqueTrigramStage` | Deterministic | A distinctive phrase identifies one canonical address within the postcode | High precision, removes clear fuzzy cases before Splink |
 | `SplinkStage` | Scored | Typos, abbreviations, partial matches, and other fuzzy cases | Precision and recall depend on threshold choice |
 
-`SplinkStage` should usually come last.
 
-It is the only scored stage. The earlier stages are intended to resolve
-obvious or near-obvious cases without any threshold tuning. That leaves Splink
-to work on the harder remainder, which makes the final thresholds easier to
-reason about and usually reduces false positives.
+##### Summary recommendation
 
-In a quick run on the bundled `fictional_london` example data, the default
-pipeline `ExactMatchStage()` -> `SplinkStage()` produced 720 Splink matches.
-Adding `UniqueTrigramStage()` before Splink reduced that to 121 Splink matches,
-because many cases were resolved deterministically first.
+You almost always want to use the `ExactMatchStage`.  The `PeeledAddressStage` and `UniqueTrigramStage` produce high, but not perfect precision (i.e. there's a chance of a small number of false positives).
+
+You almost always want to use the `SplinkStage` last, to attempt to find any matches missed by the previous stages.  In some cases, it may produce higher accuracy than the `PeeledAddressStage` and `UniqueTrigramStage`, which is why you do not always want to use these stages.
+
+
+
 
 ```python
 from uk_address_matcher import (
@@ -156,8 +156,8 @@ matcher = AddressMatcher(
         PeeledAddressStage(),
         UniqueTrigramStage(),
         SplinkStage(
-            final_match_weight_threshold=12.0,
-            final_distinguishability_threshold=5.0,
+            final_match_weight_threshold=2.0,
+            final_distinguishability_threshold=1.0,
         ),
     ],
 )
@@ -165,85 +165,8 @@ matcher = AddressMatcher(
 
 ## Tuning the Splink stage
 
-For most users, the two most important Splink parameters are:
+For guidance on choosing Splink thresholds, see [here](choosing_a_matching_threshold.md).
 
-- `final_match_weight_threshold`
-- `final_distinguishability_threshold`
-
-### Match weight
-
-`match_weight` is Splink's score for the selected candidate.
-
-Higher values mean stronger evidence that the messy address and canonical
-address are the same place. Lower values are weaker matches. Negative values
-are often a sign that the candidate was retained only because the stage is in a
-very permissive mode.
-
-Raising `final_match_weight_threshold` filters out weak matches.
-
-### Distinguishability
-
-`distinguishability` is the gap between the best candidate and the next best
-candidate for the same messy address.
-
-Higher values mean the winner is clearly ahead. Low values mean the top two
-candidates look similar, which is often where false positives come from.
-
-Raising `final_distinguishability_threshold` filters out ambiguous matches.
-
-If `distinguishability` is `NULL`, there was usually only one candidate left
-after blocking, so there was no runner-up to compare against.
-
-## A small example
-
-Suppose one postcode block contains these canonical addresses:
-
-- `Flat A 10 Demo Road Townton`
-- `Flat B 10 Demo Road Townton`
-- `Flat C 10 Demo Road Townton`
-- `10 Demo Road Townton`
-
-Now match these messy addresses with a permissive Splink stage:
-
-- `Flat 10 Demo Road Townton`
-- `Example Court 10 Demo Road Townton`
-
-In a local test run, the top Splink candidates were:
-
-| Messy address | Top candidate | Match weight | Distinguishability |
-|---|---|---:|---:|
-| `Flat 10 Demo Road Townton` | `10 Demo Road Townton` | `-4.71` | `5.27` |
-| `Example Court 10 Demo Road Townton` | `10 Demo Road Townton` | `4.79` | `10.2` |
-
-That leads to different outcomes depending on the thresholds:
-
-| Splink settings | Result |
-|---|---|
-| `final_match_weight_threshold=-20`, `final_distinguishability_threshold=0.0` | Keep both results |
-| `final_match_weight_threshold=0`, `final_distinguishability_threshold=0.0` | Drop `Flat 10 Demo Road Townton` because the score is weak |
-| `final_match_weight_threshold=-20`, `final_distinguishability_threshold=6.0` | Drop `Flat 10 Demo Road Townton` because the winner is not clearly ahead |
-| `final_match_weight_threshold=-20`, `final_distinguishability_threshold=11.0` | Drop both results |
-
-The exact numbers will vary by dataset, but the pattern is the same:
-
-- Raise `final_match_weight_threshold` to remove generally weak matches.
-- Raise `final_distinguishability_threshold` to remove close-call matches.
-
-## Practical workflow
-
-1. Start with deterministic stages before Splink: `ExactMatchStage()`, then
-   any useful deterministic fuzzy stages such as `PeeledAddressStage()` or
-   `UniqueTrigramStage()`.
-2. Start Splink in a permissive mode, for example
-   `final_match_weight_threshold=-20` and
-   `final_distinguishability_threshold=0.0`, so you can see the full range of
-   candidate quality.
-3. If you have labelled data, use `MatchResult.accuracy_analysis()` to choose a
-   threshold with the precision and recall you need.
-4. If false positives look ambiguous, raise
-   `final_distinguishability_threshold` first.
-5. If false positives are weak across the board, raise
-   `final_match_weight_threshold`.
 
 ## Stage API docs
 

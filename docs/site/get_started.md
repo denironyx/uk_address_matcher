@@ -155,14 +155,11 @@ If you're linking to a large canonical dataset (for example, national-scale NGD)
     )
     ```
 
-    Use `AddressMatcher.available_stages()` to discover registered stage
-    classes. See the [API reference](api_reference.md) for full parameter
-    tables.
+    Use `AddressMatcher.available_stages()` to discover registered stage classes. See [Choosing a matching threshold](choosing_a_matching_threshold.md) and [Optimising accuracy](optimising_accuracy.md) for further accuracy advice. The [API reference](api_reference.md) covers the main API docs.
 
 ## Using labelled data
 
 If you know the correct match for each address, add a `ukam_label` column to
 your messy data. It propagates through to results, enabling accuracy analysis
 with `MatchResult.match_metrics()`.
-
 

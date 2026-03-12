@@ -18,7 +18,26 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, repr=False)
 class UniqueTrigramStage(MatchingStage):
-    """Match unresolved records using unique trigram evidence."""
+    """Deterministic matching using n-grams that identify one canonical row.
+
+    The stage looks for n-grams, usually trigrams, that appear in exactly one
+    canonical address within the same postcode and with the same numeric and
+    unit structure. If all supporting evidence points to one canonical row, the
+    stage emits a match without using a score.
+
+    This is a good stage to place before ``SplinkStage`` because it removes
+    clear-cut fuzzy cases from the scored stage.
+
+    Args:
+        ngram_size: Size of the token n-gram to index. The default of ``3``
+            works well for most address data.
+        min_unique_hits: Minimum number of unique n-grams that must support the
+            same canonical address before a match is accepted.
+        include_conflicts: When ``True``, keep an intermediate conflicts table
+            for debugging ambiguous n-gram matches.
+        include_trigram_text: When ``True``, retain supporting trigram text in
+            the intermediate output for inspection.
+    """
 
     ngram_size: int = 3
     min_unique_hits: int = 1

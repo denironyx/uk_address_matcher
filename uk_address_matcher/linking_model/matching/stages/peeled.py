@@ -22,7 +22,23 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, repr=False)
 class PeeledAddressStage(MatchingStage):
-    """Match records after peeling common UK locality suffix tokens."""
+    """Deterministic matching after peeling common UK locality suffixes.
+
+    This stage removes trailing locality words such as borough, county, or city
+    names, then performs an exact match on the peeled address plus postcode.
+    It is useful when one side includes extra suffixes such as ``"Hackney
+    London"`` and the other does not, but it still requires the postcodes to
+    be identical.
+
+    Use this before ``SplinkStage`` so these high-precision cases are resolved
+    without needing probabilistic thresholds.
+
+    Example:
+        ``"100 Test Street Hackney London"`` can match
+        ``"100 Test Street"`` when both share the same postcode. Peeling only
+        relaxes the address text comparison; it does not allow cross-postcode
+        matches.
+    """
 
     def find_matches(
         self,

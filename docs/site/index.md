@@ -25,7 +25,7 @@ The end-to-end process of matching 100,000 addresses to Ordnance Survey data, in
 ## Installation
 
 ```bash
-pip install --pre uk_address_matcher
+pip install uk_address_matcher
 ```
 
 ## What does it do?
@@ -93,8 +93,12 @@ This project is free and open source and is released under the MIT licence.
 
 ## Next steps
 
-- [Get started](get_started.md)
+- [Overview](index.md)
+- [Getting started](get_started.md)
+- [Choosing a matching threshold](choosing_a_matching_threshold.md)
+- [Optimising accuracy](optimising_accuracy.md)
 - [Working with Ordnance Survey data](ordnance_survey.md)
+- [Performance and benchmarking](performance.md)
 - [API reference](api_reference.md)
 
 [^1]: Timings on a MacBook Pro M4 Max.
