@@ -136,9 +136,7 @@ class SplinkStage(MatchingStage):
 
         # Step 2: Predict
         df_predict = linker.inference.predict(
-            threshold_match_weight=self.predict_threshold_match_weight,
-            # num_chunks_right=1,
-            # num_chunks_left=1,
+            threshold_match_weight=self.predict_threshold_match_weight
         )
         df_predict_ddb = df_predict.as_duckdbpyrelation()
 
