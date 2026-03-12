@@ -6,6 +6,11 @@ if TYPE_CHECKING:
     import duckdb
 
 
+_MISMATCHED_MATCHES_DOUBLE_SQL = (
+    "SUM(CASE WHEN is_matched AND NOT is_correct THEN 1 ELSE 0 END)::DOUBLE"  # noqa: E501
+)
+
+
 def _scored_matches_sql(relation_name: str) -> str:
     return f"""
         SELECT
@@ -141,7 +146,7 @@ def summarise_run_totals(
             SUM(CASE WHEN is_matched AND NOT is_correct THEN 1 ELSE 0 END)
                 AS mismatched_matches,
             ROUND(
-                100.0 * SUM(CASE WHEN is_matched AND NOT is_correct THEN 1 ELSE 0 END)::DOUBLE
+                100.0 * {_MISMATCHED_MATCHES_DOUBLE_SQL}
                 / NULLIF(SUM(CASE WHEN is_matched THEN 1 ELSE 0 END), 0),
                 2
             ) AS mismatched_of_matched_pct,
@@ -151,7 +156,7 @@ def summarise_run_totals(
                 2
             ) AS correct_of_input_pct,
             ROUND(
-                100.0 * SUM(CASE WHEN is_matched AND NOT is_correct THEN 1 ELSE 0 END)::DOUBLE
+                100.0 * {_MISMATCHED_MATCHES_DOUBLE_SQL}
                 / NULLIF(COUNT(*), 0),
                 2
             ) AS mismatched_of_input_pct,

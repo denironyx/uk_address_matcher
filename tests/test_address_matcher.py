@@ -328,12 +328,17 @@ def test_stage_repr_is_concise_and_informative():
 
     assert exact_repr.startswith("ExactMatchStage()")
     assert "\n  Purpose:" in exact_repr
-    assert "Deterministic exact matching on ``clean_full_address`` and ``postcode``." in exact_repr
+    assert (
+        "Deterministic exact matching on ``clean_full_address`` and ``postcode``."
+        in exact_repr
+    )  # noqa: E501
     assert "\n  Import:  from uk_address_matcher import ExactMatchStage" in exact_repr
 
     assert peeled_repr.startswith("PeeledAddressStage()")
     assert "\n  Purpose:" in peeled_repr
-    assert "Deterministic matching after peeling common UK locality suffixes." in peeled_repr
+    assert (
+        "Deterministic matching after peeling common UK locality suffixes." in peeled_repr
+    )  # noqa: E501
     assert "\n  Import:  from uk_address_matcher import PeeledAddressStage" in peeled_repr
 
     assert splink_repr.startswith("SplinkStage(final_match_weight_threshold=7.0)")
@@ -343,7 +348,10 @@ def test_stage_repr_is_concise_and_informative():
 
     assert trigram_repr.startswith("UniqueTrigramStage(min_unique_hits=2)")
     assert "\n  Purpose:" in trigram_repr
-    assert "Deterministic matching using n-grams that identify one canonical row." in trigram_repr
+    assert (
+        "Deterministic matching using n-grams that identify one canonical row."
+        in trigram_repr
+    )  # noqa: E501
     assert (
         "\n  Import:  from uk_address_matcher import UniqueTrigramStage" in trigram_repr
     )
