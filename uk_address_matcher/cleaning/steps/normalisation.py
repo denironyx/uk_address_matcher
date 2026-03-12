@@ -20,15 +20,15 @@ from uk_address_matcher.sql_pipeline.steps import CTEStep, pipeline_stage
 
 @pipeline_stage(
     name="ensure_ukam_address_id",
-    description=("Assign a unique UUID to each row for safe joining without duplicates"),
+    description=("Preserve or normalise ukam_address_id as an integer for safe joining"),
     tags=["setup"],
 )
 def _add_ukam_address_id():
     return """
     SELECT
-        *,
+        * EXCLUDE (ukam_address_id),
         address_concat AS original_address_concat,
-        uuid() AS ukam_address_id
+        CAST(ukam_address_id AS INTEGER) AS ukam_address_id
     FROM {input}
     """
 
