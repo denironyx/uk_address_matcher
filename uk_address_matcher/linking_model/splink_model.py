@@ -4,7 +4,7 @@ import json
 from duckdb import DuckDBPyConnection, DuckDBPyRelation
 from splink import DuckDBAPI, Linker, SettingsCreator
 
-from uk_address_matcher.sql_pipeline.helpers import _uid, package_resource_read_sql
+from uk_address_matcher.sql_pipeline.helpers import package_resource_read_sql
 
 
 def _get_model_settings_dict():
