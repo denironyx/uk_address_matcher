@@ -107,7 +107,7 @@ def test_existing_ukam_address_id_is_preserved_as_integer(duck_con):
         """
     )
 
-    cleaned = clean_data_pre_term_frequencies(
+    cleaned = clean_data_pre_term_frequencies(  # noqa: F841
         duck_con.table("test_data"),
         con=duck_con,
         num_of_chunks=2,
