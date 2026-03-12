@@ -161,6 +161,26 @@ def _duckdb_table_exists(con: duckdb.DuckDBPyConnection, table_name: str) -> boo
     return result[0] > 0
 
 
+def _drop_table_and_registered_aliases(
+    con: duckdb.DuckDBPyConnection,
+    table_name: str,
+) -> None:
+    object_row = con.execute(
+        "SELECT table_type FROM information_schema.tables WHERE table_name = ?",
+        [table_name],
+    ).fetchone()
+
+    if object_row is None:
+        return
+
+    object_type = object_row[0]
+    if object_type == "VIEW":
+        con.execute(f"DROP VIEW IF EXISTS {table_name}")
+        return
+
+    con.execute(f"DROP TABLE IF EXISTS {table_name}")
+
+
 def _register_input_relation_once(
     relation: duckdb.DuckDBPyRelation,
     *,
@@ -188,9 +208,9 @@ def _register_input_relation_once(
         registration_cache[relation_sql] = str(relation_alias)
         return con.table(str(relation_alias))
 
-    alias = f"__ukam_input_{role}_{_uid()}"
+    alias = f"__ukam__tmp_input_{role}_{_uid()}"
     while _duckdb_table_exists(con, alias):
-        alias = f"__ukam_input_{role}_{_uid()}"
+        alias = f"__ukam__tmp_input_{role}_{_uid()}"
 
     try:
         con.register(alias, relation)

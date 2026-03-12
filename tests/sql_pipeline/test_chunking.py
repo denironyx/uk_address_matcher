@@ -114,6 +114,15 @@ def test_chunking_yields_same_result_as_no_chunking(
         f"chunked={len(chunked_set)}"
     )
 
+    table_names = [name for (name,) in duck_con.execute("SHOW TABLES").fetchall()]
+    leaked_chunk_tables = [
+        name for name in table_names if name.startswith("__ukam_chunk_input_")
+    ]
+    assert not leaked_chunk_tables, (
+        "Chunk input tables should be cleaned by clean_data_pre_term_frequencies: "
+        f"{sorted(leaked_chunk_tables)}"
+    )
+
 
 def test_clean_data_using_precomputed_rel_tok_freq(
     duck_con, fhrs_data, mock_chunk_size_1k

@@ -142,7 +142,7 @@ class SplinkStage(MatchingStage):
         )
         df_predict_ddb = df_predict.as_duckdbpyrelation()
 
-        table_name = f"ukam__splink__predictions__{_uid()}"
+        table_name = f"__ukam__splink__predictions__{_uid()}"
         con.execute(
             "CREATE OR REPLACE TEMP VIEW "
             + table_name

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Literal, Optional
 
 from duckdb import DuckDBPyConnection, DuckDBPyRelation
 
@@ -22,7 +22,10 @@ from uk_address_matcher.cleaning.steps.inverted_index import (
     _build_inverted_index_from_keys,
     _derive_keys_for_strategy,
 )
-from uk_address_matcher.sql_pipeline.helpers import _uid
+from uk_address_matcher.sql_pipeline.helpers import (
+    _drop_table_and_registered_aliases,
+    _uid,
+)
 from uk_address_matcher.sql_pipeline.runner import create_sql_pipeline
 
 if TYPE_CHECKING:
@@ -36,10 +39,18 @@ def _materialise_relation(
     relation: DuckDBPyRelation,
     table_name: str,
 ) -> DuckDBPyRelation:
-    con.execute(f"DROP VIEW IF EXISTS {table_name}")
-    con.execute(f"DROP TABLE IF EXISTS {table_name}")
-    relation.create(table_name)
+    # Ensure any prior table/view/registered alias with this name is removed.
+    _drop_table_and_registered_aliases(con, table_name)
+
+    con.execute(f"CREATE TABLE {table_name} AS SELECT * FROM ({relation.sql_query()})")
     return con.table(table_name)
+
+
+def _drop_tables_with_prefix(con: DuckDBPyConnection, prefix: str) -> None:
+    table_names = [name for (name,) in con.execute("SHOW TABLES").fetchall()]
+    for table_name in table_names:
+        if table_name.startswith(prefix):
+            _drop_table_and_registered_aliases(con, table_name)
 
 
 def _format_elapsed(elapsed_seconds: float) -> str:
@@ -153,10 +164,10 @@ def clean_data_pre_term_frequencies(
             chunk_elapsed_seconds=time.perf_counter() - chunk_started_at,
         )
 
-        con.execute(f"DROP TABLE IF EXISTS {chunk_table}")
+        _drop_table_and_registered_aliases(con, chunk_table)
 
-    con.execute(f"DROP VIEW IF EXISTS {input_name}")
-    con.execute(f"DROP TABLE IF EXISTS {input_name}")
+    _drop_table_and_registered_aliases(con, input_name)
+    _drop_tables_with_prefix(con, f"__ukam_chunk_input_{uid}_")
 
     return con.table(f"__ukam_chunked_addresses_{uid}")
 
@@ -248,7 +259,7 @@ def derive_term_frequencies_table(
             chunk_elapsed_seconds=time.perf_counter() - chunk_started_at,
         )
 
-        con.execute(f"DROP TABLE IF EXISTS {chunk_table}")
+        _drop_table_and_registered_aliases(con, chunk_table)
 
     # Compute token frequencies from clean_full_address tokens
     tf_sql = f"""
@@ -271,8 +282,7 @@ def derive_term_frequencies_table(
 
     # Clean up intermediate table
     con.execute(f"DROP TABLE IF EXISTS {cleaned_table}")
-    con.execute(f"DROP VIEW IF EXISTS {input_name}")
-    con.execute(f"DROP TABLE IF EXISTS {input_name}")
+    _drop_table_and_registered_aliases(con, input_name)
 
     return con.table(result_table)
 
@@ -419,6 +429,7 @@ def prepare_data_for_matching(
     inverted_index: Optional[DuckDBPyRelation] = None,
     derive_distinguishing_wrt_adjacent_records: bool = False,
     *,
+    dataset_role: Literal["messy", "canonical"] | None = None,
     debug_options: Optional[DebugOptions] = None,
 ) -> DuckDBPyRelation:
     """Prepare address data for matching.
@@ -442,6 +453,8 @@ def prepare_data_for_matching(
             `exploding_unique_ids` is set to [unique_id] (single-element array).
         derive_distinguishing_wrt_adjacent_records: Whether to derive distinguishing
             tokens relative to adjacent records.
+        dataset_role: Optional role hint used to make output table names more
+            descriptive in DuckDB catalogs. Use ``"canonical"`` or ``"messy"``.
         debug_options: Optional debug configuration for pipeline execution.
             Note: Debug options are only applied on the first iteration to avoid
             excessive logging output.
@@ -499,7 +512,14 @@ def prepare_data_for_matching(
     # Get the underlying table name for direct access
     cleaned_table_name = cleaned_address_table.alias
 
-    processed_table = f"__ukam_addresses_processed_{uid}"
+    if dataset_role == "canonical":
+        processed_table = f"__ukam__processed_canonical_{uid}"
+    elif dataset_role == "messy":
+        processed_table = f"__ukam__processed_messy_{uid}"
+    elif dataset_role is None:
+        processed_table = f"__ukam__processed_{uid}"
+    else:
+        raise ValueError("dataset_role must be one of: 'messy', 'canonical', or None.")
 
     # Apply term frequencies and trigram blocking to cleaned chunks
     for chunk_index in range(total_chunks):
@@ -545,7 +565,7 @@ def prepare_data_for_matching(
             chunk_elapsed_seconds=time.perf_counter() - chunk_started_at,
         )
 
-        con.execute(f"DROP TABLE IF EXISTS {chunk_table}")
+        _drop_table_and_registered_aliases(con, chunk_table)
 
     # Verify the intermediate table is now empty (all chunks processed)
     remaining_rows = con.sql(f"SELECT COUNT(*) FROM {cleaned_table_name}").fetchone()[0]

@@ -401,3 +401,21 @@ def test_matching_does_not_leak_unnamed_relations(con, canonical_data, messy_dat
         "Expected at most two root_* tables for canonical/messy inputs, "
         f"found {len(root_tables)}: {sorted(root_tables)}"
     )
+
+    processed_tables = [
+        name
+        for name in table_names
+        if re.fullmatch(r"(?:__ukam__|ukam__)processed_(messy|canonical)_[a-z0-9]+", name)
+    ]
+    assert len(processed_tables) == 2, (
+        "Expected one processed table each for messy/canonical inputs, "
+        f"found {len(processed_tables)}: {sorted(processed_tables)}"
+    )
+
+    legacy_processed_tables = [
+        name for name in table_names if name.startswith("__ukam_addresses_processed_")
+    ]
+    assert not legacy_processed_tables, (
+        "Legacy processed table names should no longer be created: "
+        f"{sorted(legacy_processed_tables)}"
+    )

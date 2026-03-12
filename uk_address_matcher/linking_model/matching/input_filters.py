@@ -65,14 +65,14 @@ def _restrict_canonical_to_messy_postcodes(
     messy_subquery = f"""
         SELECT DISTINCT
             {messy_key_expr} AS postcode_key
-        FROM {{messy_addresses}}
+        FROM {{__ukam__tmp_messy_addresses}}
         WHERE {messy_key_expr} IS NOT NULL
     """
 
     sql = f"""
         SELECT
             {canonical_select_fields_str}
-        FROM {{canonical_addresses}} AS canon
+        FROM {{__ukam__tmp_canonical_addresses}} AS canon
         JOIN (
         {messy_subquery}
         ) AS messy
