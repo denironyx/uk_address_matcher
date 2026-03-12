@@ -20,7 +20,20 @@ MessyInputName = Literal["__ukam__tmp_messy_addresses", "unmatched_records"]
 
 @dataclass(frozen=True, repr=False)
 class ExactMatchStage(MatchingStage):
-    """Exact hash-join matching on clean_full_address + postcode."""
+    """Deterministic exact matching on ``clean_full_address`` and ``postcode``.
+
+    This is usually the first stage in a pipeline. It accepts the easy,
+    unambiguous cases before any probabilistic matching is attempted.
+
+    A match is emitted when the cleaned messy address and the cleaned canonical
+    address are identical and the postcode is also identical. A cleaned address
+    match on its own is not enough: differing postcodes will not match.
+
+    Example:
+        ``"10 Demo Road Townton"`` matches
+        ``"10 Demo Road, Townton"`` only when cleaning normalises punctuation
+        and whitespace and both records have the same postcode.
+    """
 
     def find_matches(
         self,

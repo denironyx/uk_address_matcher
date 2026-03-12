@@ -14,18 +14,53 @@ if TYPE_CHECKING:
 
 @dataclass(repr=False)
 class SplinkStage(MatchingStage):
-    """Splink probabilistic matching stage.
+    """Probabilistic matching stage built on Splink.
 
-    Encapsulates the full Splink pipeline:
+    This stage is usually placed last because it is the only stage that emits a
+    score and therefore requires threshold tuning. Earlier deterministic stages
+    should remove the obvious high-precision matches first, leaving Splink to
+    handle the harder residual cases.
 
-    1. ``_get_linker()`` — builds the Splink Linker
-    2. ``linker.inference.predict()`` — generates pairwise predictions
-    3. ``improve_predictions_using_distinguishing_tokens()`` — refines scores
-    4. ``best_matches_with_distinguishability()`` — picks the best candidate
-    5. Threshold filtering to select the top match per messy record
+    The stage returns the standard match columns plus two key diagnostics:
 
-    ``find_matches()`` returns a relation with the standard match columns
-    plus ``match_weight`` and ``distinguishability``.
+    - ``match_weight``: the strength of evidence for the selected canonical
+      candidate. Higher is better.
+    - ``distinguishability``: the gap in ``match_weight`` between the best
+      candidate and the next best candidate for the same messy record. Higher
+      means the winner is clearer. ``NULL`` usually means there was only one
+      candidate left after blocking.
+
+    Setting ``final_match_weight_threshold=-20`` and
+    ``final_distinguishability_threshold=0.0`` is a permissive configuration
+    that keeps almost all top-ranked Splink candidates. Raising either
+    threshold filters out more weak or ambiguous matches, typically improving
+    precision at the cost of recall.
+
+    Args:
+        predict_threshold_match_weight: Initial minimum score passed to
+            ``linker.inference.predict()``. Lower values retain more candidate
+            pairs for later refinement.
+        improve_threshold_match_weight: Minimum score considered when applying
+            the token-based score adjustment step.
+        improve_top_n_matches: Number of top candidate pairs per messy address
+            to retain for the token-based score adjustment step.
+        improve_use_bigrams: Whether the token-based improvement step should
+            use bigrams as well as single tokens.
+        final_match_weight_threshold: Minimum ``match_weight`` required for a
+            Splink match to be emitted in the final results.
+        final_distinguishability_threshold: Minimum distinguishability required
+            for a Splink match to be emitted. Set to ``None`` to disable this
+            filter.
+        include_full_postcode_block: Whether to include a strict full-postcode
+            blocking rule when generating Splink candidate pairs.
+        include_outside_postcode_block: Whether to include broader blocking
+            rules that can generate candidate pairs across postcode boundaries.
+        additional_columns_to_retain: Extra columns to keep in the Splink
+            predictions and downstream inspection output.
+        settings: Optional custom Splink settings object. Leave as ``None`` to
+            use the library defaults.
+        retain_intermediate_calculation_columns: Retain Splink comparison
+            columns needed for debugging and waterfall charts.
     """
 
     # Prediction threshold for initial Splink predict() call

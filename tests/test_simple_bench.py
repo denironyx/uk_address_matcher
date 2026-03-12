@@ -145,8 +145,11 @@ def test_summarise_run_totals() -> None:
     assert totals[1] == 3
     assert totals[2] == pytest.approx(75.0, rel=1e-6)
     assert totals[3] == 2
-    assert totals[4] == pytest.approx(50.0, rel=1e-6)
-    assert float(totals[5]) == pytest.approx(12.35, rel=1e-6)
+    assert totals[4] == 1
+    assert totals[5] == pytest.approx(33.33, rel=1e-6)
+    assert totals[6] == pytest.approx(50.0, rel=1e-6)
+    assert totals[7] == pytest.approx(25.0, rel=1e-6)
+    assert float(totals[8]) == pytest.approx(12.35, rel=1e-6)
 
 
 def test_build_dataset_diagnostics_filters_unmatchable_incorrect_rows() -> None:
