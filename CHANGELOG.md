@@ -15,9 +15,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Placeholder for bug fixes included in the 1.0.1 patch release
-
-
 
 ## [1.0.0] - 2026-03-04
 
