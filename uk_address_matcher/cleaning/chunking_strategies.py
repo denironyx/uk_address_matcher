@@ -46,6 +46,28 @@ def _materialise_relation(
     return con.table(table_name)
 
 
+def _materialise_relation_with_ukam_address_id(
+    con: DuckDBPyConnection,
+    relation: DuckDBPyRelation,
+    table_name: str,
+    *,
+    id_offset: int,
+) -> DuckDBPyRelation:
+    source_query = relation.sql_query()
+
+    exclude_existing_id = (
+        "* EXCLUDE (ukam_address_id)," if "ukam_address_id" in relation.columns else "*,"
+    )
+    relation_with_ids = con.sql(f"""
+        SELECT
+            {exclude_existing_id}
+            CAST(ROW_NUMBER() OVER () + {id_offset} AS INTEGER) AS ukam_address_id
+        FROM ({source_query}) AS src
+    """)
+
+    return _materialise_relation(con, relation_with_ids, table_name)
+
+
 def _drop_tables_with_prefix(con: DuckDBPyConnection, prefix: str) -> None:
     table_names = [name for (name,) in con.execute("SHOW TABLES").fetchall()]
     for table_name in table_names:
@@ -129,6 +151,8 @@ def clean_data_pre_term_frequencies(
 
     chunk_size = _calculate_chunk_size(total_rows, num_of_chunks)
     total_chunks = (total_rows + chunk_size - 1) // chunk_size
+    next_ukam_address_id_offset = 0
+    processed_records = 0
 
     con.execute(f"DROP TABLE IF EXISTS __ukam_chunked_addresses_{uid}")
 
@@ -140,7 +164,13 @@ def clean_data_pre_term_frequencies(
             WHERE (abs(hash(address_concat)) % {total_chunks}) = {chunk_index}
         """)
         chunk_table = f"__ukam_chunk_input_{uid}_{chunk_index}"
-        chunk = _materialise_relation(con, chunk_query, chunk_table)
+        chunk = _materialise_relation_with_ukam_address_id(
+            con,
+            chunk_query,
+            chunk_table,
+            id_offset=next_ukam_address_id_offset,
+        )
+        chunk_row_count = chunk.count("*").fetchone()[0]
 
         # Process the chunk without address ID,
         # applying debug options only on first iteration.
@@ -155,9 +185,12 @@ def clean_data_pre_term_frequencies(
         else:
             processed_chunk.insert_into(f"__ukam_chunked_addresses_{uid}")
 
+        processed_records += chunk_row_count
+        next_ukam_address_id_offset += chunk_row_count
+
         _log_progress(
             total_rows,
-            min((chunk_index + 1) * chunk_size, total_rows),
+            processed_records,
             stage_type="Cleaned and preprocessed: ",
             chunk_index=chunk_index,
             total_chunks=total_chunks,
@@ -221,6 +254,8 @@ def derive_term_frequencies_table(
     total_rows = address_table.count("*").fetchone()[0]
     chunk_size = _calculate_chunk_size(total_rows, num_of_chunks)
     total_chunks = (total_rows + chunk_size - 1) // chunk_size
+    next_ukam_address_id_offset = 0
+    processed_records = 0
 
     cleaned_table = f"__ukam_tf_derive_cleaned_{uid}"
     con.execute(f"DROP TABLE IF EXISTS {cleaned_table}")
@@ -234,7 +269,13 @@ def derive_term_frequencies_table(
             WHERE (abs(hash(address_concat)) % {total_chunks}) = {chunk_index}
         """)
         chunk_table = f"__ukam_tf_chunk_input_{uid}_{chunk_index}"
-        chunk = _materialise_relation(con, chunk_query, chunk_table)
+        chunk = _materialise_relation_with_ukam_address_id(
+            con,
+            chunk_query,
+            chunk_table,
+            id_offset=next_ukam_address_id_offset,
+        )
+        chunk_row_count = chunk.count("*").fetchone()[0]
 
         pipeline = create_sql_pipeline(
             con,
@@ -250,9 +291,12 @@ def derive_term_frequencies_table(
         else:
             processed_chunk.insert_into(cleaned_table)
 
+        processed_records += chunk_row_count
+        next_ukam_address_id_offset += chunk_row_count
+
         _log_progress(
             total_rows,
-            min((chunk_index + 1) * chunk_size, total_rows),
+            processed_records,
             stage_type="Cleaned for TF derivation: ",
             chunk_index=chunk_index,
             total_chunks=total_chunks,

@@ -52,19 +52,33 @@ def test_chunking_yields_same_result_as_no_chunking(
         SELECT
             COUNT(*) as count_records,
             COUNT(DISTINCT ukam_address_id) as count_distinct_ids,
-            COUNT(*) = COUNT(DISTINCT ukam_address_id) as no_duplicates
+            COUNT(*) = COUNT(DISTINCT ukam_address_id) as no_duplicates,
+            MIN(ukam_address_id) as min_ukam_address_id,
+            MAX(ukam_address_id) as max_ukam_address_id
         FROM {relation}
     """
 
     # Get baseline metrics
     baseline_stats = duck_con.sql(query.format(relation="baseline_rel")).fetchone()
 
-    baseline_count, baseline_distinct_ids, baseline_no_dupes = baseline_stats
+    (
+        baseline_count,
+        baseline_distinct_ids,
+        baseline_no_dupes,
+        baseline_min_id,
+        baseline_max_id,
+    ) = baseline_stats
 
     # Get chunked metrics
     chunked_stats = duck_con.sql(query.format(relation="chunked_rel")).fetchone()
 
-    chunked_count, chunked_distinct_ids, chunked_no_dupes = chunked_stats
+    (
+        chunked_count,
+        chunked_distinct_ids,
+        chunked_no_dupes,
+        chunked_min_id,
+        chunked_max_id,
+    ) = chunked_stats
 
     # Basic sanity check on expected record count
     assert chunked_count == baseline_count == 5000
@@ -91,6 +105,9 @@ def test_chunking_yields_same_result_as_no_chunking(
         f"baseline={baseline_distinct_ids}, "
         f"chunked={chunked_distinct_ids}"
     )
+
+    assert (baseline_min_id, baseline_max_id) == (1, baseline_count)
+    assert (chunked_min_id, chunked_max_id) == (1, chunked_count)
 
     # All clean_full_address values are identical
     # (via set intersection to avoid order issues).
