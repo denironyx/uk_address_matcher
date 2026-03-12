@@ -19,16 +19,15 @@ from uk_address_matcher.sql_pipeline.steps import CTEStep, pipeline_stage
 
 
 @pipeline_stage(
-    name="ensure_ukam_address_id",
-    description=("Preserve or normalise ukam_address_id as an integer for safe joining"),
+    name="preserve_original_address_concat",
+    description="Preserve the original address string for downstream outputs",
     tags=["setup"],
 )
-def _add_ukam_address_id():
+def _preserve_original_address_concat() -> str:
     return """
     SELECT
-        * EXCLUDE (ukam_address_id),
+        *,
         address_concat AS original_address_concat,
-        CAST(ukam_address_id AS INTEGER) AS ukam_address_id
     FROM {input}
     """
 

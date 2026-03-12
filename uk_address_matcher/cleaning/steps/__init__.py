@@ -11,11 +11,11 @@ from uk_address_matcher.cleaning.steps.inverted_index import (
     _set_exploding_unique_ids_to_self,
 )
 from uk_address_matcher.cleaning.steps.normalisation import (
-    _add_ukam_address_id,
     _canonicalise_postcode,
     _clean_address_string_first_pass,
     _extract_postcode_from_address,
     _normalise_abbreviations_and_units,
+    _preserve_original_address_concat,
     _remove_duplicate_end_tokens,
     _rename_and_select_columns,
     _strip_country_suffix,
@@ -65,7 +65,7 @@ __all__ = [
     "_remove_duplicate_end_tokens",
     "_rename_and_select_columns",
     "_normalise_abbreviations_and_units",
-    "_add_ukam_address_id",
+    "_preserve_original_address_concat",
     # tokenisation
     "_split_numeric_tokens_to_cols",
     "_tokenise_address_without_numbers",

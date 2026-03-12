@@ -5,7 +5,6 @@ from duckdb import DuckDBPyConnection, DuckDBPyRelation
 from uk_address_matcher.cleaning.steps import (
     _add_numeric_term_frequencies_using_registered_df,
     _add_term_frequencies_to_address_tokens_using_registered_df,
-    _add_ukam_address_id,
     _canonicalise_postcode,
     _clean_address_string_first_pass,
     _clean_address_string_second_pass,
@@ -19,6 +18,7 @@ from uk_address_matcher.cleaning.steps import (
     _parse_out_business_unit,
     _parse_out_flat_position_and_letter,
     _parse_out_numbers,
+    _preserve_original_address_concat,
     _remove_duplicate_end_tokens,
     _rename_and_select_columns,
     _separate_distinguishing_start_tokens_from_with_respect_to_adjacent_records,
@@ -68,7 +68,7 @@ def _ensure_postcode_column(rel: DuckDBPyRelation) -> DuckDBPyRelation:
 
 
 QUEUE_CLEAN_FULL_ADDRESS = [
-    _add_ukam_address_id,
+    _preserve_original_address_concat,
     _extract_postcode_from_address,
     _rename_and_select_columns,
     _trim_whitespace_address_and_postcode,
