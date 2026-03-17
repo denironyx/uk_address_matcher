@@ -8,7 +8,7 @@ def test_duplicate_records_get_unique_ukam_address_id(duck_con):
     # - Two identical addresses but different unique_ids
     #   (should get different ukam_address_id)
     # - Two completely identical rows including unique_id
-    #   (should get SAME ukam_address_id)
+    #   (should still get a distinct row-level ukam_address_id)
     sql = """
     CREATE OR REPLACE TABLE test_data AS
     SELECT * FROM (VALUES
@@ -36,6 +36,10 @@ def test_duplicate_records_get_unique_ukam_address_id(duck_con):
 
     assert len(result) == 3, "Expected 3 records in output"
     assert len(set(result)) == 3
+
+    ukam_ids = [ukam_address_id for _, ukam_address_id in result]
+    assert sorted(ukam_ids) == [1, 2, 3]
+    assert all(isinstance(ukam_address_id, int) for ukam_address_id in ukam_ids)
 
 
 def test_chunking_with_duplicates_across_chunk_boundaries(duck_con):
@@ -87,3 +91,30 @@ def test_chunking_with_duplicates_across_chunk_boundaries(duck_con):
         f"All ukam_address_id values should be unique across chunks. "
         f"Got {len(set(ukam_ids))} unique values for 20 identical records."
     )
+
+    assert sorted(ukam_ids) == list(range(1, 21))
+    assert all(isinstance(ukam_address_id, int) for ukam_address_id in ukam_ids)
+
+
+def test_existing_ukam_address_id_is_replaced_with_fresh_integer(duck_con):
+    duck_con.execute(
+        """
+        CREATE OR REPLACE TABLE test_data AS
+        SELECT * FROM (VALUES
+            ('1', '10 DOWNING STREET', 'SW1A 2AA', 101::BIGINT),
+            ('2', '11 DOWNING STREET', 'SW1A 2AA', 102::BIGINT)
+        ) AS t(unique_id, address_concat, postcode, ukam_address_id)
+        """
+    )
+
+    cleaned = clean_data_pre_term_frequencies(  # noqa: F841
+        duck_con.table("test_data"),
+        con=duck_con,
+        num_of_chunks=2,
+    )
+
+    result = duck_con.sql(
+        "SELECT unique_id, ukam_address_id FROM cleaned ORDER BY unique_id"
+    ).fetchall()
+
+    assert result == [("1", 1), ("2", 2)]

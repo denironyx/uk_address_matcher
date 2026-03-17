@@ -12,7 +12,7 @@ Note that runtimes depend on whether the canonical data covers a local council r
 | 2. Install Python, uv, and `uk_address_matcher` | 5 minutes | 5 minutes |
 | 3. Download and process OS data into a flat file | 5 seconds[^1] | 4 minutes[^2] |
 | 4. Pre-process indexes and features | Not necessary | 4 min 50 sec |
-| 5. Match 100,000 records | 26 seconds | 46 seconds |
+| 5. Match 100,000 records | 18 seconds | 26 seconds |
 
 [^1]: Plus ~15 seconds to download the data.
 [^2]: Plus ~18 minutes to download the data.
