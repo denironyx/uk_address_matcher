@@ -139,14 +139,6 @@ class MatchResult:
     con: DuckDBPyConnection
     _splink_linker: Any | None = None
     _canonical_relation: DuckDBPyRelation | None = None
-    _splink_inspector: _SplinkInspector | None = None
-
-    def __post_init__(self) -> None:
-        if self._splink_linker is not None:
-            self._splink_inspector = _SplinkInspector(
-                con=self.con,
-                linker=self._splink_linker,
-            )
 
     def __repr__(self) -> str:
         class_name = self.__class__.__name__
@@ -193,11 +185,11 @@ class MatchResult:
 
     def _require_splink(self) -> _SplinkInspector:
         """Return the Splink inspector or raise if unavailable."""
-        if self._splink_inspector is None:
+        if self._splink_linker is None:
             raise ValueError(
                 "Splink inspection is unavailable. Run a Splink stage to enable it."
             )
-        return self._splink_inspector
+        return _SplinkInspector(con=self.con, linker=self._splink_linker)
 
     def splink_predictions(
         self,
@@ -323,10 +315,9 @@ class MatchResult:
                 - ``"precision_recall"`` — precision vs recall curve.
                 - ``"table"`` — the raw truth-space data as a list of dicts.
 
-                                ``"roc"`` is intentionally not supported here because this
-                                record-level evaluation does not observe the full
-                                negative-pair universe, making TN-dependent ROC
-                                interpretation unreliable.
+                ``"roc"`` is intentionally not supported here because this
+                record-level evaluation does not observe the full negative-pair
+                universe, making TN-dependent ROC interpretation unreliable.
 
             add_metrics: Extra metrics to include in the ``"threshold_selection"``
                 chart.  Accepted values: ``"specificity"``, ``"npv"``,

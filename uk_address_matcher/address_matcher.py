@@ -12,6 +12,7 @@ from uk_address_matcher.cleaning.chunking_strategies import (
 from uk_address_matcher.linking_model.address_record import AddressRecord
 from uk_address_matcher.linking_model.matching.runner import _run_matching
 from uk_address_matcher.linking_model.matching.stages.base_stage import MatchingStage
+from uk_address_matcher.linking_model.matching.stages.splink import SplinkStage
 from uk_address_matcher.post_linkage.match_result import MatchResult
 from uk_address_matcher.prepare_canonical import load_prepared_canonical_data
 from uk_address_matcher.sql_pipeline.helpers import (
@@ -314,10 +315,10 @@ class AddressMatcher:
             debug_options=self.debug_options,
         )
 
-        splink_stage = self._find_splink_stage()
-        splink_linker = None
-        if splink_stage is not None:
-            splink_linker = splink_stage.linker
+        splink_linker = next(
+            (stage.linker for stage in self.stages if isinstance(stage, SplinkStage)),
+            None,
+        )
 
         self._cleanup_intermediate_tables(result)
 
@@ -348,12 +349,3 @@ class AddressMatcher:
                 continue
 
             _drop_table_and_registered_aliases(self.con, table_name)
-
-    def _find_splink_stage(self):
-        """Return the first SplinkStage instance from the stage list, or None."""
-        from uk_address_matcher.linking_model.matching.stages.splink import SplinkStage
-
-        for stage in self.stages:
-            if isinstance(stage, SplinkStage):
-                return stage
-        return None
