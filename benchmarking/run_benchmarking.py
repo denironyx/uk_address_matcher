@@ -17,17 +17,16 @@ from benchmarking.settings import (
 )
 from uk_address_matcher import (
     ExactMatchStage,
-    NgramJaccardStage,
     PeeledAddressStage,
+    SplinkStage,
 )
 
 # SELECTED_DATASETS: str | list[str] = "all"
 SELECTED_DATASETS: str | list[str] = "hackney"
 STAGES = [
     ExactMatchStage(),
-    NgramJaccardStage(min_similarity=0.9),
     PeeledAddressStage(),
-    # SplinkStage(),
+    SplinkStage(),
 ]
 APPLY_CANONICAL_FILTER = True
 
