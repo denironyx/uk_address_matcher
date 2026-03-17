@@ -17,6 +17,6 @@ def test_example_matching():
         timeout=timeout_seconds,
     )
 
-    assert (
-        result.returncode == 0
-    ), f"Script failed!\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    assert result.returncode == 0, (
+        f"Script failed!\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    )
