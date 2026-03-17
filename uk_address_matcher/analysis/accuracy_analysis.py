@@ -14,11 +14,29 @@ def _load_chart_definition(file_name: str) -> dict[str, Any]:
         return json.load(f)
 
 
+def _visual_chart_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return records used for chart rendering, excluding sentinel thresholds."""
+    filtered: list[dict[str, Any]] = []
+    for row in records:
+        threshold = row.get("truth_threshold")
+        if threshold is None:
+            filtered.append(row)
+            continue
+        threshold_value = float(threshold)
+        if abs(threshold_value) >= 900:
+            continue
+        filtered.append(row)
+    return filtered
+
+
 def build_precision_recall_chart_definition(
     records: list[dict[str, Any]],
+    add_metrics: list[str] | None = None,
 ) -> dict[str, Any]:
+    del add_metrics
+    plot_records = _visual_chart_records(records)
     chart = _load_chart_definition("precision_recall.json")
-    chart["data"]["values"] = records
+    chart["data"]["values"] = plot_records
     return chart
 
 
@@ -26,8 +44,9 @@ def build_threshold_selection_chart_definition(
     records: list[dict[str, Any]],
     add_metrics: list[str],
 ) -> dict[str, Any]:
+    plot_records = _visual_chart_records(records)
     chart = _load_chart_definition("threshold_selection_tool.json")
-    chart["data"]["values"] = records
+    chart["data"]["values"] = plot_records
 
     metrics = ["precision", "recall", *add_metrics]
     chart["transform"][0]["fold"] = metrics
