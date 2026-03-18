@@ -3,15 +3,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from benchmarking.insights.types import BenchmarkOutputOptions
+from uk_address_matcher.post_linkage.match_result.result import MatchResult
 
 if TYPE_CHECKING:
     from benchmarking.runner import BenchmarkRunResult
 
 
 def _show_via_sql(result: BenchmarkRunResult, relation) -> None:
-    result.con.sql(f"SELECT * FROM ({relation.sql_query()}) AS display_result").show(
-        max_width=50000
-    )
+    relation.show(max_width=50000)
 
 
 def _sql_literal(value: str) -> str:
@@ -60,13 +59,13 @@ def _print_by_match_reason(
 
 def print_benchmark_summary(
     results: list[BenchmarkRunResult],
+    *,
+    splink_baseline_weight: float | None = None,
+    splink_comparison_weights: list[float] | None = None,
 ) -> None:
     print("\nBenchmark summary")
     for result in results:
         print(f"\nDataset: {result.dataset_key}")
-        print("Match reason breakdown:")
-        _show_via_sql(result, result.match_reason_breakdown)
-
         print("\nRun totals:")
         _show_via_sql(result, result.run_totals)
 
@@ -76,47 +75,37 @@ def print_benchmark_summary(
             f"match_pipeline={result.timings['match_pipeline']:.2f}s"
         )
 
-    # Show rolled-up totals only when benchmarking multiple datasets.
-    if len(results) <= 1:
-        return
+        if result.accuracy_table is not None:
+            print("\nAccuracy table:")
+            _show_via_sql(result, result.accuracy_table)
 
-    total_input_rows = sum(result.total_rows for result in results)
-    matched_rows = sum(result.matched_rows for result in results)
-    correct_matches = sum(result.correct_matches for result in results)
-    total_runtime_s = sum(result.timings.get("total_runtime", 0.0) for result in results)
+        if result.stage_diagnostics_table is not None:
+            print("\nStage diagnostics:")
+            _show_via_sql(result, result.stage_diagnostics_table)
 
-    matched_pct = 100.0 * matched_rows / total_input_rows if total_input_rows > 0 else 0.0
-    mismatched_matches = matched_rows - correct_matches
-    mismatched_of_matched_pct = (
-        100.0 * mismatched_matches / matched_rows if matched_rows > 0 else 0.0
-    )
-    correct_of_input_pct = (
-        100.0 * correct_matches / total_input_rows if total_input_rows > 0 else 0.0
-    )
-    mismatched_of_input_pct = (
-        100.0 * mismatched_matches / total_input_rows if total_input_rows > 0 else 0.0
-    )
-    precision = correct_matches / matched_rows if matched_rows > 0 else 0.0
-    recall = correct_matches / total_input_rows if total_input_rows > 0 else 0.0
+        if splink_baseline_weight is not None and splink_comparison_weights is not None:
+            table_name = f"simple_bench_matches_{result.dataset_key}"
+            relation = result.con.table(table_name)
+            comparison_result = MatchResult(_relation=relation, con=result.con)
 
-    print("\nOverall totals across selected datasets:")
-    overall_totals = results[0].con.sql(
-        f"""
-        SELECT
-            {total_input_rows}::BIGINT AS total_input_rows,
-            {matched_rows}::BIGINT AS matched_rows,
-            ROUND({matched_pct}, 2) AS matched_pct,
-            {correct_matches}::BIGINT AS correct_matches,
-            {mismatched_matches}::BIGINT AS mismatched_matches,
-            ROUND({mismatched_of_matched_pct}, 2) AS mismatched_of_matched_pct,
-            ROUND({correct_of_input_pct}, 2) AS correct_of_input_pct,
-            ROUND({mismatched_of_input_pct}, 2) AS mismatched_of_input_pct,
-            ROUND({precision}, 6) AS precision,
-            ROUND({recall}, 6) AS recall,
-            ROUND({total_runtime_s}, 2) AS total_runtime_s
-        """
-    )
-    _show_via_sql(results[0], overall_totals)
+            print("\nSplink threshold comparison:")
+            comparison_output = comparison_result._compare_splink_model_results(
+                baseline_match_weight=splink_baseline_weight,
+                splink_comparison_weights=splink_comparison_weights,
+            )
+
+            if comparison_output.total_input_rows is not None:
+                print(
+                    "Splink comparison input rows "
+                    "(constant across thresholds): "
+                    f"{comparison_output.total_input_rows}"
+                )
+
+            print("\nSplink headline performance table")
+            _show_via_sql(result, comparison_output.headline_table)
+
+            print("\nSplink change-vs-baseline table")
+            _show_via_sql(result, comparison_output.delta_table)
 
 
 def print_diagnostics(
@@ -173,6 +162,6 @@ def print_results(
     output_options: BenchmarkOutputOptions | None = None,
 ) -> None:
     output_options = output_options or BenchmarkOutputOptions()
-    print_benchmark_summary(results, output_options=output_options)
+    print_benchmark_summary(results)
     if output_options.enable_diagnostics():
         print_diagnostics(results, output_options=output_options)

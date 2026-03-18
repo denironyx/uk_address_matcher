@@ -10,11 +10,9 @@ from benchmarking.config.datasets import (
     load_dataset,
 )
 from benchmarking.insights.diagnostics import build_dataset_diagnostics
-from benchmarking.insights.metrics import (
-    summarise_by_match_reason,
-    summarise_precision_recall,
-    summarise_run_totals,
-)
+from benchmarking.insights.run_totals import build_run_totals
+from benchmarking.insights.stage_breakdown import build_stage_breakdown
+from benchmarking.insights.summary import fetch_overall_summary
 from benchmarking.insights.types import DatasetDiagnostics
 from benchmarking.utils.io import setup_connection
 from uk_address_matcher import AddressMatcher
@@ -37,6 +35,8 @@ class BenchmarkRunResult:
     timings: dict[str, float]
     con: duckdb.DuckDBPyConnection
     diagnostics: DatasetDiagnostics | None = None
+    accuracy_table: duckdb.DuckDBPyRelation | None = None
+    stage_diagnostics_table: duckdb.DuckDBPyRelation | None = None
 
 
 def resolve_dataset_selection(selection: str | list[str]) -> list[str]:
@@ -70,6 +70,7 @@ def run_single_dataset(
     data_load_start = perf_counter()
     df_messy = load_dataset(con, dataset_key=dataset_key, sample_mode=sample_mode)
     timings["data_load"] = perf_counter() - data_load_start
+    total_input_rows = int(df_messy.aggregate("COUNT(*) AS row_count").fetchone()[0])
 
     pipeline_start = perf_counter()
     matcher = AddressMatcher(
@@ -80,24 +81,26 @@ def run_single_dataset(
         canonical_address_filter=canonical_address_filter,
     )
     match_result = matcher.match()
-    matcher_metrics = match_result.match_metrics(order="descending")
     matches = match_result.matches(all_columns=True)
     table_name = f"simple_bench_matches_{dataset_key}"
     con.sql(f"DROP TABLE IF EXISTS {table_name}")
     matches.to_table(table_name)
     timings["match_pipeline"] = perf_counter() - pipeline_start
 
-    summary = summarise_precision_recall(con, table_name).fetchone()
     timings["total_runtime"] = perf_counter() - total_start
-    by_reason_rel = summarise_by_match_reason(
+    accuracy_rel = match_result._accuracy_table()
+    stage_diagnostics_rel = match_result._stage_diagnostics_table()
+    by_reason_rel = build_stage_breakdown(accuracy_rel)
+    run_totals_rel = build_run_totals(
         con,
-        table_name,
-        matcher_metrics,
+        accuracy_rel,
+        total_input_rows=total_input_rows,
+        total_runtime_seconds=timings["total_runtime"],
     )
-    run_totals_rel = summarise_run_totals(
+    total_rows, matched_rows, correct_matches, precision, recall = fetch_overall_summary(
         con,
-        table_name,
-        timings["total_runtime"],
+        accuracy_rel,
+        total_input_rows=total_input_rows,
     )
 
     diagnostics: DatasetDiagnostics | None = None
@@ -120,13 +123,15 @@ def run_single_dataset(
     return BenchmarkRunResult(
         dataset_key=dataset_key,
         dataset_label=dataset["label"],
-        total_rows=int(summary[0]),
-        matched_rows=int(summary[1]),
-        correct_matches=int(summary[2]),
-        precision=float(summary[3]) if summary[3] is not None else None,
-        recall=float(summary[4]) if summary[4] is not None else None,
+        total_rows=total_rows,
+        matched_rows=matched_rows,
+        correct_matches=correct_matches,
+        precision=precision,
+        recall=recall,
         match_reason_breakdown=by_reason_rel,
         run_totals=run_totals_rel,
+        accuracy_table=accuracy_rel,
+        stage_diagnostics_table=stage_diagnostics_rel,
         timings=timings,
         con=con,
         diagnostics=diagnostics,
