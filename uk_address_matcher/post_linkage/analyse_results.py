@@ -124,14 +124,24 @@ def best_matches_with_distinguishability(
 
     sql = f"""
     WITH
+        distinct_canonical_candidates AS (
+            SELECT
+                *
+            FROM ({df_predict.sql_query()}) AS predict_for_distinguishability
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY unique_id_r, unique_id_l
+                ORDER BY match_weight DESC, ukam_address_id_l
+            ) = 1
+        ),
         distinguishability_calc AS (
             SELECT
                 *,
                 match_weight - LEAD(match_weight) OVER (
-                    PARTITION BY unique_id_r ORDER BY match_weight DESC
+                    PARTITION BY unique_id_r
+                    ORDER BY match_weight DESC, unique_id_l, ukam_address_id_l
                 ) AS distinguishability,
                 COUNT(*) OVER (PARTITION BY unique_id_r) AS match_count
-            FROM ({df_predict.sql_query()}) AS predict_for_distinguishability
+            FROM distinct_canonical_candidates
             {rn_filter}
         ),
         categorized_matches AS (
