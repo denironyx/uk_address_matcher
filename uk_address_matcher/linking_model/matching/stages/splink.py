@@ -91,6 +91,7 @@ class SplinkStage(MatchingStage):
     # Populated after find_matches runs — used by MatchResult for inspection
     linker: Any = field(default=None, init=False, repr=False)
     predictions_table: str | None = field(default=None, init=False, repr=False)
+    best_matches_table: str | None = field(default=None, init=False, repr=False)
 
     def find_matches(
         self,
@@ -161,12 +162,21 @@ class SplinkStage(MatchingStage):
         )
 
         # Step 4: Compute distinguishability and select best match per record
+        # This returns an unmaterialised relation
         df_best = best_matches_with_distinguishability(
             df_predict=df_improved,
             df_addresses_to_match=df_unmatched,
             con=con,
-            best_match_only=True,
+            best_match_only=False,
         )
+
+        df_best_name = f"__ukam__splink__best_matches__{_uid()}"
+        df_best.create(df_best_name)
+        self.best_matches_table = df_best_name
+
+        improved_alias = getattr(df_improved, "alias", None)
+        if improved_alias:
+            con.execute(f"DROP TABLE {improved_alias}")
 
         # Step 5: Apply thresholds and project to standard columns
         splink_label = MatchReason.SPLINK.value
@@ -180,14 +190,18 @@ class SplinkStage(MatchingStage):
 
         return con.sql(f"""
             SELECT
-                ukam_address_id_r AS ukam_address_id,
-                unique_id_l AS resolved_canonical_id,
-                ukam_address_id_l AS canonical_ukam_address_id,
+                best_match.ukam_address_id_r AS ukam_address_id,
+                best_match.unique_id_l AS resolved_canonical_id,
+                best_match.ukam_address_id_l AS canonical_ukam_address_id,
                 '{splink_label}' AS match_reason,
-                match_weight,
-                distinguishability
-            FROM ({df_best.sql_query()})
-            WHERE match_weight >= {self.final_match_weight_threshold}
+                best_match.match_weight,
+                best_match.distinguishability
+            FROM (
+                SELECT *
+                FROM {df_best_name}
+                WHERE candidate_rank = 1
+            ) AS best_match
+            WHERE best_match.match_weight >= {self.final_match_weight_threshold}
             {dist_filter}
-            AND unique_id_l IS NOT NULL
+            AND best_match.unique_id_l IS NOT NULL
         """)
