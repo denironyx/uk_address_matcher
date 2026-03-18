@@ -307,7 +307,7 @@ class AddressMatcher:
         self._resolve_canonical_data()
         self._resolve_messy_data()
 
-        result = _run_matching(
+        result, stage_diagnostics = _run_matching(
             con=self.con,
             df_messy_clean=self._messy_clean,
             df_canonical_clean=self._canonical_clean,
@@ -327,6 +327,7 @@ class AddressMatcher:
             con=self.con,
             _splink_linker=splink_linker,
             _canonical_relation=self._canonical_clean,
+            _stage_diagnostics=stage_diagnostics,
         )
 
     def _cleanup_intermediate_tables(self, result: duckdb.DuckDBPyRelation) -> None:

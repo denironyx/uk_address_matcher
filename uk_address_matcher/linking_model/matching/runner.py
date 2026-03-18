@@ -5,6 +5,11 @@ import time
 from typing import TYPE_CHECKING, Optional
 
 from uk_address_matcher.linking_model.matching.stages.base_stage import MatchingStage
+from uk_address_matcher.linking_model.matching.utils import (
+    format_elapsed,
+    relation_sql,
+    safe_divide,
+)
 from uk_address_matcher.sql_pipeline.helpers import _uid
 from uk_address_matcher.sql_pipeline.match_reasons import MatchReason
 from uk_address_matcher.sql_pipeline.validation import ColumnSpec, validate_tables
@@ -15,17 +20,6 @@ if TYPE_CHECKING:
     from uk_address_matcher.sql_pipeline.runner import DebugOptions
 
 logger = logging.getLogger("uk_address_matcher")
-
-
-def _format_elapsed(elapsed_seconds: float) -> str:
-    total_seconds = int(round(max(0.0, elapsed_seconds)))
-    # We shouldn't need to worry about hours here...
-    minutes, seconds = divmod(total_seconds, 60)
-    return f"{minutes}m {seconds:02d}s"
-
-
-def _relation_sql(relation: duckdb.DuckDBPyRelation) -> str:
-    return f"({relation.sql_query()})"
 
 
 def _duckdb_column_type(
@@ -77,7 +71,7 @@ def _create_results_table(
             NULL::{resolved_canonical_type} AS resolved_canonical_id,
             NULL::{canonical_ukam_type} AS canonical_ukam_address_id,
             NULL::ENUM {enum_values} AS match_reason
-        FROM {_relation_sql(df_messy_clean)} AS messy
+        FROM {relation_sql(df_messy_clean)} AS messy
         """
     )
 
@@ -90,7 +84,7 @@ def _get_unmatched(
     return con.sql(
         f"""
         SELECT messy.*
-        FROM {_relation_sql(df_messy_clean)} AS messy
+        FROM {relation_sql(df_messy_clean)} AS messy
         INNER JOIN \"{results_table}\" AS results
             ON results.ukam_address_id = messy.ukam_address_id
         WHERE results.resolved_canonical_id IS NULL
@@ -131,10 +125,10 @@ def _build_final_output(
             ,
             canonical.original_address_concat AS original_address_concat_canonical,
             canonical.postcode AS postcode_canonical
-        FROM {_relation_sql(df_messy_clean)} AS messy
+        FROM {relation_sql(df_messy_clean)} AS messy
         INNER JOIN \"{results_table}\" AS results
             ON results.ukam_address_id = messy.ukam_address_id
-        LEFT JOIN {_relation_sql(df_canonical_clean)} AS canonical
+        LEFT JOIN {relation_sql(df_canonical_clean)} AS canonical
             ON canonical.ukam_address_id = results.canonical_ukam_address_id
         """
     )
@@ -148,7 +142,7 @@ def _run_matching(
     stages: list[MatchingStage],
     debug_options: Optional[DebugOptions] = None,
     explain: bool = False,
-) -> Optional[duckdb.DuckDBPyRelation]:
+) -> tuple[Optional[duckdb.DuckDBPyRelation], list[dict[str, int | float | str]]]:
     """Run matching stages sequentially and return unified results.
 
     Each stage receives only the still-unmatched messy records. Matches found
@@ -165,6 +159,7 @@ def _run_matching(
     Returns:
         A DuckDB relation containing all messy records with match results
         joined to canonical address details, or ``None`` when ``explain=True``.
+        Also returns stage diagnostics for executed stages.
     """
     validate_tables(
         relations={
@@ -187,6 +182,9 @@ def _run_matching(
         df_canonical_clean=df_canonical_clean,
         results_table=results_table,
     )
+
+    total_input_rows = df_messy_clean.count("*").fetchone()[0]
+    stage_diagnostics: list[dict[str, int | float | str]] = []
 
     for stage in stages:
         stage_name = _stage_name_for_instance(stage)
@@ -224,7 +222,7 @@ def _run_matching(
         logger.debug(
             "Stage '%s' completed in %s.",
             stage_name,
-            _format_elapsed(elapsed_seconds),
+            format_elapsed(elapsed_seconds),
         )
 
         if explain:
@@ -234,6 +232,23 @@ def _run_matching(
             f'SELECT COUNT(*) FROM "{results_table}" WHERE resolved_canonical_id IS NULL'
         ).fetchone()[0]
         matched_this_stage = unmatched_count - remaining
+        stage_diagnostics.append(
+            {
+                "stage": stage_name,
+                "unmatched_before": int(unmatched_count),
+                "matched_this_stage": int(matched_this_stage),
+                "remaining_after": int(remaining),
+                "matched_pct_of_unmatched": safe_divide(
+                    int(matched_this_stage),
+                    int(unmatched_count),
+                ),
+                "matched_pct_of_input": safe_divide(
+                    int(matched_this_stage),
+                    int(total_input_rows),
+                ),
+                "elapsed_seconds": float(elapsed_seconds),
+            }
+        )
         logger.info(
             "Stage '%s' matched %d records (%d remaining).",
             stage_name,
@@ -243,7 +258,7 @@ def _run_matching(
 
     if explain:
         con.execute(f'DROP TABLE IF EXISTS "{results_table}"')
-        return None
+        return None, stage_diagnostics
 
     result = _build_final_output(
         con=con,
@@ -259,7 +274,7 @@ def _run_matching(
 
     con.execute(f'DROP TABLE IF EXISTS "{results_table}"')
 
-    return final_result
+    return final_result, stage_diagnostics
 
 
 def _stage_name_for_instance(stage: MatchingStage) -> str:
