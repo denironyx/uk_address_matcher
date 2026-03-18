@@ -340,3 +340,403 @@ def test_accuracy_analysis_rejects_roc_output_type():
 
     with pytest.raises(ValueError, match="Invalid output_type"):
         result.accuracy_analysis(output_type="roc")
+
+
+def test_accuracy_table_supports_splink_threshold_override():
+    con = duckdb.connect()
+    con.register(
+        "m",
+        pa.Table.from_pylist(
+            [
+                {
+                    "unique_id": "a",
+                    "resolved_canonical_id": "1",
+                    "ukam_label": "1",
+                    "match_weight": None,
+                    "match_reason": "exact: full match",
+                },
+                {
+                    "unique_id": "b",
+                    "resolved_canonical_id": "2",
+                    "ukam_label": "2",
+                    "match_weight": 12.0,
+                    "match_reason": "splink: probabilistic match",
+                },
+                {
+                    "unique_id": "c",
+                    "resolved_canonical_id": "9",
+                    "ukam_label": "3",
+                    "match_weight": 8.0,
+                    "match_reason": "splink: probabilistic match",
+                },
+            ]
+        ),
+    )
+    con.register(
+        "c",
+        pa.Table.from_pylist(
+            [{"unique_id": "1"}, {"unique_id": "2"}, {"unique_id": "3"}],
+        ),
+    )
+
+    result = MatchResult(
+        _relation=con.table("m"),
+        con=con,
+        _canonical_relation=con.table("c"),
+    )
+
+    default_df = result._accuracy_table().df()
+    override_df = result._accuracy_table(splink_match_weight_threshold=10.0).df()
+
+    default_overall = default_df.loc[default_df["stage"] == "overall"].iloc[0]
+    override_overall = override_df.loc[override_df["stage"] == "overall"].iloc[0]
+
+    assert int(default_overall["rows_matched_in_stage"]) == 3
+    assert int(default_overall["correct_matches"]) == 2
+    assert pytest.approx(float(default_overall["precision"])) == 2.0 / 3.0
+    assert pytest.approx(float(default_overall["recall"])) == 2.0 / 3.0
+
+    assert int(override_overall["rows_matched_in_stage"]) == 2
+    assert int(override_overall["correct_matches"]) == 2
+    assert pytest.approx(float(override_overall["precision"])) == 1.0
+    assert pytest.approx(float(override_overall["recall"])) == 2.0 / 3.0
+
+
+def test_accuracy_table_probability_threshold_matches_weight_threshold():
+    con = duckdb.connect()
+    con.register(
+        "m",
+        pa.Table.from_pylist(
+            [
+                {
+                    "unique_id": "a",
+                    "resolved_canonical_id": "1",
+                    "ukam_label": "1",
+                    "match_weight": 12.0,
+                    "match_reason": "splink: probabilistic match",
+                },
+                {
+                    "unique_id": "b",
+                    "resolved_canonical_id": "2",
+                    "ukam_label": "1",
+                    "match_weight": 8.0,
+                    "match_reason": "splink: probabilistic match",
+                },
+            ]
+        ),
+    )
+    con.register("c", pa.Table.from_pylist([{"unique_id": "1"}, {"unique_id": "2"}]))
+
+    result = MatchResult(
+        _relation=con.table("m"),
+        con=con,
+        _canonical_relation=con.table("c"),
+    )
+
+    by_weight = result._accuracy_table(splink_match_weight_threshold=10.0).df()
+    by_probability = result._accuracy_table(
+        splink_match_probability_threshold=0.999,
+    ).df()
+
+    weight_overall = by_weight.loc[by_weight["stage"] == "overall"].iloc[0]
+    probability_overall = by_probability.loc[by_probability["stage"] == "overall"].iloc[0]
+
+    assert int(weight_overall["rows_matched_in_stage"]) == int(
+        probability_overall["rows_matched_in_stage"]
+    )
+    assert int(weight_overall["correct_matches"]) == int(
+        probability_overall["correct_matches"]
+    )
+
+
+def test_stage_diagnostics_includes_flow_and_timing_columns_only():
+    con = duckdb.connect()
+    con.register(
+        "m",
+        pa.Table.from_pylist(
+            [
+                {
+                    "unique_id": "a",
+                    "resolved_canonical_id": "1",
+                    "ukam_label": "1",
+                    "match_weight": None,
+                    "match_reason": "exact: full match",
+                },
+                {
+                    "unique_id": "b",
+                    "resolved_canonical_id": "2",
+                    "ukam_label": "2",
+                    "match_weight": 11.0,
+                    "match_reason": "splink: probabilistic match",
+                },
+            ]
+        ),
+    )
+    con.register("c", pa.Table.from_pylist([{"unique_id": "1"}, {"unique_id": "2"}]))
+
+    result = MatchResult(
+        _relation=con.table("m"),
+        con=con,
+        _canonical_relation=con.table("c"),
+        _stage_diagnostics=[
+            {
+                "stage": "exact_matches",
+                "unmatched_before": 2,
+                "matched_this_stage": 1,
+                "remaining_after": 1,
+                "matched_pct_of_unmatched": 0.5,
+                "matched_pct_of_input": 0.5,
+                "elapsed_seconds": 0.1,
+            },
+            {
+                "stage": "splink",
+                "unmatched_before": 1,
+                "matched_this_stage": 1,
+                "remaining_after": 0,
+                "matched_pct_of_unmatched": 1.0,
+                "matched_pct_of_input": 0.5,
+                "elapsed_seconds": 0.2,
+            },
+        ],
+    )
+
+    diagnostics_df = result._stage_diagnostics_table().df()
+    assert diagnostics_df.columns[0] == "stage_order"
+    assert diagnostics_df.columns[1] == "stage"
+    assert list(diagnostics_df["stage"]) == ["exact_matches", "splink"]
+    assert list(diagnostics_df["stage_order"]) == [0, 1]
+    assert "rows_entering_stage" in diagnostics_df.columns
+    assert "rows_matched_in_stage" in diagnostics_df.columns
+    assert "rows_remaining_after_stage" not in diagnostics_df.columns
+    assert "stage_match_rate" in diagnostics_df.columns
+    assert "share_of_total_input_matched" in diagnostics_df.columns
+    assert "elapsed_seconds" in diagnostics_df.columns
+    assert "precision" not in diagnostics_df.columns
+    assert "recall" not in diagnostics_df.columns
+    assert "f1" not in diagnostics_df.columns
+
+
+def test_stage_diagnostics_without_labels_still_returns_timing_rows():
+    con = duckdb.connect()
+    con.register(
+        "m",
+        pa.Table.from_pylist(
+            [
+                {
+                    "unique_id": "a",
+                    "resolved_canonical_id": "1",
+                    "match_weight": None,
+                    "match_reason": "exact: full match",
+                }
+            ]
+        ),
+    )
+
+    result = MatchResult(
+        _relation=con.table("m"),
+        con=con,
+        _stage_diagnostics=[
+            {
+                "stage": "exact_matches",
+                "unmatched_before": 1,
+                "matched_this_stage": 1,
+                "remaining_after": 0,
+                "matched_pct_of_unmatched": 1.0,
+                "matched_pct_of_input": 1.0,
+                "elapsed_seconds": 0.03,
+            }
+        ],
+    )
+
+    diagnostics_df = result._stage_diagnostics_table().df()
+    assert list(diagnostics_df["stage"]) == ["exact_matches"]
+    assert list(diagnostics_df["stage_order"]) == [0]
+    assert float(diagnostics_df.iloc[0]["elapsed_seconds"]) == pytest.approx(0.03)
+
+
+def test_accuracy_table_keeps_overall_without_total_row():
+    con = duckdb.connect()
+    con.register(
+        "m",
+        pa.Table.from_pylist(
+            [
+                {
+                    "unique_id": "a",
+                    "resolved_canonical_id": "1",
+                    "ukam_label": "1",
+                    "match_weight": None,
+                    "match_reason": "exact: full match",
+                },
+                {
+                    "unique_id": "b",
+                    "resolved_canonical_id": None,
+                    "ukam_label": "2",
+                    "match_weight": None,
+                    "match_reason": None,
+                },
+            ]
+        ),
+    )
+    con.register("c", pa.Table.from_pylist([{"unique_id": "1"}, {"unique_id": "2"}]))
+
+    result = MatchResult(
+        _relation=con.table("m"),
+        con=con,
+        _canonical_relation=con.table("c"),
+    )
+
+    accuracy_df = result._accuracy_table().df()
+    overall = accuracy_df.loc[accuracy_df["stage"] == "overall"].iloc[0]
+    assert int(overall["rows_matched_in_stage"]) == 1
+    assert "total" not in set(accuracy_df["stage"])
+    assert "rows_entering_stage" not in accuracy_df.columns
+    assert "total_input_rows" not in accuracy_df.columns
+
+
+def test_compare_splink_model_results_returns_headline_and_delta_tables():
+    con = duckdb.connect()
+    con.register(
+        "m",
+        pa.Table.from_pylist(
+            [
+                {
+                    "unique_id": "a",
+                    "resolved_canonical_id": "1",
+                    "ukam_label": "1",
+                    "match_weight": None,
+                    "match_reason": "exact: full match",
+                },
+                {
+                    "unique_id": "b",
+                    "resolved_canonical_id": "2",
+                    "ukam_label": "2",
+                    "match_weight": 12.0,
+                    "match_reason": "splink: probabilistic match",
+                },
+                {
+                    "unique_id": "c",
+                    "resolved_canonical_id": "9",
+                    "ukam_label": "3",
+                    "match_weight": 8.0,
+                    "match_reason": "splink: probabilistic match",
+                },
+            ]
+        ),
+    )
+    con.register(
+        "c",
+        pa.Table.from_pylist(
+            [{"unique_id": "1"}, {"unique_id": "2"}, {"unique_id": "3"}],
+        ),
+    )
+
+    result = MatchResult(
+        _relation=con.table("m"),
+        con=con,
+        _canonical_relation=con.table("c"),
+    )
+
+    comparison_output = result._compare_splink_model_results(
+        baseline_match_weight=10.0,
+        splink_comparison_weights=[8.0, 10.0],
+    )
+
+    headline_df = comparison_output.headline_table.df()
+    delta_df = comparison_output.delta_table.df()
+
+    assert comparison_output.total_input_rows == 3
+
+    assert "scenario" in headline_df.columns
+    assert "threshold" in headline_df.columns
+    assert "match_rate" in headline_df.columns
+    assert "precision" in headline_df.columns
+    assert "recall" in headline_df.columns
+    assert "f1" in headline_df.columns
+    assert "total_input_rows" not in headline_df.columns
+    assert "accuracy" not in headline_df.columns
+
+    assert "scenario" in delta_df.columns
+    assert "delta_matched_rows" in delta_df.columns
+    assert "delta_correct_matches" in delta_df.columns
+    assert "precision_delta" in delta_df.columns
+    assert "recall_delta" in delta_df.columns
+    assert "f1_delta" in delta_df.columns
+
+    baseline_rows = delta_df[delta_df["scenario"] == "weight_10.0 (baseline)"]
+    assert not baseline_rows.empty
+    assert baseline_rows["delta_matched_rows"].eq("1").all()
+    assert baseline_rows["delta_correct_matches"].eq("1").all()
+    assert baseline_rows["precision_delta"].eq("100.0%").all()
+    assert baseline_rows["recall_delta"].eq("33.3%").all()
+    assert baseline_rows["f1_delta"].eq("50.0%").all()
+
+
+def test_accuracy_table_is_quality_focused_without_flow_columns():
+    con = duckdb.connect()
+    con.register(
+        "m",
+        pa.Table.from_pylist(
+            [
+                {
+                    "unique_id": "a",
+                    "resolved_canonical_id": "1",
+                    "ukam_label": "1",
+                    "match_weight": None,
+                    "match_reason": "exact: full match",
+                },
+                {
+                    "unique_id": "b",
+                    "resolved_canonical_id": "2",
+                    "ukam_label": "9",
+                    "match_weight": None,
+                    "match_reason": "exact: full match",
+                },
+                {
+                    "unique_id": "c",
+                    "resolved_canonical_id": "3",
+                    "ukam_label": "3",
+                    "match_weight": 11.0,
+                    "match_reason": "splink: probabilistic match",
+                },
+                {
+                    "unique_id": "d",
+                    "resolved_canonical_id": "8",
+                    "ukam_label": "4",
+                    "match_weight": 9.0,
+                    "match_reason": "splink: probabilistic match",
+                },
+            ]
+        ),
+    )
+    con.register(
+        "c",
+        pa.Table.from_pylist(
+            [
+                {"unique_id": "1"},
+                {"unique_id": "2"},
+                {"unique_id": "3"},
+                {"unique_id": "4"},
+            ],
+        ),
+    )
+
+    result = MatchResult(
+        _relation=con.table("m"),
+        con=con,
+        _canonical_relation=con.table("c"),
+    )
+
+    table_df = result._accuracy_table(splink_match_weight_threshold=10.0).df()
+
+    exact = table_df.loc[table_df["stage"] == "exact_matches"].iloc[0]
+    splink = table_df.loc[table_df["stage"] == "splink"].iloc[0]
+
+    assert int(exact["rows_matched_in_stage"]) == 2
+    assert int(splink["rows_matched_in_stage"]) == 1
+    assert int(exact["wrong_matches"]) == 1
+    assert int(splink["wrong_matches"]) == 0
+
+    # Flow metrics are owned by stage diagnostics, not stage accuracy.
+    assert "rows_entering_stage" not in table_df.columns
+    assert "stage_match_rate" not in table_df.columns
+    assert "share_of_total_input_matched" not in table_df.columns
