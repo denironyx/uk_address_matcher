@@ -122,7 +122,6 @@ If you're linking to a large canonical dataset (for example, national-scale NGD)
 | `.matches()` | DuckDB relation with `unique_id`, `resolved_canonical_id`, `match_reason`, and more. |
 | `.match_metrics()` | Match-reason breakdown with counts and percentages. |
 | `.accuracy_analysis()` | Threshold-based accuracy analysis from labelled data (requires `ukam_label` in messy input). |
-| `.splink_predictions()` | Raw Splink predictions (only available when a `SplinkStage` ran). |
 
 
 ??? info "Customising stages"
@@ -162,4 +161,3 @@ If you're linking to a large canonical dataset (for example, national-scale NGD)
 If you know the correct match for each address, add a `ukam_label` column to
 your messy data. It propagates through to results, enabling accuracy analysis
 with `MatchResult.match_metrics()`.
-
