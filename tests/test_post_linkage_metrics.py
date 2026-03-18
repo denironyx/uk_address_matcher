@@ -217,7 +217,9 @@ def test_best_matches_with_distinguishability_uses_consistent_top_row_when_tied(
     assert len(best_only) == 1
     assert len(top_from_all) == 1
     assert best_only.loc[0, "unique_id_l"] == top_from_all.loc[0, "unique_id_l"]
-    assert best_only.loc[0, "ukam_address_id_l"] == top_from_all.loc[0, "ukam_address_id_l"]
+    assert best_only.loc[0, "ukam_address_id_l"] == top_from_all.loc[
+        0, "ukam_address_id_l"
+    ]
     assert best_only.loc[0, "candidate_rank"] == 1
     assert top_from_all.loc[0, "candidate_rank"] == 1
     assert best_only.loc[0, "distinguishability"] == pytest.approx(0.0)
