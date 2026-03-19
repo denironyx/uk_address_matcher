@@ -5,6 +5,12 @@ from typing import TYPE_CHECKING, Any, List, Literal
 
 from duckdb import DuckDBPyConnection, DuckDBPyRelation
 
+from uk_address_matcher.analysis.accuracy_analysis import (
+    build_match_weight_rounding_expression,
+    build_precision_recall_chart_definition,
+    build_threshold_selection_chart_definition,
+    render_chart_definition,
+)
 from uk_address_matcher.post_linkage.analyse_results import _calculate_match_metrics
 from uk_address_matcher.post_linkage.match_result.splink_inspector import (
     _SplinkInspector,
@@ -296,20 +302,15 @@ class MatchResult:
                 "matching via AddressMatcher."
             )
 
-        if match_weight_round_to_nearest is not None:
-            rounding_expr = (
-                f"CAST({match_weight_round_to_nearest} AS DOUBLE) "
-                f"* round(m.match_weight / {match_weight_round_to_nearest})"
-            )
-        else:
-            rounding_expr = "m.match_weight"
-
-        sql = _build_threshold_metrics_sql(rounding_expr)
+        rounding_expr = build_match_weight_rounding_expression(
+            match_weight_round_to_nearest
+        )
+        threshold_sql = _build_threshold_metrics_sql(rounding_expr)
 
         self.con.register("__ukam_threshold_matches__", self._relation)
         self.con.register("__ukam_threshold_canonical__", self._canonical_relation)
         try:
-            rel = self.con.sql(sql)
+            rel = self.con.sql(threshold_sql)
             rows = rel.fetchall()
             cols = rel.columns
         finally:
@@ -357,29 +358,28 @@ class MatchResult:
         Returns:
             An Altair chart, or a list of dicts when ``output_type="table"``.
         """
-        from splink.internals.charts import (
-            precision_recall_chart as _splink_pr_chart,
-            threshold_selection_tool as _splink_threshold_tool,
-        )
-
         if add_metrics is None:
             add_metrics = []
 
         records = self.accuracy_data(
-            match_weight_round_to_nearest=match_weight_round_to_nearest
+            match_weight_round_to_nearest=match_weight_round_to_nearest,
         )
 
-        if output_type == "threshold_selection":
-            return _splink_threshold_tool(records, add_metrics=add_metrics)
-        elif output_type == "precision_recall":
-            return _splink_pr_chart(records)
-        elif output_type == "table":
+        if output_type == "table":
             return records
-        else:
-            raise ValueError(
-                "Invalid output_type. Allowed values are: "
-                "'threshold_selection', 'precision_recall', 'table'."
+        if output_type == "precision_recall":
+            chart_definition = build_precision_recall_chart_definition(records)
+            return render_chart_definition(chart_definition)
+        if output_type == "threshold_selection":
+            chart_definition = build_threshold_selection_chart_definition(
+                records,
+                add_metrics,
             )
+            return render_chart_definition(chart_definition)
+        raise ValueError(
+            "Invalid output_type. Allowed values are: "
+            "'threshold_selection', 'precision_recall', 'table'."
+        )
 
     def _splink_waterfall_chart(
         self,
