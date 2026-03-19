@@ -318,19 +318,7 @@ def build_splink_model_comparison(
             format('{{:,}}', wrong_matches) AS mismatched_matches,
             ROUND(precision, 3) AS precision,
             ROUND(recall, 3) AS recall,
-            ROUND(f1, 3) AS f1,
-            CASE
-                WHEN is_baseline THEN 'Baseline threshold for comparison'
-                WHEN delta_matched_rows > 0 AND delta_recall > 0 AND delta_precision < 0
-                    THEN 'More matches and higher recall, slight drop in precision'
-                WHEN delta_matched_rows < 0 AND delta_precision > 0 AND delta_recall < 0
-                    THEN 'Fewer matches, slightly higher precision, lower recall'
-                WHEN delta_matched_rows > 0 AND delta_precision >= 0 AND delta_recall >= 0
-                    THEN 'More matches with improved precision and recall'
-                WHEN delta_matched_rows < 0 AND delta_precision <= 0 AND delta_recall <= 0
-                    THEN 'Fewer matches with weaker precision and recall'
-                ELSE 'Trade-off requires judgement across precision and recall'
-            END AS interpretation
+            ROUND(f1, 3) AS f1
         FROM compared
         ORDER BY scenario_order, threshold
         """
