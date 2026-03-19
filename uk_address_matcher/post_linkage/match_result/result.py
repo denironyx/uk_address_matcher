@@ -5,21 +5,30 @@ from typing import TYPE_CHECKING, Any, List, Literal
 
 from duckdb import DuckDBPyConnection, DuckDBPyRelation
 
+from uk_address_matcher._typing import StageDiagnostics
 from uk_address_matcher.analysis.accuracy_analysis import (
     build_match_weight_rounding_expression,
     build_precision_recall_chart_definition,
     build_threshold_selection_chart_definition,
     render_chart_definition,
 )
+from uk_address_matcher.analysis.table_accuracy_metrics import (
+    SplinkModelComparisonOutput,
+    build_accuracy_table,
+    build_splink_model_comparison,
+)
+from uk_address_matcher.analysis.table_stage_diagnostics import (
+    build_stage_diagnostics_relation,
+    build_stage_diagnostics_table,
+)
 from uk_address_matcher.post_linkage.analyse_results import _calculate_match_metrics
 from uk_address_matcher.post_linkage.match_result.splink_inspector import (
     _SplinkInspector,
 )
+from uk_address_matcher.sql_pipeline.match_reasons import MatchReason
 
 if TYPE_CHECKING:
     from uk_address_matcher.linking_model.matching.stages.splink import SplinkStage
-
-_SPLINK_MATCH_REASON = "splink: probabilistic match"
 
 
 def _build_threshold_metrics_sql(rounding_expr: str) -> str:
@@ -48,6 +57,10 @@ def _build_threshold_metrics_sql(rounding_expr: str) -> str:
     receive wrong-ID decisions, because wrong-ID rows inflate ``fp`` but should
     not reduce the count of correctly-rejected genuine negatives.
     """
+    splink_value = MatchReason.SPLINK.value.replace("'", "''")
+    enum_values = str(MatchReason.enum_values())
+    splink_reason_sql = f"'{splink_value}'::ENUM {enum_values}"
+
     return f"""
     WITH canonical_ids AS (
         SELECT DISTINCT unique_id FROM __ukam_threshold_canonical__
@@ -64,7 +77,7 @@ def _build_threshold_metrics_sql(rounding_expr: str) -> str:
             END AS true_positive_row,
             CASE
                 WHEN m.match_reason IS NULL THEN CAST(-999 AS DOUBLE)
-                WHEN m.match_reason = '{_SPLINK_MATCH_REASON}' THEN {rounding_expr}
+                WHEN m.match_reason = {splink_reason_sql} THEN {rounding_expr}
                 ELSE CAST(999 AS DOUBLE)
             END AS match_weight_adj
         FROM __ukam_threshold_matches__ m
@@ -148,6 +161,7 @@ class MatchResult:
     con: DuckDBPyConnection
     _splink_stage: SplinkStage | None = None
     _canonical_relation: DuckDBPyRelation | None = None
+    _stage_diagnostics: StageDiagnostics | None = None
 
     def __repr__(self) -> str:
         class_name = self.__class__.__name__
@@ -380,6 +394,58 @@ class MatchResult:
             "Invalid output_type. Allowed values are: "
             "'threshold_selection', 'precision_recall', 'table'."
         )
+
+    def _accuracy_table(
+        self,
+        *,
+        splink_match_weight_threshold: float | None = None,
+        splink_match_probability_threshold: float | None = None,
+    ) -> DuckDBPyRelation:
+        """Overall + per-stage accuracy table from emitted match decisions.
+
+        The returned table always includes an ``overall`` row and stage rows
+        using stage keys (for example ``exact_matches``, ``peeled_address``,
+        ``unique_trigram``, ``splink``, and ``unmatched``).
+
+        When a Splink threshold override is provided, matched Splink rows with
+        ``match_weight`` below the threshold are treated as unmatched for this
+        table only. Deterministic stage matches are unchanged.
+        """
+        return build_accuracy_table(
+            self.con,
+            self._relation,
+            splink_match_weight_threshold=splink_match_weight_threshold,
+            splink_match_probability_threshold=splink_match_probability_threshold,
+        )
+
+    def _compare_splink_model_results(
+        self,
+        *,
+        baseline_match_weight: float,
+        splink_comparison_weights: list[float] | None = None,
+    ) -> SplinkModelComparisonOutput:
+        """Return compact Splink threshold comparisons for reporting.
+
+        Returns two tables:
+        - headline_table: key operational and quality metrics per threshold
+        - delta_table: changes versus the baseline threshold
+        """
+        return build_splink_model_comparison(
+            self.con,
+            self._relation,
+            baseline_match_weight=baseline_match_weight,
+            splink_comparison_weights=splink_comparison_weights,
+        )
+
+    def _stage_diagnostics_table(
+        self,
+    ) -> DuckDBPyRelation:
+        """Per-stage diagnostics with execution flow and timing metrics."""
+        diagnostics_rel = build_stage_diagnostics_relation(
+            self.con,
+            self._stage_diagnostics,
+        )
+        return build_stage_diagnostics_table(self.con, diagnostics_rel)
 
     def _splink_waterfall_chart(
         self,

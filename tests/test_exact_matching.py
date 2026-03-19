@@ -420,7 +420,7 @@ def test_peeled_address_matching_finds_matches(duck_con, peeled_test_data):
     locality tokens."""
     df_fuzzy, df_canonical = peeled_test_data
 
-    results = _run_matching(
+    results, _ = _run_matching(
         con=duck_con,
         df_messy_clean=df_fuzzy,
         df_canonical_clean=df_canonical,
@@ -464,7 +464,7 @@ def test_run_matching_handles_non_identifier_uid(duck_con, peeled_test_data, mon
 
     monkeypatch.setattr(matching_runner, "_uid", lambda n=6: "abc-def")
 
-    results = matching_runner._run_matching(
+    results, _ = matching_runner._run_matching(
         con=duck_con,
         df_messy_clean=df_fuzzy,
         df_canonical_clean=df_canonical,
@@ -478,7 +478,7 @@ def test_peeled_address_matching_preserves_row_count(duck_con, peeled_test_data)
     """Test that peeled address matching doesn't inflate or reduce row count."""
     df_fuzzy, df_canonical = peeled_test_data
 
-    results = _run_matching(
+    results, _ = _run_matching(
         con=duck_con,
         df_messy_clean=df_fuzzy,
         df_canonical_clean=df_canonical,
@@ -497,7 +497,7 @@ def test_peeled_address_matching_match_reason(duck_con, peeled_test_data):
     """Test that peeled matches have the correct match_reason."""
     df_fuzzy, df_canonical = peeled_test_data
 
-    results = _run_matching(
+    results, _ = _run_matching(
         con=duck_con,
         df_messy_clean=df_fuzzy,
         df_canonical_clean=df_canonical,
@@ -610,7 +610,7 @@ def test_peeled_address_multi_word_token_handling(duck_con):
         """
     )
 
-    results = _run_matching(
+    results, _stage_diagnostics = _run_matching(
         con=duck_con,
         df_messy_clean=df_fuzzy,
         df_canonical_clean=df_canonical,
