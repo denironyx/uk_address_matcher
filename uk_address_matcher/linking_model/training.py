@@ -16,6 +16,27 @@ clean_full_address_comparison = cl.ExactMatch(
 ).configure(u_probabilities=[1, 2], m_probabilities=[15, 1])
 
 
+ADDRESS_WITHOUT_NUMERIC_REGEX_PATTERN = (
+    r"\b"
+    r"(\d{1,5}-\d{1,5}|[A-Za-z]?\d{1,5}[A-Za-z]?)"
+    r"\b"
+)
+
+
+def create_address_without_numeric(expr: str) -> str:
+    """Strip numeric tokens and normalise empty strings to NULL.
+
+    DuckDB's jaccard raises when an input is a zero-length string, so this
+    helper emits NULL for empty post-strip values to keep downstream
+    comparisons safe and consistent with other null-level handling.
+    """
+    return (
+        "nullif(trim(regexp_replace(regexp_replace("  # remove numbers and tidy spaces
+        f"{expr}, '{ADDRESS_WITHOUT_NUMERIC_REGEX_PATTERN}', '', 'g'), "
+        "'\\s+', ' ', 'g')), '')"
+    )
+
+
 def get_address_without_numbers_comparison(
     WEIGHT_EXACT=15,
     WEIGHT_JACCARD_HIGH=8,
@@ -41,21 +62,8 @@ def get_address_without_numbers_comparison(
     difference with a possible location difference.  Jaccard on the character
     bigrams separates these cases neatly.
     """
-    regex_pattern = (
-        r"\b"
-        r"(\d{1,5}-\d{1,5}|[A-Za-z]?\d{1,5}[A-Za-z]?)"
-        r"\b"
-    )
-
-    def _strip_numbers(expr: str) -> str:
-        return (
-            "trim(regexp_replace(regexp_replace("  # remove numbers and tidy spaces
-            f"{expr}, '{regex_pattern}', '', 'g'), "
-            "'\\s+', ' ', 'g'))"
-        )
-
-    left_expr = _strip_numbers("clean_full_address_l")
-    right_expr = _strip_numbers("clean_full_address_r")
+    left_expr = create_address_without_numeric("clean_full_address_l")
+    right_expr = create_address_without_numeric("clean_full_address_r")
 
     address_without_numbers_comparison = {
         "output_column_name": "address_without_numbers",
