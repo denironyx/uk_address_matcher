@@ -538,8 +538,8 @@ def test_stage_diagnostics_includes_flow_and_timing_columns_only():
     )
 
     diagnostics_df = result._stage_diagnostics_table().df()
-    assert diagnostics_df.columns[0] == "stage_order"
-    assert diagnostics_df.columns[1] == "stage"
+    assert diagnostics_df.columns[0] == "stage"
+    assert diagnostics_df.columns[1] == "stage_order"
     assert list(diagnostics_df["stage"]) == ["exact_matches", "splink"]
     assert list(diagnostics_df["stage_order"]) == [0, 1]
     assert "rows_entering_stage" in diagnostics_df.columns
@@ -686,9 +686,12 @@ def test_compare_splink_model_results_returns_headline_and_delta_tables():
     assert "scenario" in headline_df.columns
     assert "threshold" in headline_df.columns
     assert "match_rate" in headline_df.columns
+    assert "correct_matches" in headline_df.columns
+    assert "mismatched_matches" in headline_df.columns
     assert "precision" in headline_df.columns
     assert "recall" in headline_df.columns
     assert "f1" in headline_df.columns
+    assert "interpretation" not in headline_df.columns
     assert "total_input_rows" not in headline_df.columns
     assert "accuracy" not in headline_df.columns
 
