@@ -4,6 +4,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Optional
 
+from uk_address_matcher._typing import StageDiagnostics
 from uk_address_matcher.linking_model.matching.stages.base_stage import MatchingStage
 from uk_address_matcher.linking_model.matching.utils import (
     format_elapsed,
@@ -142,7 +143,7 @@ def _run_matching(
     stages: list[MatchingStage],
     debug_options: Optional[DebugOptions] = None,
     explain: bool = False,
-) -> tuple[Optional[duckdb.DuckDBPyRelation], list[dict[str, int | float | str]]]:
+) -> tuple[Optional[duckdb.DuckDBPyRelation], StageDiagnostics]:
     """Run matching stages sequentially and return unified results.
 
     Each stage receives only the still-unmatched messy records. Matches found
@@ -184,7 +185,7 @@ def _run_matching(
     )
 
     total_input_rows = df_messy_clean.count("*").fetchone()[0]
-    stage_diagnostics: list[dict[str, int | float | str]] = []
+    stage_diagnostics: StageDiagnostics = []
 
     for stage in stages:
         stage_name = _stage_name_for_instance(stage)

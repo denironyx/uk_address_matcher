@@ -3,24 +3,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from uk_address_matcher._typing import StageDiagnosticRow, StageDiagnostics
+
 if TYPE_CHECKING:
     import duckdb
 
 
-_STAGE_DIAGNOSTIC_KEYS = (
-    "stage",
-    "unmatched_before",
-    "matched_this_stage",
-    "remaining_after",
-    "matched_pct_of_unmatched",
-    "matched_pct_of_input",
-    "elapsed_seconds",
-)
-
-
 def build_stage_diagnostics_relation(
     con: duckdb.DuckDBPyConnection,
-    stage_diagnostics: list[dict[str, int | float | str]] | None,
+    stage_diagnostics: StageDiagnostics | None,
 ) -> duckdb.DuckDBPyRelation:
     if not stage_diagnostics:
         raise ValueError("No stage diagnostics data available to build relation.")
@@ -42,11 +33,12 @@ def build_stage_diagnostics_relation(
     )
     insert_sql = f'INSERT INTO "{table_name}" VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
 
+    stage_diagnostics_signature = tuple(StageDiagnosticRow.__annotations__.keys())
     for index, row in enumerate(stage_diagnostics):
-        if tuple(row.keys()) != _STAGE_DIAGNOSTIC_KEYS:
+        if tuple(row.keys()) != stage_diagnostics_signature:
             raise ValueError(
-                "Stage diagnostics row keys must be ordered as: "
-                + ", ".join(_STAGE_DIAGNOSTIC_KEYS)
+                "Stage diagnostics row keys must match StageDiagnosticRow: "
+                + ", ".join(stage_diagnostics_signature)
             )
         # index indicates the order of the stage in the pipeline,
         # which is useful for ordering in the final diagnostics table.
@@ -56,7 +48,7 @@ def build_stage_diagnostics_relation(
         f'''
         SELECT
             stage,
-            stage_order as stg_order,
+            stage_order,
             unmatched_before AS rows_entering_stage,
             matched_this_stage AS rows_matched_in_stage,
             matched_pct_of_unmatched AS stage_match_rate,

@@ -5,6 +5,7 @@ from typing import Any, List, Literal
 
 from duckdb import DuckDBPyConnection, DuckDBPyRelation
 
+from uk_address_matcher._typing import StageDiagnostics
 from uk_address_matcher.analysis.accuracy_analysis import (
     build_match_weight_rounding_expression,
     build_precision_recall_chart_definition,
@@ -154,7 +155,7 @@ class MatchResult:
     con: DuckDBPyConnection
     _splink_linker: Any | None = None
     _canonical_relation: DuckDBPyRelation | None = None
-    _stage_diagnostics: list[dict[str, int | float | str]] | None = None
+    _stage_diagnostics: StageDiagnostics | None = None
 
     def __repr__(self) -> str:
         class_name = self.__class__.__name__
