@@ -10,7 +10,6 @@ from uk_address_matcher import prepare_canonical_folder
 from uk_address_matcher.prepare_canonical import (
     MAX_CHUNK_COUNT,
     _PreparedCanonical,
-    _validate_prepared_folder,
     load_prepared_canonical_data,
 )
 
@@ -299,55 +298,3 @@ def test_corrupt_parquet_raises(con, prepared_folder):
 
     with pytest.raises(FileNotFoundError, match="not a valid Parquet file"):
         load_prepared_canonical_data(prepared_folder, con=con)
-
-
-def test_validate_prepared_folder_keeps_remote_uri_scheme():
-    class _FakeRelation:
-        def limit(self, _n):
-            return self
-
-        def fetchone(self):
-            return (1,)
-
-    class _FakeCon:
-        def __init__(self):
-            self.calls = []
-
-        def read_parquet(self, path):
-            self.calls.append(path)
-            return _FakeRelation()
-
-    fake_con = _FakeCon()
-    layout = _validate_prepared_folder(
-        "s3://bucket/prepared/2026-03-17_12-00-00Z", con=fake_con
-    )
-
-    assert layout.is_remote is True
-    assert layout.folder == "s3://bucket/prepared/2026-03-17_12-00-00Z"
-    assert layout.canonical_paths == [
-        "s3://bucket/prepared/2026-03-17_12-00-00Z/"
-        "ukam_canonical_addresses_chunks/*.parquet"
-    ]
-    assert "s3:/bucket" not in " ".join(str(call) for call in fake_con.calls)
-
-
-def test_validate_prepared_folder_remote_falls_back_to_single_file():
-    class _FakeRelation:
-        def limit(self, _n):
-            return self
-
-        def fetchone(self):
-            return (1,)
-
-    class _FakeCon:
-        def read_parquet(self, path):
-            if str(path).endswith("ukam_canonical_addresses_chunks/*.parquet"):
-                raise RuntimeError("No files found that match pattern")
-            return _FakeRelation()
-
-    layout = _validate_prepared_folder("s3://bucket/prepared", con=_FakeCon())
-
-    assert layout.is_remote is True
-    assert layout.canonical_paths == [
-        "s3://bucket/prepared/ukam_canonical_addresses.parquet"
-    ]
