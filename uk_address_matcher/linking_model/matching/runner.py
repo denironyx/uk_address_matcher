@@ -238,15 +238,21 @@ def _run_matching(
                 "unmatched_before": int(unmatched_count),
                 "matched_this_stage": int(matched_this_stage),
                 "remaining_after": int(remaining),
-                "matched_pct_of_unmatched": safe_divide(
-                    int(matched_this_stage),
-                    int(unmatched_count),
+                "matched_pct_of_unmatched": round(
+                    safe_divide(
+                        int(matched_this_stage),
+                        int(unmatched_count),
+                    ),
+                    6,
                 ),
-                "matched_pct_of_input": safe_divide(
-                    int(matched_this_stage),
-                    int(total_input_rows),
+                "matched_pct_of_input": round(
+                    safe_divide(
+                        int(matched_this_stage),
+                        int(total_input_rows),
+                    ),
+                    6,
                 ),
-                "elapsed_seconds": float(elapsed_seconds),
+                "elapsed_seconds": round(float(elapsed_seconds), 6),
             }
         )
         logger.info(
