@@ -1,0 +1,94 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "Precision-recall curve",
+  "title": "Precision-Recall Curve",
+  "padding": {
+    "top": 0,
+    "left": 5,
+    "right": 5,
+    "bottom": 5
+  },
+  "width": 420,
+  "height": 360,
+  "data": {
+    "values": []
+  },
+  "layer": [
+    {
+      "mark": {
+        "type": "area",
+        "opacity": 0.12,
+        "color": "#4C78A8"
+      },
+      "encoding": {
+        "x": {
+          "field": "recall",
+          "type": "quantitative",
+          "title": "Recall",
+          "scale": {
+            "domain": [0, 1]
+          }
+        },
+        "y": {
+          "field": "precision",
+          "type": "quantitative",
+          "title": "Precision",
+          "scale": {
+            "domain": [0, 1]
+          }
+        }
+      }
+    },
+    {
+      "mark": {
+        "type": "line",
+        "point": true,
+        "color": "#4C78A8"
+      },
+      "encoding": {
+        "x": {
+          "field": "recall",
+          "type": "quantitative",
+          "title": "Recall",
+          "scale": {
+            "domain": [0, 1]
+          }
+        },
+        "y": {
+          "field": "precision",
+          "type": "quantitative",
+          "title": "Precision",
+          "scale": {
+            "domain": [0, 1]
+          }
+        },
+        "tooltip": [
+          {
+            "field": "truth_threshold",
+            "type": "quantitative",
+            "title": "Match weight threshold",
+            "format": ".2f"
+          },
+          {
+            "field": "match_probability",
+            "type": "quantitative",
+            "title": "Match probability",
+            "format": ".4f"
+          },
+          {
+            "field": "precision",
+            "type": "quantitative",
+            "title": "Precision",
+            "format": ".4f"
+          },
+          {
+            "field": "recall",
+            "type": "quantitative",
+            "title": "Recall",
+            "format": ".4f"
+          }
+        ]
+      }
+    }
+  ]
+}
