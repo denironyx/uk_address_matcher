@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from benchmarking.config.datasets import (
     get_dataset_definition,
     list_dataset_keys,
@@ -20,6 +22,12 @@ from uk_address_matcher import (
     SplinkStage,
 )
 
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+
 # Optional Splink-only comparison table shown after benchmark summary.
 # Set to `None` to disable threshold-comparison output.
 SPLINK_BASELINE_WEIGHT: float | None = 10.0
@@ -33,9 +41,10 @@ STAGES = [
     SplinkStage(final_match_weight_threshold=SPLINK_BASELINE_WEIGHT),
 ]
 APPLY_CANONICAL_FILTER = True
+CLEANING_NUM_CHUNKS = 1
 
 
-# Defaults: always print summary sections (run totals, timings, accuracy, diagnostics),
+# Defaults: always print summary sections (timings, accuracy, diagnostics),
 # with selected diagnostics enabled and successful/unmatched diagnostics opt-in.
 # OUTPUT_OPTIONS = BenchmarkOutputOptions()
 OUTPUT_OPTIONS = BenchmarkOutputOptions(
@@ -66,6 +75,7 @@ results = run_selected_datasets(
     sample_mode=SAMPLE_MODE,
     canonical_address_filter=(CANONICAL_FILTER_SQL if APPLY_CANONICAL_FILTER else None),
     enable_diagnostics=OUTPUT_OPTIONS.enable_diagnostics(),
+    cleaning_num_chunks=CLEANING_NUM_CHUNKS,
 )
 print_benchmark_summary(
     results,
