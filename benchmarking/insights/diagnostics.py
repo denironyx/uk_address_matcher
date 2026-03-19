@@ -33,16 +33,6 @@ def _resolve_postcode_expr(match_columns: set[str], messy_columns: set[str]) -> 
     return "NULL::VARCHAR"
 
 
-def _resolve_canonical_clean_expr(
-    canonical_columns: set[str],
-    *,
-    alias: str,
-) -> str:
-    if "clean_full_address" in canonical_columns:
-        return f"{alias}.clean_full_address"
-    return "NULL::VARCHAR"
-
-
 def _resolve_splink_id_column(predictions: duckdb.DuckDBPyRelation) -> str:
     columns = set(predictions.columns)
     if "unique_id_r" in columns:
@@ -71,22 +61,6 @@ def _resolve_unmatched_join_key_expr(
 def _resolve_optional_ukam_address_id_expr(match_columns: set[str]) -> str:
     if "ukam_address_id" in match_columns:
         return "CAST(m.ukam_address_id AS VARCHAR)"
-    return "NULL::VARCHAR"
-
-
-def _resolve_splink_canonical_id_expr(
-    prediction_columns: set[str],
-    *,
-    splink_id_column: str,
-) -> str:
-    if splink_id_column == "unique_id_r" and "unique_id_l" in prediction_columns:
-        return "CAST(pred.unique_id_l AS VARCHAR)"
-    if splink_id_column == "unique_id_l" and "unique_id_r" in prediction_columns:
-        return "CAST(pred.unique_id_r AS VARCHAR)"
-    if splink_id_column == "ukam_address_id_r" and "unique_id_l" in prediction_columns:
-        return "CAST(pred.unique_id_l AS VARCHAR)"
-    if splink_id_column == "ukam_address_id_l" and "unique_id_r" in prediction_columns:
-        return "CAST(pred.unique_id_r AS VARCHAR)"
     return "NULL::VARCHAR"
 
 
@@ -425,12 +399,7 @@ def build_dataset_diagnostics(
 
     if splink_predictions is not None:
         con.register("__simple_bench_splink_predictions__", splink_predictions)
-        prediction_columns = set(splink_predictions.columns)
         splink_id_column = _resolve_splink_id_column(splink_predictions)
-        splink_canonical_id_expr = _resolve_splink_canonical_id_expr(
-            prediction_columns,
-            splink_id_column=splink_id_column,
-        )
         unmatched_join_key_expr = _resolve_unmatched_join_key_expr(
             match_columns=match_columns,
             splink_id_column=splink_id_column,
@@ -438,18 +407,6 @@ def build_dataset_diagnostics(
         optional_ukam_address_id_expr = _resolve_optional_ukam_address_id_expr(
             match_columns
         )
-        canonical_clean_top_expr = "NULL::VARCHAR"
-        canonical_top_join_sql = ""
-        if has_canonical:
-            canonical_clean_top_expr = _resolve_canonical_clean_expr(
-                canonical_columns,
-                alias="canonical_top",
-            )
-            canonical_top_join_sql = """
-            LEFT JOIN __simple_bench_canonical__ AS canonical_top
-              ON tsc.splink_canonical_id IS NOT NULL
-             AND CAST(canonical_top.unique_id AS VARCHAR) = tsc.splink_canonical_id
-            """
 
         con.sql(
             f"""
@@ -460,7 +417,6 @@ def build_dataset_diagnostics(
                     CAST(m.unique_id AS VARCHAR) AS unique_id,
                     {unmatched_join_key_expr} AS unmatched_join_key,
                     {optional_ukam_address_id_expr} AS ukam_address_id,
-                    {postcode_expr} AS postcode,
                     m.original_address_concat,
                     {cleaned_address_expr} AS cleaned_full_address
                 FROM {matches_table_name} AS m
@@ -473,7 +429,6 @@ def build_dataset_diagnostics(
             top_splink_candidates AS (
                 SELECT
                     CAST(pred.{splink_id_column} AS VARCHAR) AS splink_join_key,
-                    {splink_canonical_id_expr} AS splink_canonical_id,
                     pred.match_probability AS highest_splink_comparison,
                     pred.match_weight,
                     ROW_NUMBER() OVER (
@@ -491,17 +446,14 @@ def build_dataset_diagnostics(
             SELECT
                 su.unique_id,
                 su.ukam_address_id,
-                su.postcode,
                 su.original_address_concat,
                 su.cleaned_full_address,
-                {canonical_clean_top_expr} AS clean_full_address_canonical,
                 tsc.highest_splink_comparison,
                 tsc.match_weight
             FROM sampled_unmatched AS su
             LEFT JOIN top_splink_candidates AS tsc
                 ON su.unmatched_join_key = tsc.splink_join_key
                AND tsc.rn = 1
-            {canonical_top_join_sql}
             ORDER BY su.unique_id
             """
         )

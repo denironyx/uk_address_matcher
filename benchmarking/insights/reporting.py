@@ -66,8 +66,6 @@ def print_benchmark_summary(
     print("\nBenchmark summary")
     for result in results:
         print(f"\nDataset: {result.dataset_key}")
-        print("\nRun totals:")
-        _show_via_sql(result, result.run_totals)
 
         print(
             "Timings: "
