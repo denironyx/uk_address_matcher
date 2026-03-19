@@ -42,28 +42,6 @@ def _safe_stage_name(match_reason_sql: str) -> str:
     """
 
 
-def _match_weight_from_probability(probability: float) -> float:
-    if probability <= 0.0:
-        return -999.0
-    if probability >= 1.0:
-        return 999.0
-    return math.log2(probability / (1.0 - probability))
-
-
-def _accuracy_stage_sort_key(stage_sql: str) -> str:
-    return f"""
-    CASE
-        WHEN {stage_sql} = 'overall' THEN 0
-        WHEN {stage_sql} = 'exact_matches' THEN 10
-        WHEN {stage_sql} = 'peeled_address' THEN 20
-        WHEN {stage_sql} = 'unique_trigram' THEN 30
-        WHEN {stage_sql} = 'splink' THEN 40
-        WHEN {stage_sql} = 'unmatched' THEN 90
-        ELSE 50
-    END
-    """
-
-
 def resolve_splink_threshold_match_weight(
     *,
     splink_match_weight_threshold: float | None,
@@ -79,7 +57,13 @@ def resolve_splink_threshold_match_weight(
         )
     if splink_match_probability_threshold is None:
         return splink_match_weight_threshold
-    return _match_weight_from_probability(splink_match_probability_threshold)
+    if not 0.0 <= splink_match_probability_threshold <= 1.0:
+        raise ValueError(
+            "splink_match_probability_threshold must be between 0.0 and 1.0 inclusive."
+        )
+    return math.log2(
+        splink_match_probability_threshold / (1.0 - splink_match_probability_threshold)
+    )
 
 
 def build_accuracy_table(
@@ -96,6 +80,8 @@ def build_accuracy_table(
             "Add a ground-truth label column to the input addresses_to_match data."
         )
 
+    # normalise our match weight threshold irrespective of whether it's provided as a
+    # weight or probability
     threshold_match_weight = resolve_splink_threshold_match_weight(
         splink_match_weight_threshold=splink_match_weight_threshold,
         splink_match_probability_threshold=splink_match_probability_threshold,
@@ -198,7 +184,6 @@ def build_accuracy_table(
             ) AS f1
         FROM all_rows
         ORDER BY
-            {_accuracy_stage_sort_key("stage")},
             rows_matched_in_stage DESC,
             stage
         """

@@ -449,6 +449,43 @@ def test_accuracy_table_probability_threshold_matches_weight_threshold():
     )
 
 
+def test_accuracy_table_probability_threshold_rejects_out_of_range_values():
+    con = duckdb.connect()
+    con.register(
+        "m",
+        pa.Table.from_pylist(
+            [
+                {
+                    "unique_id": "a",
+                    "resolved_canonical_id": "1",
+                    "ukam_label": "1",
+                    "match_weight": 12.0,
+                    "match_reason": "splink: probabilistic match",
+                }
+            ]
+        ),
+    )
+    con.register("c", pa.Table.from_pylist([{"unique_id": "1"}]))
+
+    result = MatchResult(
+        _relation=con.table("m"),
+        con=con,
+        _canonical_relation=con.table("c"),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="must be between 0.0 and 1.0 inclusive",
+    ):
+        result._accuracy_table(splink_match_probability_threshold=-0.01).df()
+
+    with pytest.raises(
+        ValueError,
+        match="must be between 0.0 and 1.0 inclusive",
+    ):
+        result._accuracy_table(splink_match_probability_threshold=1.01).df()
+
+
 def test_stage_diagnostics_includes_flow_and_timing_columns_only():
     con = duckdb.connect()
     con.register(
