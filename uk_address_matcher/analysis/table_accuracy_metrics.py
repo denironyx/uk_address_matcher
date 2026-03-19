@@ -4,6 +4,8 @@ import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from uk_address_matcher.sql_pipeline.match_reasons import MatchReason
+
 if TYPE_CHECKING:
     import duckdb
 
@@ -26,44 +28,6 @@ def _sql_literal(value: str) -> str:
     return value.replace("'", "''")
 
 
-def _safe_stage_name(match_reason_sql: str) -> str:
-    return f"""
-    CASE
-        WHEN {match_reason_sql} IS NULL THEN 'unmatched'
-        WHEN lower(CAST({match_reason_sql} AS VARCHAR)) LIKE 'exact:%'
-            THEN 'exact_matches'
-        WHEN lower(CAST({match_reason_sql} AS VARCHAR)) LIKE 'peeled_address:%'
-            THEN 'peeled_address'
-        WHEN lower(CAST({match_reason_sql} AS VARCHAR)) LIKE 'unique_trigram:%'
-            THEN 'unique_trigram'
-        WHEN lower(CAST({match_reason_sql} AS VARCHAR)) LIKE 'splink:%' THEN 'splink'
-        ELSE split_part(CAST({match_reason_sql} AS VARCHAR), ':', 1)
-    END
-    """
-
-
-def _match_weight_from_probability(probability: float) -> float:
-    if probability <= 0.0:
-        return -999.0
-    if probability >= 1.0:
-        return 999.0
-    return math.log2(probability / (1.0 - probability))
-
-
-def _accuracy_stage_sort_key(stage_sql: str) -> str:
-    return f"""
-    CASE
-        WHEN {stage_sql} = 'overall' THEN 0
-        WHEN {stage_sql} = 'exact_matches' THEN 10
-        WHEN {stage_sql} = 'peeled_address' THEN 20
-        WHEN {stage_sql} = 'unique_trigram' THEN 30
-        WHEN {stage_sql} = 'splink' THEN 40
-        WHEN {stage_sql} = 'unmatched' THEN 90
-        ELSE 50
-    END
-    """
-
-
 def resolve_splink_threshold_match_weight(
     *,
     splink_match_weight_threshold: float | None,
@@ -79,14 +43,19 @@ def resolve_splink_threshold_match_weight(
         )
     if splink_match_probability_threshold is None:
         return splink_match_weight_threshold
-    return _match_weight_from_probability(splink_match_probability_threshold)
+    if not 0.0 <= splink_match_probability_threshold <= 1.0:
+        raise ValueError(
+            "splink_match_probability_threshold must be between 0.0 and 1.0 inclusive."
+        )
+    return math.log2(
+        splink_match_probability_threshold / (1.0 - splink_match_probability_threshold)
+    )
 
 
 def build_accuracy_table(
     con: duckdb.DuckDBPyConnection,
     relation: duckdb.DuckDBPyRelation,
     *,
-    splink_match_reason: str,
     splink_match_weight_threshold: float | None = None,
     splink_match_probability_threshold: float | None = None,
 ) -> duckdb.DuckDBPyRelation:
@@ -96,6 +65,8 @@ def build_accuracy_table(
             "Add a ground-truth label column to the input addresses_to_match data."
         )
 
+    # normalise our match weight threshold irrespective of whether it's provided as a
+    # weight or probability
     threshold_match_weight = resolve_splink_threshold_match_weight(
         splink_match_weight_threshold=splink_match_weight_threshold,
         splink_match_probability_threshold=splink_match_probability_threshold,
@@ -105,22 +76,28 @@ def build_accuracy_table(
         if threshold_match_weight is None
         else f"COALESCE(m.match_weight, -1000.0) >= {threshold_match_weight}"
     )
-    stage_sql = _safe_stage_name("m.match_reason")
-    escaped_reason = _sql_literal(splink_match_reason)
+    splink_value = _sql_literal(MatchReason.SPLINK.value)
+    enum_values = str(MatchReason.enum_values())
+    splink_reason_sql = f"'{splink_value}'::ENUM {enum_values}"
 
     return con.sql(
         f"""
         WITH scored AS (
             SELECT
-                {stage_sql} AS stage,
+                CASE
+                    WHEN m.match_reason IS NULL THEN 'unmatched'
+                    WHEN split_part(m.match_reason::VARCHAR, ':', 1) = 'exact'
+                        THEN 'exact_matches'
+                    ELSE split_part(m.match_reason::VARCHAR, ':', 1)
+                END AS stage,
                 CASE
                     WHEN m.match_reason IS NULL THEN FALSE
-                    WHEN m.match_reason = '{escaped_reason}' THEN {splink_accepted_sql}
+                    WHEN m.match_reason = {splink_reason_sql} THEN {splink_accepted_sql}
                     ELSE TRUE
                 END AS is_matched,
                 CASE
                     WHEN m.match_reason IS NULL THEN FALSE
-                    WHEN m.match_reason = '{escaped_reason}' THEN {splink_accepted_sql}
+                    WHEN m.match_reason = {splink_reason_sql} THEN {splink_accepted_sql}
                     ELSE TRUE
                 END
                 AND CAST(m.resolved_canonical_id AS VARCHAR)
@@ -198,7 +175,6 @@ def build_accuracy_table(
             ) AS f1
         FROM all_rows
         ORDER BY
-            {_accuracy_stage_sort_key("stage")},
             rows_matched_in_stage DESC,
             stage
         """
@@ -209,7 +185,6 @@ def build_splink_model_comparison(
     con: duckdb.DuckDBPyConnection,
     relation: duckdb.DuckDBPyRelation,
     *,
-    splink_match_reason: str,
     splink_comparison_weights: list[float] | None = None,
     baseline_match_weight: float,
 ) -> SplinkModelComparisonOutput:
@@ -223,7 +198,6 @@ def build_splink_model_comparison(
     baseline_rel = build_accuracy_table(
         con,
         relation,
-        splink_match_reason=splink_match_reason,
         splink_match_weight_threshold=baseline_value,
     )
     scenario_queries.append(
@@ -257,7 +231,6 @@ def build_splink_model_comparison(
         rel = build_accuracy_table(
             con,
             relation,
-            splink_match_reason=splink_match_reason,
             splink_match_weight_threshold=threshold_value,
         )
         scenario_label = f"weight_{threshold_value}"

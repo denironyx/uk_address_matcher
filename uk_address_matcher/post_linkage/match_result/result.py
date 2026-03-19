@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, List, Literal
 
 from duckdb import DuckDBPyConnection, DuckDBPyRelation
 
+from uk_address_matcher._typing import StageDiagnostics
 from uk_address_matcher.analysis.accuracy_analysis import (
     build_match_weight_rounding_expression,
     build_precision_recall_chart_definition,
@@ -24,11 +25,7 @@ from uk_address_matcher.post_linkage.analyse_results import _calculate_match_met
 from uk_address_matcher.post_linkage.match_result.splink_inspector import (
     _SplinkInspector,
 )
-
-if TYPE_CHECKING:
-    from uk_address_matcher.linking_model.matching.stages.splink import SplinkStage
-
-_SPLINK_MATCH_REASON = "splink: probabilistic match"
+from uk_address_matcher.sql_pipeline.match_reasons import MatchReason
 
 
 def _build_threshold_metrics_sql(rounding_expr: str) -> str:
@@ -57,6 +54,10 @@ def _build_threshold_metrics_sql(rounding_expr: str) -> str:
     receive wrong-ID decisions, because wrong-ID rows inflate ``fp`` but should
     not reduce the count of correctly-rejected genuine negatives.
     """
+    splink_value = MatchReason.SPLINK.value.replace("'", "''")
+    enum_values = str(MatchReason.enum_values())
+    splink_reason_sql = f"'{splink_value}'::ENUM {enum_values}"
+
     return f"""
     WITH canonical_ids AS (
         SELECT DISTINCT unique_id FROM __ukam_threshold_canonical__
@@ -73,7 +74,7 @@ def _build_threshold_metrics_sql(rounding_expr: str) -> str:
             END AS true_positive_row,
             CASE
                 WHEN m.match_reason IS NULL THEN CAST(-999 AS DOUBLE)
-                WHEN m.match_reason = '{_SPLINK_MATCH_REASON}' THEN {rounding_expr}
+                WHEN m.match_reason = {splink_reason_sql} THEN {rounding_expr}
                 ELSE CAST(999 AS DOUBLE)
             END AS match_weight_adj
         FROM __ukam_threshold_matches__ m
@@ -157,7 +158,7 @@ class MatchResult:
     con: DuckDBPyConnection
     _splink_stage: SplinkStage | None = None
     _canonical_relation: DuckDBPyRelation | None = None
-    _stage_diagnostics: list[dict[str, int | float | str]] | None = None
+    _stage_diagnostics: StageDiagnostics | None = None
 
     def __repr__(self) -> str:
         class_name = self.__class__.__name__
@@ -410,7 +411,6 @@ class MatchResult:
         return build_accuracy_table(
             self.con,
             self._relation,
-            splink_match_reason=_SPLINK_MATCH_REASON,
             splink_match_weight_threshold=splink_match_weight_threshold,
             splink_match_probability_threshold=splink_match_probability_threshold,
         )
@@ -430,7 +430,6 @@ class MatchResult:
         return build_splink_model_comparison(
             self.con,
             self._relation,
-            splink_match_reason=_SPLINK_MATCH_REASON,
             baseline_match_weight=baseline_match_weight,
             splink_comparison_weights=splink_comparison_weights,
         )

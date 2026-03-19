@@ -6,7 +6,6 @@ from benchmarking.config.datasets import (
 )
 from benchmarking.insights.reporting import (
     print_benchmark_summary,
-    print_diagnostics,
 )
 from benchmarking.insights.types import BenchmarkOutputOptions
 from benchmarking.runner import run_selected_datasets
@@ -21,16 +20,22 @@ from uk_address_matcher import (
     SplinkStage,
 )
 
+# Optional Splink-only comparison table shown after benchmark summary.
+# Set to `None` to disable threshold-comparison output.
+SPLINK_BASELINE_WEIGHT: float | None = 10.0
+SPLINK_COMPARISON_WEIGHTS: list[float] | None = [8.0, 12.0]
+
 # SELECTED_DATASETS: str | list[str] = "all"
 SELECTED_DATASETS: str | list[str] = "hackney"
 STAGES = [
     ExactMatchStage(),
     PeeledAddressStage(),
-    SplinkStage(),
+    SplinkStage(final_match_weight_threshold=SPLINK_BASELINE_WEIGHT),
 ]
 APPLY_CANONICAL_FILTER = True
 
-# Defaults: always print summary sections (match breakdown, run totals, timings),
+
+# Defaults: always print summary sections (run totals, timings, accuracy, diagnostics),
 # with selected diagnostics enabled and successful/unmatched diagnostics opt-in.
 # OUTPUT_OPTIONS = BenchmarkOutputOptions()
 OUTPUT_OPTIONS = BenchmarkOutputOptions(
@@ -62,7 +67,8 @@ results = run_selected_datasets(
     canonical_address_filter=(CANONICAL_FILTER_SQL if APPLY_CANONICAL_FILTER else None),
     enable_diagnostics=OUTPUT_OPTIONS.enable_diagnostics(),
 )
-print_benchmark_summary(results)
-
-if OUTPUT_OPTIONS.enable_diagnostics():
-    print_diagnostics(results, output_options=OUTPUT_OPTIONS)
+print_benchmark_summary(
+    results,
+    splink_baseline_weight=SPLINK_BASELINE_WEIGHT,
+    splink_comparison_weights=SPLINK_COMPARISON_WEIGHTS,
+)

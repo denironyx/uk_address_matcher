@@ -4,6 +4,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Optional
 
+from uk_address_matcher._typing import StageDiagnostics
 from uk_address_matcher.linking_model.matching.stages.base_stage import MatchingStage
 from uk_address_matcher.linking_model.matching.utils import (
     format_elapsed,
@@ -142,7 +143,7 @@ def _run_matching(
     stages: list[MatchingStage],
     debug_options: Optional[DebugOptions] = None,
     explain: bool = False,
-) -> tuple[Optional[duckdb.DuckDBPyRelation], list[dict[str, int | float | str]]]:
+) -> tuple[Optional[duckdb.DuckDBPyRelation], StageDiagnostics]:
     """Run matching stages sequentially and return unified results.
 
     Each stage receives only the still-unmatched messy records. Matches found
@@ -184,7 +185,7 @@ def _run_matching(
     )
 
     total_input_rows = df_messy_clean.count("*").fetchone()[0]
-    stage_diagnostics: list[dict[str, int | float | str]] = []
+    stage_diagnostics: StageDiagnostics = []
 
     for stage in stages:
         stage_name = _stage_name_for_instance(stage)
@@ -238,15 +239,21 @@ def _run_matching(
                 "unmatched_before": int(unmatched_count),
                 "matched_this_stage": int(matched_this_stage),
                 "remaining_after": int(remaining),
-                "matched_pct_of_unmatched": safe_divide(
-                    int(matched_this_stage),
-                    int(unmatched_count),
+                "matched_pct_of_unmatched": round(
+                    safe_divide(
+                        int(matched_this_stage),
+                        int(unmatched_count),
+                    ),
+                    6,
                 ),
-                "matched_pct_of_input": safe_divide(
-                    int(matched_this_stage),
-                    int(total_input_rows),
+                "matched_pct_of_input": round(
+                    safe_divide(
+                        int(matched_this_stage),
+                        int(total_input_rows),
+                    ),
+                    6,
                 ),
-                "elapsed_seconds": float(elapsed_seconds),
+                "elapsed_seconds": round(float(elapsed_seconds), 6),
             }
         )
         logger.info(
