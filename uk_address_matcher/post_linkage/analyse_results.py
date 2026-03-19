@@ -72,7 +72,9 @@ def best_matches_with_distinguishability(
 
     Returns:
         DuckDBPyRelation: A table containing matched addresses with
-        distinguishability metrics.
+        distinguishability metrics. Includes ``candidate_rank`` so callers can
+        deterministically select the top candidate from the all-candidates
+        output.
     """
 
     if "mw_adjustment" not in df_predict.columns:
@@ -108,14 +110,7 @@ def best_matches_with_distinguishability(
     nan_label = f"{next_label_value}: NaN (last match in group)"
     zero_label = f"{next_label_value}: Distinguishability = 0"
 
-    rn_filter = (
-        (
-            "QUALIFY ROW_NUMBER() OVER (PARTITION BY unique_id_r "
-            "ORDER BY match_weight DESC, unique_id_l) = 1"
-        )
-        if best_match_only
-        else ""
-    )
+    best_match_filter = "WHERE candidate_rank = 1" if best_match_only else ""
 
     if best_match_only:
         sort_str = "ORDER BY distinguishability_category ASC, match_weight DESC"
@@ -124,15 +119,28 @@ def best_matches_with_distinguishability(
 
     sql = f"""
     WITH
+        distinct_canonical_candidates AS (
+            SELECT
+                *
+            FROM ({df_predict.sql_query()}) AS predict_for_distinguishability
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY unique_id_r, unique_id_l
+                ORDER BY match_weight DESC, ukam_address_id_l
+            ) = 1
+        ),
         distinguishability_calc AS (
             SELECT
                 *,
+                ROW_NUMBER() OVER (
+                    PARTITION BY unique_id_r
+                    ORDER BY match_weight DESC, unique_id_l, ukam_address_id_l
+                ) AS candidate_rank,
                 match_weight - LEAD(match_weight) OVER (
-                    PARTITION BY unique_id_r ORDER BY match_weight DESC
+                    PARTITION BY unique_id_r
+                    ORDER BY match_weight DESC, unique_id_l, ukam_address_id_l
                 ) AS distinguishability,
                 COUNT(*) OVER (PARTITION BY unique_id_r) AS match_count
-            FROM ({df_predict.sql_query()}) AS predict_for_distinguishability
-            {rn_filter}
+            FROM distinct_canonical_candidates
         ),
         categorized_matches AS (
             SELECT
@@ -145,7 +153,7 @@ def best_matches_with_distinguishability(
                     ELSE '99: error, uncategorized'
                 END AS distinguishability_category
             FROM distinguishability_calc
-
+            {best_match_filter}
         )
     SELECT
         a.unique_id AS unique_id_r,
@@ -158,6 +166,7 @@ def best_matches_with_distinguishability(
         t.postcode_l,
         t.match_weight,
         t.distinguishability,
+        t.candidate_rank,
         COALESCE(
             t.distinguishability_category, '99: No match'
         ) AS distinguishability_category,
