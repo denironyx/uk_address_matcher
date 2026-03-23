@@ -18,6 +18,7 @@ from uk_address_matcher.analysis.sql_helpers import (
     signed_pp_delta_sql,
     sql_literal,
 )
+from uk_address_matcher.analysis.validation import requires_ukam_label
 
 if TYPE_CHECKING:
     import duckdb
@@ -167,10 +168,6 @@ def _build_top_k_scenario_metrics_relation(
     scenario_label: str,
     precision_at_cutoffs: list[int],
 ) -> duckdb.DuckDBPyRelation:
-    if "ukam_label" not in labelled_relation.columns:
-        raise ValueError(
-            "Top-k analysis requires a 'ukam_label' column in the match results."
-        )
     if "match_weight" not in predictions_relation.columns:
         raise ValueError(
             "Splink predictions table is missing required column 'match_weight'."
@@ -726,6 +723,7 @@ def _build_top_k_sql_fragments(
     )
 
 
+@requires_ukam_label("relation", function_name="_compare_splink_model_results")
 def build_splink_model_comparison(
     con: duckdb.DuckDBPyConnection,
     relation: duckdb.DuckDBPyRelation,

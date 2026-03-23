@@ -10,6 +10,7 @@ from uk_address_matcher.analysis.accuracy_sql import (
     wrong_match_rate_sql,
 )
 from uk_address_matcher.analysis.sql_helpers import sql_literal
+from uk_address_matcher.analysis.validation import requires_ukam_label
 from uk_address_matcher.sql_pipeline.match_reasons import MatchReason
 
 if TYPE_CHECKING:
@@ -40,6 +41,7 @@ def resolve_splink_threshold_match_weight(
     )
 
 
+@requires_ukam_label("relation", function_name="_accuracy_table")
 def build_accuracy_table(
     con: duckdb.DuckDBPyConnection,
     relation: duckdb.DuckDBPyRelation,
@@ -47,11 +49,6 @@ def build_accuracy_table(
     splink_match_weight_threshold: float | None = None,
     splink_match_probability_threshold: float | None = None,
 ) -> duckdb.DuckDBPyRelation:
-    if "ukam_label" not in relation.columns:
-        raise ValueError(
-            "_accuracy_table requires a 'ukam_label' column in the match results. "
-            "Add a ground-truth label column to the input addresses_to_match data."
-        )
 
     threshold_match_weight = resolve_splink_threshold_match_weight(
         splink_match_weight_threshold=splink_match_weight_threshold,
