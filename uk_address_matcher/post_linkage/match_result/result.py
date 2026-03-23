@@ -12,9 +12,9 @@ from uk_address_matcher.analysis.accuracy_analysis import (
     build_threshold_selection_chart_definition,
     render_chart_definition,
 )
-from uk_address_matcher.analysis.table_accuracy_metrics import (
+from uk_address_matcher.analysis.accuracy_table import build_accuracy_table
+from uk_address_matcher.analysis.splink_comparison_metrics import (
     SplinkModelComparisonOutput,
-    build_accuracy_table,
     build_splink_model_comparison,
 )
 from uk_address_matcher.analysis.table_stage_diagnostics import (
@@ -272,6 +272,8 @@ class MatchResult:
         contains the confusion-matrix counts (tp, tn, fp, fn) plus the derived
         rates (tp_rate, fp_rate, precision, recall, f1).
 
+        Requires a ``ukam_label`` column in the match results relation.
+
         Important semantics: this uses top-1 outcome evaluation.  Wrong-ID rows
         are false positives at their emitted score; they are not score-floored.
         Recall is derived from true positives as ``TP/P`` (equivalently
@@ -304,11 +306,6 @@ class MatchResult:
             the canonical dataset; it is used to derive ``tn``, ``tn_rate``,
             and ``fp_rate``.
         """
-        if "ukam_label" not in self._relation.columns:
-            raise ValueError(
-                "accuracy_data requires a 'ukam_label' column in the match results. "
-                "Add a ground-truth label column to the input addresses_to_match data."
-            )
         if self._canonical_relation is None:
             raise ValueError(
                 "accuracy_data requires access to the canonical dataset to determine "
@@ -348,7 +345,7 @@ class MatchResult:
         """Generate an accuracy chart or table from labelled match results.
 
         Mirrors Splink's ``linker.evaluation.accuracy_analysis_from_labels_table``
-        API.  Requires a ``ukam_label`` column in the input addresses.
+        API. Requires a ``ukam_label`` column in the input addresses.
 
         Args:
             match_weight_round_to_nearest: Round splink match weights to this
@@ -423,18 +420,31 @@ class MatchResult:
         *,
         baseline_match_weight: float,
         splink_comparison_weights: list[float] | None = None,
+        precision_at_metrics: list[int] | None = None,
+        human_readable: bool = True,
     ) -> SplinkModelComparisonOutput:
         """Return compact Splink threshold comparisons for reporting.
 
         Returns two tables:
         - headline_table: key operational and quality metrics per threshold
         - delta_table: changes versus the baseline threshold
+
+        Requires a ``ukam_label`` column in the match results relation.
+
+        ``human_readable=False`` returns machine-friendly numeric delta fields.
         """
+        predictions_relation = None
+        if precision_at_metrics is not None:
+            predictions_relation = self._splink_predictions()
+
         return build_splink_model_comparison(
             self.con,
             self._relation,
             baseline_match_weight=baseline_match_weight,
             splink_comparison_weights=splink_comparison_weights,
+            predictions_relation=predictions_relation,
+            precision_at_metrics=precision_at_metrics,
+            human_readable=human_readable,
         )
 
     def _stage_diagnostics_table(
