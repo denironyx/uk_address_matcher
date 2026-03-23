@@ -32,10 +32,6 @@ if TYPE_CHECKING:
     from uk_address_matcher.linking_model.matching.stages.splink import SplinkStage
 
 
-_SPLINK_MATCH_REASON = "splink: probabilistic match"
-_REPORT_LABEL_WIDTH = 27
-
-
 def _build_threshold_metrics_sql(rounding_expr: str) -> str:
     """Return threshold metrics SQL parameterised by the score-rounding expression.
 
@@ -233,11 +229,7 @@ class MatchResult:
         return _SplinkInspector(con=self.con, stage=stage)
 
     def _debug_tools(self) -> _MatchResultDebugTools:
-        return _MatchResultDebugTools(
-            self,
-            splink_match_reason=_SPLINK_MATCH_REASON,
-            report_label_width=_REPORT_LABEL_WIDTH,
-        )
+        return _MatchResultDebugTools(self)
 
     def _splink_results_for_messy_id(self, messy_id: str | int) -> DuckDBPyRelation:
         """Return human-friendly Splink candidates for one messy-side record."""

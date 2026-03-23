@@ -7,24 +7,20 @@ from typing import TYPE_CHECKING, Any
 from duckdb import DuckDBPyRelation
 
 from uk_address_matcher.post_linkage.match_result.splink_inspector import _sql_literal
+from uk_address_matcher.sql_pipeline.match_reasons import MatchReason
 
 if TYPE_CHECKING:
     from uk_address_matcher.post_linkage.match_result.result import MatchResult
 
 
+_REPORT_LABEL_WIDTH = 27
+
+
 class _MatchResultDebugTools:
-    def __init__(
-        self,
-        owner: MatchResult,
-        *,
-        splink_match_reason: str,
-        report_label_width: int,
-    ) -> None:
+    def __init__(self, owner: MatchResult) -> None:
         self._owner = owner
-        self._splink_match_reason = splink_match_reason
-        self._report_label_width = report_label_width
-        self._splink_match_reason = splink_match_reason
-        self._report_label_width = report_label_width
+        self._splink_match_reason = MatchReason.SPLINK.value
+        self._report_label_width = _REPORT_LABEL_WIDTH
 
     def _splink_best_matches_table(self) -> str:
         stage = self._owner._require_splink_stage()
