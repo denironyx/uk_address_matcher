@@ -30,6 +30,30 @@ def _run_threshold_metrics(
     return {row[cols.index("truth_threshold")]: dict(zip(cols, row)) for row in rows}
 
 
+def _make_result_without_ukam_label() -> MatchResult:
+    con = duckdb.connect()
+    con.register(
+        "m",
+        pa.Table.from_pylist(
+            [
+                {
+                    "unique_id": "a",
+                    "resolved_canonical_id": "1",
+                    "match_weight": 12.0,
+                    "match_reason": "splink: probabilistic match",
+                }
+            ]
+        ),
+    )
+    con.register("c", pa.Table.from_pylist([{"unique_id": "1"}]))
+
+    return MatchResult(
+        _relation=con.table("m"),
+        con=con,
+        _canonical_relation=con.table("c"),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -342,6 +366,43 @@ def test_accuracy_analysis_rejects_roc_output_type():
 
     with pytest.raises(ValueError, match="Invalid output_type"):
         result.accuracy_analysis(output_type="roc")
+
+
+@pytest.mark.parametrize(
+    ("method_name", "kwargs"),
+    [
+        ("_accuracy_table", {}),
+        (
+            "_compare_splink_model_results",
+            {
+                "baseline_match_weight": 10.0,
+                "precision_at_metrics": None,
+            },
+        ),
+    ],
+)
+def test_match_result_analysis_methods_require_ukam_label(method_name, kwargs):
+    result = _make_result_without_ukam_label()
+    method = getattr(result, method_name)
+
+    with pytest.raises(
+        ValueError,
+        match=f"{method_name} requires a 'ukam_label' column",
+    ):
+        method(**kwargs)
+
+
+def test_compare_splink_model_results_requires_ukam_label_without_top_k_metrics():
+    result = _make_result_without_ukam_label()
+
+    with pytest.raises(
+        ValueError,
+        match="_compare_splink_model_results requires a 'ukam_label' column",
+    ):
+        result._compare_splink_model_results(
+            baseline_match_weight=10.0,
+            precision_at_metrics=None,
+        )
 
 
 def test_accuracy_table_supports_splink_threshold_override():
