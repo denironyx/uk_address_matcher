@@ -12,9 +12,9 @@ from uk_address_matcher.analysis.accuracy_analysis import (
     build_threshold_selection_chart_definition,
     render_chart_definition,
 )
-from uk_address_matcher.analysis.table_accuracy_metrics import (
+from uk_address_matcher.analysis.accuracy_table import build_accuracy_table
+from uk_address_matcher.analysis.splink_comparison_metrics import (
     SplinkModelComparisonOutput,
-    build_accuracy_table,
     build_splink_model_comparison,
 )
 from uk_address_matcher.analysis.table_stage_diagnostics import (
@@ -423,18 +423,29 @@ class MatchResult:
         *,
         baseline_match_weight: float,
         splink_comparison_weights: list[float] | None = None,
+        precision_at_metrics: list[int] | None = None,
+        human_readable: bool = True,
     ) -> SplinkModelComparisonOutput:
         """Return compact Splink threshold comparisons for reporting.
 
         Returns two tables:
         - headline_table: key operational and quality metrics per threshold
         - delta_table: changes versus the baseline threshold
+
+        ``human_readable=False`` returns machine-friendly numeric delta fields.
         """
+        predictions_relation = None
+        if precision_at_metrics is not None:
+            predictions_relation = self._splink_predictions()
+
         return build_splink_model_comparison(
             self.con,
             self._relation,
             baseline_match_weight=baseline_match_weight,
             splink_comparison_weights=splink_comparison_weights,
+            predictions_relation=predictions_relation,
+            precision_at_metrics=precision_at_metrics,
+            human_readable=human_readable,
         )
 
     def _stage_diagnostics_table(
