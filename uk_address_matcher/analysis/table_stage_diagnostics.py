@@ -67,8 +67,8 @@ def build_stage_diagnostics_table(
         f"""
         WITH base_rows AS (
             SELECT
-                d.stage_order,
                 d.stage,
+                d.stage_order,
                 d.rows_entering_stage,
                 d.rows_matched_in_stage,
                 ROUND(100.0 * d.stage_match_rate, 2) AS stage_match_rate,
@@ -78,8 +78,8 @@ def build_stage_diagnostics_table(
             FROM ({stage_diagnostics_relation.sql_query()}) AS d
         )
         SELECT
-            stage_order,
             stage,
+            stage_order,
             rows_entering_stage,
             rows_matched_in_stage,
             stage_match_rate,

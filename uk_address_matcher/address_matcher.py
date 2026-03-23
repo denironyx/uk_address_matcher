@@ -91,6 +91,9 @@ class AddressMatcher:
         con: DuckDB connection to use for all operations.
         stages: Optional list of `MatchingStage` instances defining the
             matching pipeline. Defaults to exact match followed by Splink.
+        cleaning_num_chunks: Number of chunks to use for cleaning and term
+            frequency derivation when canonical input is a raw relation. Also
+            used for messy-address cleaning. Must be a positive integer.
         debug_options: Optional `DebugOptions` to control debug output and logging.
 
     Examples:
@@ -151,12 +154,18 @@ class AddressMatcher:
         con: duckdb.DuckDBPyConnection,
         stages: Optional[list[MatchingStage]] = None,
         debug_options: Optional[DebugOptions] = None,
+        cleaning_num_chunks: int = 10,
     ):
         self.con = con
         _ensure_splink_udfs(self.con)
         self.stages = stages if stages is not None else _default_stages()
         self.debug_options = debug_options
         self.canonical_address_filter = canonical_address_filter
+        if not isinstance(cleaning_num_chunks, int):
+            raise TypeError("cleaning_num_chunks must be an integer.")
+        if cleaning_num_chunks < 1:
+            raise ValueError("cleaning_num_chunks must be >= 1.")
+        self.cleaning_num_chunks = cleaning_num_chunks
 
         if self.canonical_address_filter is not None and not isinstance(
             self.canonical_address_filter, str
@@ -215,6 +224,7 @@ class AddressMatcher:
             self._tf_table = derive_term_frequencies_table(
                 canonical_for_preparation,
                 con=self.con,
+                num_of_chunks=self.cleaning_num_chunks,
                 debug_options=self.debug_options,
             )
 
@@ -222,6 +232,7 @@ class AddressMatcher:
             self._canonical_clean = prepare_data_for_matching(
                 canonical_for_preparation,
                 con=self.con,
+                num_of_chunks=self.cleaning_num_chunks,
                 term_frequency_lookup=self._tf_table,
                 dataset_role="canonical",
                 debug_options=self.debug_options,
@@ -241,6 +252,7 @@ class AddressMatcher:
         self._messy_clean = prepare_data_for_matching(
             self._raw_messy,
             con=self.con,
+            num_of_chunks=self.cleaning_num_chunks,
             # If nothing was loaded from disk, these will be None — but that's fine,
             term_frequency_lookup=self._tf_table,
             inverted_index=self._inverted_index,

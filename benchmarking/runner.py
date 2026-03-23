@@ -10,8 +10,6 @@ from benchmarking.config.datasets import (
     load_dataset,
 )
 from benchmarking.insights.diagnostics import build_dataset_diagnostics
-from benchmarking.insights.run_totals import build_run_totals
-from benchmarking.insights.stage_breakdown import build_stage_breakdown
 from benchmarking.insights.summary import fetch_overall_summary
 from benchmarking.insights.types import DatasetDiagnostics
 from benchmarking.utils.io import setup_connection
@@ -31,7 +29,6 @@ class BenchmarkRunResult:
     precision: float | None
     recall: float | None
     match_reason_breakdown: duckdb.DuckDBPyRelation
-    run_totals: duckdb.DuckDBPyRelation
     timings: dict[str, float]
     con: duckdb.DuckDBPyConnection
     diagnostics: DatasetDiagnostics | None = None
@@ -62,6 +59,7 @@ def run_single_dataset(
     sample_mode: bool = False,
     canonical_address_filter: str | None = None,
     enable_diagnostics: bool = False,
+    cleaning_num_chunks: int = 10,
 ) -> BenchmarkRunResult:
     dataset = get_dataset_definition(dataset_key)
     timings: dict[str, float] = {}
@@ -79,6 +77,7 @@ def run_single_dataset(
         con=con,
         stages=stages,
         canonical_address_filter=canonical_address_filter,
+        cleaning_num_chunks=cleaning_num_chunks,
     )
     match_result = matcher.match()
     matches = match_result.matches(all_columns=True)
@@ -90,13 +89,7 @@ def run_single_dataset(
     timings["total_runtime"] = perf_counter() - total_start
     accuracy_rel = match_result._accuracy_table()
     stage_diagnostics_rel = match_result._stage_diagnostics_table()
-    by_reason_rel = build_stage_breakdown(accuracy_rel)
-    run_totals_rel = build_run_totals(
-        con,
-        accuracy_rel,
-        total_input_rows=total_input_rows,
-        total_runtime_seconds=timings["total_runtime"],
-    )
+    by_reason_rel = accuracy_rel
     total_rows, matched_rows, correct_matches, precision, recall = fetch_overall_summary(
         con,
         accuracy_rel,
@@ -129,7 +122,6 @@ def run_single_dataset(
         precision=precision,
         recall=recall,
         match_reason_breakdown=by_reason_rel,
-        run_totals=run_totals_rel,
         accuracy_table=accuracy_rel,
         stage_diagnostics_table=stage_diagnostics_rel,
         timings=timings,
@@ -145,6 +137,7 @@ def run_selected_datasets(
     sample_mode: bool = False,
     canonical_address_filter: str | None = None,
     enable_diagnostics: bool = False,
+    cleaning_num_chunks: int = 10,
 ) -> list[BenchmarkRunResult]:
     selected = resolve_dataset_selection(selected_datasets)
     con = setup_connection()
@@ -160,6 +153,10 @@ def run_selected_datasets(
             sample_mode=sample_mode,
             canonical_address_filter=canonical_address_filter,
             enable_diagnostics=enable_diagnostics,
+            cleaning_num_chunks=cleaning_num_chunks,
+        )
+        print(
+            f"Completed dataset '{dataset_key}' in {result.timings['total_runtime']:.2f}s"
         )
         results.append(result)
 

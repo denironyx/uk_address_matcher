@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from benchmarking.config.sources import resolve_s3_path
+from benchmarking.config.sources import resolve_data_path
 from benchmarking.utils.io import load_duckdb_httpfs
 
 if TYPE_CHECKING:
@@ -33,26 +33,22 @@ _DATASETS: dict[str, dict[str, str]] = {
     "hackney": {
         "label": "Hackney council tax",
         "s3_key": "HACKNEY_CTBANDS_ONSUD_202507.csv",
-        "s3_base_env": "UKAM_HACKNEY_S3_BASE_PATH",
-        "s3_relative_env": "UKAM_HACKNEY_DATA_PATH",
+        "data_path_env": "UKAM_HACKNEY_DATA_PATH",
     },
     "lambeth_council_tax": {
         "label": "Lambeth council tax",
         "s3_key": "ctax.parquet",
-        "s3_base_env": "UKAM_LAMBETH_S3_BASE_PATH",
-        "s3_relative_env": "UKAM_LAMBETH_DATA_PATH",
+        "data_path_env": "UKAM_LAMBETH_DATA_PATH",
     },
     "lambeth_electoral_register": {
         "label": "Lambeth electoral register",
         "s3_key": "elecreg.parquet",
-        "s3_base_env": "UKAM_LAMBETH_S3_BASE_PATH",
-        "s3_relative_env": "UKAM_LAMBETH_DATA_PATH",
+        "data_path_env": "UKAM_LAMBETH_DATA_PATH",
     },
     "lambeth_llpg": {
         "label": "Lambeth LLPG",
         "s3_key": "llpg.parquet",
-        "s3_base_env": "UKAM_LAMBETH_S3_BASE_PATH",
-        "s3_relative_env": "UKAM_LAMBETH_DATA_PATH",
+        "data_path_env": "UKAM_LAMBETH_DATA_PATH",
     },
 }
 
@@ -227,7 +223,7 @@ def load_dataset(
     sample_mode: bool = False,
 ) -> duckdb.DuckDBPyRelation:
     dataset = get_dataset_definition(dataset_key)
-    base_path = resolve_s3_path(dataset["s3_base_env"], dataset["s3_relative_env"])
+    base_path = resolve_data_path(dataset["data_path_env"])
 
     maybe_enable_s3_for_path(con, base_path)
 

@@ -53,6 +53,17 @@ def _make_addresses(con, records):
     return con.from_arrow(pyarrow.Table.from_pylist(records))
 
 
+def _make_large_records(count: int, *, prefix: str) -> list[dict[str, str]]:
+    return [
+        {
+            "unique_id": f"{prefix}{index}",
+            "address_concat": f"{index} high street london",
+            "postcode": "SW1A 1AA",
+        }
+        for index in range(count)
+    ]
+
+
 @pytest.fixture
 def con():
     return duckdb.connect(database=":memory:")
@@ -154,6 +165,52 @@ def test_match_result_has_expected_columns(con, canonical_data, messy_data):
 
     assert "unique_id_l" in cols or "unique_id" in cols
     assert "match_reason" in cols
+
+
+def test_cleaning_num_chunks_is_propagated_to_cleaning_steps(
+    con,
+    caplog,
+):
+    canonical_data = _make_addresses(
+        con,
+        _make_large_records(20_500, prefix="C"),
+    )
+    messy_data = _make_addresses(
+        con,
+        _make_large_records(20_500, prefix="M"),
+    )
+
+    matcher = AddressMatcher(
+        canonical_addresses=canonical_data,
+        addresses_to_match=messy_data,
+        con=con,
+        stages=[ExactMatchStage()],
+        cleaning_num_chunks=2,
+    )
+
+    with caplog.at_level(logging.INFO, logger="uk_address_matcher"):
+        matcher._resolve_canonical_data()
+        matcher._resolve_messy_data()
+
+    info_messages = [
+        record.getMessage() for record in caplog.records if record.levelno == logging.INFO
+    ]
+
+    cleaned_logs = [
+        message
+        for message in info_messages
+        if message.startswith("Cleaned and preprocessed:")
+    ]
+    tf_logs = [
+        message
+        for message in info_messages
+        if message.startswith("Applied term frequencies:")
+    ]
+
+    assert any("chunk 1/2" in message for message in cleaned_logs)
+    assert any("chunk 2/2" in message for message in cleaned_logs)
+    assert any("chunk 1/2" in message for message in tf_logs)
+    assert any("chunk 2/2" in message for message in tf_logs)
 
 
 def test_match_with_custom_splink_stage(con, canonical_data, messy_data):

@@ -174,19 +174,15 @@ def test_build_dataset_diagnostics_adds_top_splink_for_unmatched() -> None:
     assert columns == [
         "unique_id",
         "ukam_address_id",
-        "postcode",
         "original_address_concat",
         "cleaned_full_address",
-        "clean_full_address_canonical",
         "highest_splink_comparison",
         "match_weight",
     ]
     assert diagnostics.splink_available is True
-    assert by_unique_id["u1"][5] == "1 MAIN ROAD CANDIDATE"
-    assert by_unique_id["u2"][5] == "2 MAIN ROAD CANDIDATE"
-    assert float(by_unique_id["u1"][6]) == pytest.approx(0.85, rel=1e-6)
-    assert float(by_unique_id["u1"][7]) == pytest.approx(4.0, rel=1e-6)
-    assert float(by_unique_id["u2"][6]) == pytest.approx(0.55, rel=1e-6)
+    assert float(by_unique_id["u1"][4]) == pytest.approx(0.85, rel=1e-6)
+    assert float(by_unique_id["u1"][5]) == pytest.approx(4.0, rel=1e-6)
+    assert float(by_unique_id["u2"][4]) == pytest.approx(0.55, rel=1e-6)
 
 
 def test_build_dataset_diagnostics_adds_top_splink_for_unmatched_by_ukam_id() -> None:
@@ -260,10 +256,10 @@ def test_build_dataset_diagnostics_adds_top_splink_for_unmatched_by_ukam_id() ->
     assert diagnostics.unmatched_top_splink is not None
     rows = diagnostics.unmatched_top_splink.fetchall()
     by_unique_id = {row[0]: row for row in rows}
-    assert by_unique_id["u1"][5] is None
-    assert by_unique_id["u2"][5] is None
-    assert float(by_unique_id["u1"][6]) == pytest.approx(0.90, rel=1e-6)
-    assert float(by_unique_id["u2"][6]) == pytest.approx(0.42, rel=1e-6)
+    assert float(by_unique_id["u1"][4]) == pytest.approx(0.90, rel=1e-6)
+    assert float(by_unique_id["u2"][4]) == pytest.approx(0.42, rel=1e-6)
+    assert float(by_unique_id["u1"][5]) == pytest.approx(6.0, rel=1e-6)
+    assert float(by_unique_id["u2"][5]) == pytest.approx(1.5, rel=1e-6)
 
 
 def test_build_dataset_diagnostics_rolls_up_canonical_variants() -> None:
@@ -501,7 +497,6 @@ def test_print_diagnostics_respects_output_toggles(
         precision=0.5,
         recall=1 / 3,
         match_reason_breakdown=con.sql("SELECT 1 AS x"),
-        run_totals=con.sql("SELECT 1 AS x"),
         timings={"data_load": 0.1, "match_pipeline": 0.2, "total_runtime": 0.3},
         con=con,
         diagnostics=diagnostics,
