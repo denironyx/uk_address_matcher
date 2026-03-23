@@ -178,18 +178,12 @@ class MatchResult:
                 key result columns are returned.
         """
         relation_sql = self._relation.sql_query()
-        if "match_reason" in self._relation.columns:
-            base_relation_sql = f"""
-            SELECT * REPLACE (
-                CAST(match_reason AS VARCHAR) AS match_reason
-            )
-            FROM ({relation_sql}) AS match_result
-            """
-        else:
-            base_relation_sql = f"""
-            SELECT *
-            FROM ({relation_sql}) AS match_result
-            """
+        base_relation_sql = f"""
+        SELECT * REPLACE (
+            CAST(match_reason AS VARCHAR) AS match_reason
+        )
+        FROM ({relation_sql}) AS match_result
+        """
         if all_columns:
             return self.con.sql(base_relation_sql)
         preferred = [
