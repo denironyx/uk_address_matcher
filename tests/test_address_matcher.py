@@ -167,6 +167,26 @@ def test_match_result_has_expected_columns(con, canonical_data, messy_data):
     assert "match_reason" in cols
 
 
+def test_match_result_casts_match_reason_to_varchar(con, canonical_data, messy_data):
+    matcher = AddressMatcher(
+        canonical_addresses=canonical_data,
+        addresses_to_match=messy_data,
+        con=con,
+        stages=[ExactMatchStage()],
+    )
+    result = matcher.match()
+
+    default_rows = con.execute(
+        f"DESCRIBE SELECT match_reason FROM ({result.matches().sql_query()})"
+    ).fetchall()
+    all_columns_rows = con.execute(
+        f"DESCRIBE SELECT match_reason FROM ({result.matches(all_columns=True).sql_query()})"
+    ).fetchall()
+
+    assert default_rows[0][1] == "VARCHAR"
+    assert all_columns_rows[0][1] == "VARCHAR"
+
+
 def test_cleaning_num_chunks_is_propagated_to_cleaning_steps(
     con,
     caplog,

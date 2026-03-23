@@ -170,6 +170,16 @@ class MatchResult:
             "Use .matches() to retrieve your raw results as a DuckDB table."
         )
 
+    @staticmethod
+    def _display_projection_sql(columns: list[str]) -> str:
+        projected = [
+            "CAST(match_result.match_reason AS VARCHAR) AS match_reason"
+            if column == "match_reason"
+            else f"match_result.{column}"
+            for column in columns
+        ]
+        return ",\n            ".join(projected)
+
     def matches(self, *, all_columns: bool = False) -> DuckDBPyRelation:
         """The underlying DuckDB relation containing match results.
 
@@ -178,7 +188,14 @@ class MatchResult:
                 key result columns are returned.
         """
         if all_columns:
-            return self._relation
+            projection_sql = self._display_projection_sql(self._relation.columns)
+            return self.con.sql(
+                f"""
+                SELECT
+                    {projection_sql}
+                FROM ({self._relation.sql_query()}) AS match_result
+                """
+            )
         preferred = [
             "unique_id",
             "resolved_canonical_id",
@@ -191,7 +208,14 @@ class MatchResult:
         ]
         available = set(self._relation.columns)
         cols = [c for c in preferred if c in available]
-        return self._relation.select(*cols)
+        projection_sql = self._display_projection_sql(cols)
+        return self.con.sql(
+            f"""
+            SELECT
+                {projection_sql}
+            FROM ({self._relation.sql_query()}) AS match_result
+            """
+        )
 
     def match_metrics(
         self,
