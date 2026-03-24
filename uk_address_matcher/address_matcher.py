@@ -339,6 +339,7 @@ class AddressMatcher:
             con=self.con,
             _splink_stage=splink_stage,
             _canonical_relation=self._canonical_clean,
+            _messy_relation=self._messy_clean,
             _stage_diagnostics=stage_diagnostics,
         )
 

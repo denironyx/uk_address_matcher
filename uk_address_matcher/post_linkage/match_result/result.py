@@ -22,9 +22,10 @@ from uk_address_matcher.analysis.table_stage_diagnostics import (
     build_stage_diagnostics_table,
 )
 from uk_address_matcher.post_linkage.analyse_results import _calculate_match_metrics
-from uk_address_matcher.post_linkage.match_result.splink_inspector import (
-    _SplinkInspector,
+from uk_address_matcher.post_linkage.match_result.debug_tools import (
+    _MatchResultDebugTools,
 )
+from uk_address_matcher.post_linkage.match_result.splink_inspector import _SplinkInspector
 from uk_address_matcher.sql_pipeline.match_reasons import MatchReason
 
 if TYPE_CHECKING:
@@ -161,6 +162,7 @@ class MatchResult:
     con: DuckDBPyConnection
     _splink_stage: SplinkStage | None = None
     _canonical_relation: DuckDBPyRelation | None = None
+    _messy_relation: DuckDBPyRelation | None = None
     _stage_diagnostics: StageDiagnostics | None = None
 
     def __repr__(self) -> str:
@@ -226,21 +228,24 @@ class MatchResult:
             )
         return _SplinkInspector(con=self.con, stage=stage)
 
-    def _splink_best_matches_table(self) -> str:
-        """Return the name of the DuckDB table holding Splink best matches.
+    def _debug_tools(self) -> _MatchResultDebugTools:
+        return _MatchResultDebugTools(self)
 
-        Raises:
-            ValueError: When no SplinkStage was configured, or when the stage
-                was configured but did not run far enough to create the table.
-        """
-        stage = self._require_splink_stage()
-        if stage.best_matches_table is None:
-            raise ValueError(
-                "SplinkStage is configured but did not produce a best-matches "
-                "table. This can happen when earlier stages matched all "
-                "records before the Splink stage ran."
-            )
-        return stage.best_matches_table
+    def _splink_results_for_messy_id(self, messy_id: str | int) -> DuckDBPyRelation:
+        """Return human-friendly Splink candidates for one messy-side record."""
+        return self._debug_tools().splink_results_for_messy_id(messy_id)
+
+    def _messy_id_report(
+        self,
+        messy_id: str | int,
+        *,
+        display_output: bool = True,
+    ) -> dict[str, Any]:
+        """Return a human-readable ASCII report for one messy-side record."""
+        return self._debug_tools().messy_id_report(
+            messy_id,
+            display_output=display_output,
+        )
 
     def _splink_predictions(
         self,
