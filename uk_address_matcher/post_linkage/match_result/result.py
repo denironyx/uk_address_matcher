@@ -179,8 +179,15 @@ class MatchResult:
             all_columns: When True, return every column. By default only the
                 key result columns are returned.
         """
+        relation_sql = self._relation.sql_query()
+        base_relation_sql = f"""
+        SELECT * REPLACE (
+            CAST(match_reason AS VARCHAR) AS match_reason
+        )
+        FROM ({relation_sql}) AS match_result
+        """
         if all_columns:
-            return self._relation
+            return self.con.sql(base_relation_sql)
         preferred = [
             "unique_id",
             "resolved_canonical_id",
@@ -193,7 +200,13 @@ class MatchResult:
         ]
         available = set(self._relation.columns)
         cols = [c for c in preferred if c in available]
-        return self._relation.select(*cols)
+        return self.con.sql(
+            f"""
+            SELECT
+                {", ".join(cols)}
+            FROM ({base_relation_sql}) AS match_result
+            """
+        )
 
     def match_metrics(
         self,
