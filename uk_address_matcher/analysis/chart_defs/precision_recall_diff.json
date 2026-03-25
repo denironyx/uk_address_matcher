@@ -87,6 +87,12 @@
             "format": ".2%"
           },
           {
+            "field": "baseline_fp",
+            "type": "quantitative",
+            "title": "Baseline false positives",
+            "format": ".0f"
+          },
+          {
             "field": "baseline_recall",
             "type": "quantitative",
             "title": "Baseline recall",
@@ -97,6 +103,12 @@
             "type": "quantitative",
             "title": "Interpolated comparison precision",
             "format": ".2%"
+          },
+          {
+            "field": "comparison_fp",
+            "type": "quantitative",
+            "title": "Interpolated comparison false positives",
+            "format": ".0f"
           },
           {
             "field": "precision_gap_percentage_points",

@@ -178,9 +178,26 @@ def _interpolate_precision_for_recall(
     *,
     target_recall: float,
 ) -> float:
-    candidate_precisions: list[float] = []
+    return _interpolate_numeric_field_for_recall(
+        records,
+        field_name="precision",
+        target_recall=target_recall,
+    )
 
-    for left, right in zip(records, records[1:]):
+
+def _interpolate_numeric_field_for_recall(
+    records: list[dict[str, Any]],
+    *,
+    field_name: str,
+    target_recall: float,
+) -> float | None:
+    candidate_values: list[float] = []
+
+    usable_records = [record for record in records if record.get(field_name) is not None]
+    if not usable_records:
+        return None
+
+    for left, right in zip(usable_records, usable_records[1:]):
         left_recall = float(left["recall"])
         right_recall = float(right["recall"])
         lower_recall = min(left_recall, right_recall)
@@ -188,32 +205,32 @@ def _interpolate_precision_for_recall(
         if not (lower_recall <= target_recall <= upper_recall):
             continue
 
-        left_precision = float(left["precision"])
-        right_precision = float(right["precision"])
+        left_value = float(left[field_name])
+        right_value = float(right[field_name])
 
         if left_recall == right_recall:
-            clamped_precision = min(
-                max(left_precision, min(left_precision, right_precision)),
-                max(left_precision, right_precision),
+            clamped_value = min(
+                max(left_value, min(left_value, right_value)),
+                max(left_value, right_value),
             )
-            candidate_precisions.append(clamped_precision)
+            candidate_values.append(clamped_value)
             continue
 
         interpolation_fraction = (target_recall - left_recall) / (
             right_recall - left_recall
         )
-        candidate_precisions.append(
-            left_precision + interpolation_fraction * (right_precision - left_precision)
+        candidate_values.append(
+            left_value + interpolation_fraction * (right_value - left_value)
         )
 
-    if candidate_precisions:
-        return candidate_precisions[0]
+    if candidate_values:
+        return candidate_values[0]
 
     nearest_record = min(
-        records,
+        usable_records,
         key=lambda record: abs(float(record["recall"]) - target_recall),
     )
-    return float(nearest_record["precision"])
+    return float(nearest_record[field_name])
 
 
 def _build_diff_records(
@@ -240,12 +257,19 @@ def _build_diff_records(
                 comparison_records,
                 target_recall=baseline_recall,
             )
+            comparison_fp = _interpolate_numeric_field_for_recall(
+                comparison_records,
+                field_name="fp",
+                target_recall=baseline_recall,
+            )
             diff_records.append(
                 {
                     "baseline_recall": baseline_recall,
                     "baseline_precision": baseline_precision,
+                    "baseline_fp": baseline_record.get("fp"),
                     "comparison_label": comparison_label,
                     "comparison_precision": comparison_precision,
+                    "comparison_fp": comparison_fp,
                     "precision_gap_percentage_points": (
                         comparison_precision - baseline_precision
                     )
@@ -287,6 +311,12 @@ def _build_overlay_chart_definition(
             "field": "series_label",
             "type": "nominal",
             "title": "Curve",
+        },
+        {
+            "field": "fp",
+            "type": "quantitative",
+            "title": "False positives",
+            "format": ".0f",
         },
         *top_panel["encoding"]["tooltip"],
     ]
