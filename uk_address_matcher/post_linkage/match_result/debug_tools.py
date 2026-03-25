@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import redirect_stdout
 from io import StringIO
+from math import isclose
 from typing import TYPE_CHECKING, Any
 
 from duckdb import DuckDBPyRelation
@@ -232,6 +233,117 @@ class _MatchResultDebugTools:
             LIMIT 1
         """)
 
+    def _chart_to_dict(self, chart: Any) -> dict[str, Any] | None:
+        if isinstance(chart, dict):
+            return chart
+
+        to_dict = getattr(chart, "to_dict", None)
+        if callable(to_dict):
+            chart_dict = to_dict()
+            if isinstance(chart_dict, dict):
+                return chart_dict
+
+        return None
+
+    def _format_signed_weight(self, value: float) -> str:
+        return f"{value:+.2f}"
+
+    def _format_weight(self, value: float) -> str:
+        return f"{value:.2f}"
+
+    def _waterfall_step_heading(self, row: dict[str, Any]) -> str:
+        column_name = str(row.get("column_name") or "Unknown")
+
+        if column_name in {"Prior", "Prior match weight"}:
+            return "Prior (starting match weight)"
+        if column_name == "Final score":
+            return "Final score"
+
+        label = row.get("label_for_charts")
+        if isinstance(label, str) and label and label not in {column_name, "Final score"}:
+            return f"{column_name} ({label})"
+
+        return column_name
+
+    def _waterfall_rows_from_chart(self, chart: Any) -> list[dict[str, Any]]:
+        chart_dict = self._chart_to_dict(chart)
+        if chart_dict is None:
+            return []
+
+        data_name = chart_dict.get("data", {}).get("name")
+        datasets = chart_dict.get("datasets", {})
+        if not isinstance(data_name, str) or data_name not in datasets:
+            return []
+
+        rows = datasets.get(data_name)
+        if not isinstance(rows, list):
+            return []
+
+        filtered_rows: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            bayes_factor = row.get("bayes_factor")
+            column_name = row.get("column_name")
+            if (
+                isinstance(bayes_factor, (int, float))
+                and isclose(float(bayes_factor), 1.0)
+                and column_name not in {"Prior", "Prior match weight", "Final score"}
+            ):
+                continue
+            filtered_rows.append(row)
+
+        return sorted(
+            filtered_rows,
+            key=lambda row: (
+                row.get("record_number", 0),
+                row.get("bar_sort_order", 0),
+            ),
+        )
+
+    def _waterfall_text_summary(self, title: str, chart: Any) -> str | None:
+        rows = self._waterfall_rows_from_chart(chart)
+        if not rows:
+            return None
+
+        summary_lines = [title]
+        cumulative_sum = 0.0
+
+        for row in rows:
+            column_name = row.get("column_name")
+            log2_bayes_factor = row.get("log2_bayes_factor")
+            if not isinstance(log2_bayes_factor, (int, float)):
+                continue
+
+            weight = float(log2_bayes_factor)
+            heading = self._waterfall_step_heading(row)
+
+            if column_name in {"Prior", "Prior match weight"}:
+                cumulative_sum = weight
+                summary_lines.append(f"{heading}: {self._format_weight(weight)}")
+                continue
+
+            if column_name == "Final score":
+                probability = row.get("prob")
+                if not isinstance(probability, (int, float)):
+                    probability = 1.0 / (1.0 + 2.0 ** (-weight))
+                summary_lines.append(
+                    f"{heading}: {self._format_weight(weight)}. "
+                    f"Match probability: {float(probability):.4f}"
+                )
+                continue
+
+            cumulative_sum += weight
+            summary_lines.append(
+                f"{heading}: {self._format_signed_weight(weight)}. "
+                f"Cumulative sum: {self._format_weight(cumulative_sum)}"
+            )
+
+        if len(summary_lines) == 1:
+            return None
+
+        return "\n".join(summary_lines)
+
     def _maybe_display_messy_id_waterfall_charts(
         self,
         *,
@@ -295,6 +407,7 @@ class _MatchResultDebugTools:
                 {
                     "title": title,
                     "chart": chart,
+                    "text": self._waterfall_text_summary(title, chart),
                     "display": display,
                 }
             )
@@ -538,6 +651,7 @@ class _MatchResultDebugTools:
         messy_id: str | int,
         *,
         display_output: bool = True,
+        charts_as_text: bool = False,
     ) -> dict[str, Any]:
         emitted_row = self._query_one_row(f"""
             SELECT *
@@ -715,6 +829,9 @@ class _MatchResultDebugTools:
             for warning in waterfall_data["warnings"]:
                 print(f"\nWarning: {warning}")  # noqa: T201
             for waterfall in waterfall_data["waterfalls"]:
+                if charts_as_text and waterfall.get("text"):
+                    print(f"\n{waterfall['text']}")  # noqa: T201
+                    continue
                 waterfall["display"](waterfall["title"])
                 waterfall["display"](waterfall["chart"])
 
@@ -724,6 +841,7 @@ class _MatchResultDebugTools:
                 {
                     "title": waterfall["title"],
                     "chart": waterfall["chart"],
+                    "text": waterfall.get("text"),
                 }
                 for waterfall in waterfall_data["waterfalls"]
             ],
