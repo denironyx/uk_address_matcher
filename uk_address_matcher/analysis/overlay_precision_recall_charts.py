@@ -130,9 +130,7 @@ def _normalise_comparison_labels(
 
     labels = list(comparison_labels)
     if len(labels) != len(comparison_charts):
-        raise ValueError(
-            "comparison_labels must provide one label per comparison chart"
-        )
+        raise ValueError("comparison_labels must provide one label per comparison chart")
     return labels
 
 
@@ -184,8 +182,8 @@ def _interpolate_precision_for_recall(
             candidate_precisions.append(clamped_precision)
             continue
 
-        interpolation_fraction = (
-            (target_recall - left_recall) / (right_recall - left_recall)
+        interpolation_fraction = (target_recall - left_recall) / (
+            right_recall - left_recall
         )
         candidate_precisions.append(
             left_precision + interpolation_fraction * (right_precision - left_precision)
@@ -225,9 +223,7 @@ def _build_diff_records(
                         comparison_precision - baseline_precision
                     )
                     * 100.0,
-                    "baseline_truth_threshold": baseline_record.get(
-                        "truth_threshold"
-                    ),
+                    "baseline_truth_threshold": baseline_record.get("truth_threshold"),
                     "baseline_match_probability": baseline_record.get(
                         "match_probability"
                     ),
