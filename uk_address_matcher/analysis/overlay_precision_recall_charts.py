@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from importlib.resources import files
 from os import PathLike
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,22 @@ _OVERLAY_COLOUR_RANGE = [
     "#B279A2",
     "#FF9DA6",
 ]
+
+
+def _load_chart_definition(file_name: str) -> dict[str, Any]:
+    chart_path = files("uk_address_matcher.analysis.chart_defs").joinpath(file_name)
+    with chart_path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _prepare_nested_chart_definition(
+    chart_definition: dict[str, Any],
+) -> dict[str, Any]:
+    nested_chart_definition = dict(chart_definition)
+    nested_chart_definition.pop("$schema", None)
+    nested_chart_definition.pop("config", None)
+    nested_chart_definition.pop("padding", None)
+    return nested_chart_definition
 
 
 def _load_precision_recall_chart_input(
@@ -206,8 +223,18 @@ def _build_diff_records(
     diff_records: list[dict[str, Any]] = []
 
     for comparison_label, comparison_records in comparison_records_by_label:
+        min_comparison_recall = min(
+            float(record["recall"]) for record in comparison_records
+        )
+        max_comparison_recall = max(
+            float(record["recall"]) for record in comparison_records
+        )
+
         for baseline_record in baseline_records:
             baseline_recall = float(baseline_record["recall"])
+            if not (min_comparison_recall <= baseline_recall <= max_comparison_recall):
+                continue
+
             baseline_precision = float(baseline_record["precision"])
             comparison_precision = _interpolate_precision_for_recall(
                 comparison_records,
@@ -238,208 +265,82 @@ def _build_overlay_chart_definition(
     diff_records: list[dict[str, Any]],
     label_records: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    top_panel = {
-        "width": 620,
-        "height": 320,
-        "data": {"values": curve_records},
-        "layer": [
-            {
-                "mark": {
-                    "type": "line",
-                    "strokeWidth": 2.5,
-                    "point": {
-                        "filled": True,
-                        "size": 36,
-                    },
-                },
-                "encoding": {
-                    "x": {
-                        "field": "recall",
-                        "type": "quantitative",
-                        "title": "Recall",
-                        "axis": {"format": ".1%"},
-                        "scale": {"domain": [0, 1]},
-                    },
-                    "y": {
-                        "field": "precision",
-                        "type": "quantitative",
-                        "title": "Precision",
-                        "axis": {"format": ".1%"},
-                        "scale": {"zero": False},
-                    },
-                    "order": {
-                        "field": "recall",
-                        "type": "quantitative",
-                    },
-                    "color": {
-                        "field": "series_label",
-                        "type": "nominal",
-                        "title": "Curve",
-                        "scale": {"range": _OVERLAY_COLOUR_RANGE},
-                    },
-                    "strokeDash": {
-                        "field": "is_baseline",
-                        "type": "nominal",
-                        "legend": None,
-                        "scale": {
-                            "domain": [True, False],
-                            "range": [[1, 0], [6, 3]],
-                        },
-                    },
-                    "tooltip": [
-                        {
-                            "field": "series_label",
-                            "type": "nominal",
-                            "title": "Curve",
-                        },
-                        {
-                            "field": "truth_threshold",
-                            "type": "quantitative",
-                            "title": "Match weight threshold",
-                            "format": ".2f",
-                        },
-                        {
-                            "field": "match_probability",
-                            "type": "quantitative",
-                            "title": "Match probability",
-                            "format": ".4f",
-                        },
-                        {
-                            "field": "precision",
-                            "type": "quantitative",
-                            "title": "Precision",
-                            "format": ".2%",
-                        },
-                        {
-                            "field": "recall",
-                            "type": "quantitative",
-                            "title": "Recall",
-                            "format": ".2%",
-                        },
-                    ],
-                },
-            },
-            {
-                "data": {"values": label_records},
-                "mark": {
-                    "type": "text",
-                    "align": "left",
-                    "baseline": "middle",
-                    "dx": 7,
-                    "fontSize": 11,
-                    "fontWeight": "bold",
-                },
-                "encoding": {
-                    "x": {
-                        "field": "recall",
-                        "type": "quantitative",
-                    },
-                    "y": {
-                        "field": "precision",
-                        "type": "quantitative",
-                    },
-                    "text": {
-                        "field": "series_label",
-                        "type": "nominal",
-                    },
-                    "color": {
-                        "field": "series_label",
-                        "type": "nominal",
-                        "legend": None,
-                        "scale": {"range": _OVERLAY_COLOUR_RANGE},
-                    },
-                },
-            },
-        ],
+    top_panel = _prepare_nested_chart_definition(
+        _load_chart_definition("precision_recall.json")
+    )
+    top_panel["data"]["values"] = curve_records
+    top_panel.pop("params", None)
+    top_panel["height"] = 320
+    top_panel["mark"]["fillOpacity"] = 0.08
+    top_panel["encoding"]["detail"] = {
+        "field": "series_id",
+        "type": "nominal",
     }
+    top_panel["encoding"]["color"] = {
+        "field": "series_label",
+        "type": "nominal",
+        "title": "Curve",
+        "scale": {"range": _OVERLAY_COLOUR_RANGE},
+    }
+    top_panel["encoding"]["tooltip"] = [
+        {
+            "field": "series_label",
+            "type": "nominal",
+            "title": "Curve",
+        },
+        *top_panel["encoding"]["tooltip"],
+    ]
 
-    bottom_panel = {
-        "width": 620,
-        "height": 180,
-        "data": {"values": diff_records},
-        "layer": [
-            {
-                "mark": {
-                    "type": "rule",
-                    "color": "#9AA1A6",
-                    "strokeDash": [4, 4],
+    top_mark = top_panel.pop("mark")
+    top_encoding = top_panel.pop("encoding")
+    top_panel["layer"] = [
+        {
+            "mark": top_mark,
+            "encoding": top_encoding,
+        },
+        {
+            "data": {"values": label_records},
+            "mark": {
+                "type": "text",
+                "align": "left",
+                "baseline": "middle",
+                "dx": 7,
+                "fontSize": 11,
+                "fontWeight": "bold",
+            },
+            "encoding": {
+                "x": {
+                    "field": "recall",
+                    "type": "quantitative",
                 },
-                "encoding": {
-                    "y": {"datum": 0},
+                "y": {
+                    "field": "precision",
+                    "type": "quantitative",
+                },
+                "text": {
+                    "field": "series_label",
+                    "type": "nominal",
+                },
+                "color": {
+                    "field": "series_label",
+                    "type": "nominal",
+                    "legend": None,
+                    "scale": {"range": _OVERLAY_COLOUR_RANGE},
                 },
             },
-            {
-                "mark": {
-                    "type": "line",
-                    "strokeWidth": 2,
-                    "point": {
-                        "filled": True,
-                        "size": 34,
-                    },
-                },
-                "encoding": {
-                    "x": {
-                        "field": "baseline_recall",
-                        "type": "quantitative",
-                        "title": "Baseline recall",
-                        "axis": {"format": ".1%"},
-                        "scale": {"domain": [0, 1]},
-                    },
-                    "y": {
-                        "field": "precision_gap_percentage_points",
-                        "type": "quantitative",
-                        "title": "Precision gap (percentage points)",
-                        "axis": {"format": "+.2f"},
-                    },
-                    "order": {
-                        "field": "baseline_recall",
-                        "type": "quantitative",
-                    },
-                    "color": {
-                        "field": "comparison_label",
-                        "type": "nominal",
-                        "title": "Comparison",
-                        "scale": {"range": _OVERLAY_COLOUR_RANGE[1:]},
-                    },
-                    "tooltip": [
-                        {
-                            "field": "comparison_label",
-                            "type": "nominal",
-                            "title": "Comparison",
-                        },
-                        {
-                            "field": "baseline_precision",
-                            "type": "quantitative",
-                            "title": "Baseline precision",
-                            "format": ".2%",
-                        },
-                        {
-                            "field": "baseline_recall",
-                            "type": "quantitative",
-                            "title": "Baseline recall",
-                            "format": ".2%",
-                        },
-                        {
-                            "field": "comparison_precision",
-                            "type": "quantitative",
-                            "title": "Interpolated comparison precision",
-                            "format": ".2%",
-                        },
-                        {
-                            "field": "precision_gap_percentage_points",
-                            "type": "quantitative",
-                            "title": "Precision gap (percentage points)",
-                            "format": "+.2f",
-                        },
-                    ],
-                },
-            },
-        ],
-    }
+        },
+    ]
+
+    bottom_panel = _prepare_nested_chart_definition(
+        _load_chart_definition("precision_recall_diff.json")
+    )
+    bottom_panel["data"]["values"] = diff_records
 
     return {
         "$schema": "https://vega.github.io/schema/vega-lite/v6.1.0.json",
-        "description": "Overlayed precision-recall curves with recall-aligned precision gaps",
+        "description": (
+            "Overlayed precision-recall curves with recall-aligned precision gaps"
+        ),
         "title": "Precision-Recall Curve Comparison",
         "padding": {"top": 5, "left": 5, "right": 5, "bottom": 5},
         "vconcat": [
