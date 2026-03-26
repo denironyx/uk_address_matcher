@@ -253,11 +253,13 @@ class MatchResult:
         messy_id: str | int,
         *,
         display_output: bool = True,
+        charts_as_text: bool = False,
     ) -> dict[str, Any]:
         """Return a human-readable ASCII report for one messy-side record."""
         return self._debug_tools().messy_id_report(
             messy_id,
             display_output=display_output,
+            charts_as_text=charts_as_text,
         )
 
     def _splink_predictions(
