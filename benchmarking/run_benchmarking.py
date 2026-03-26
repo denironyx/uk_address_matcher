@@ -36,6 +36,7 @@ TOP_K_PRECISION_AT_METRICS: list[int] = [1, 3, 5]
 
 # SELECTED_DATASETS: str | list[str] = "all"
 SELECTED_DATASETS: str | list[str] = "hackney"
+# SELECTED_DATASETS: str | list[str] = "lambeth_llpg"
 STAGES = [
     ExactMatchStage(),
     PeeledAddressStage(),
@@ -43,6 +44,9 @@ STAGES = [
 ]
 APPLY_CANONICAL_FILTER = True
 CLEANING_NUM_CHUNKS = 1
+PERSIST_RESULTS = True
+RESULTS_ROOT = "benchmarking/results"
+ENABLE_COMPARISON_CHARTS = True
 
 
 # Defaults: always print summary sections (timings, accuracy, diagnostics),
@@ -77,6 +81,9 @@ results = run_selected_datasets(
     canonical_address_filter=(CANONICAL_FILTER_SQL if APPLY_CANONICAL_FILTER else None),
     enable_diagnostics=OUTPUT_OPTIONS.enable_diagnostics(),
     cleaning_num_chunks=CLEANING_NUM_CHUNKS,
+    persist_results=PERSIST_RESULTS,
+    results_root=RESULTS_ROOT,
+    enable_comparison_charts=ENABLE_COMPARISON_CHARTS,
 )
 print_benchmark_summary(
     results,
@@ -85,3 +92,13 @@ print_benchmark_summary(
     top_k_precision_at_metrics=TOP_K_PRECISION_AT_METRICS,
     output_options=OUTPUT_OPTIONS,
 )
+
+# {
+# 	"UKAM_LAMBETH_DATA_PATH": "/Users/thomas.hepworth/data/address_matcher/secret_data/lambeth/",
+# 	"UKAM_HACKNEY_DATA_PATH": "/Users/thomas.hepworth/data/address_matcher/secret_data/hackney",
+# 	"UKAM_OS_CANONICAL_PREPARED": "/Users/thomas.hepworth/data/address_matcher/secret_data/os/ukam_prepared_canonical"
+# 	"UKAM_OS_CANONICAL_PREPARED": "./data/ukam_prepared_canonical"
+# }
+
+# 3989a44d95e549ea
+# a4b5ed29a00f8360
