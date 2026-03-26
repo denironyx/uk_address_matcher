@@ -10,8 +10,9 @@ from benchmarking.config.datasets import (
     load_dataset,
 )
 from benchmarking.insights.diagnostics import build_dataset_diagnostics
+from benchmarking.insights.run_persistence import persist_benchmark_run
 from benchmarking.insights.summary import fetch_overall_summary
-from benchmarking.insights.types import DatasetDiagnostics
+from benchmarking.insights.types import DatasetDiagnostics, PersistedBenchmarkRun
 from benchmarking.utils.io import setup_connection
 from uk_address_matcher import AddressMatcher
 
@@ -36,6 +37,7 @@ class BenchmarkRunResult:
     stage_diagnostics_table: duckdb.DuckDBPyRelation | None = None
     splink_predictions: duckdb.DuckDBPyRelation | None = None
     splink_available: bool = False
+    persisted_run: PersistedBenchmarkRun | None = None
 
 
 def resolve_dataset_selection(selection: str | list[str]) -> list[str]:
@@ -62,6 +64,9 @@ def run_single_dataset(
     canonical_address_filter: str | None = None,
     enable_diagnostics: bool = False,
     cleaning_num_chunks: int = 10,
+    persist_results: bool = False,
+    results_root: str = "benchmarking/results",
+    enable_comparison_charts: bool = True,
 ) -> BenchmarkRunResult:
     dataset = get_dataset_definition(dataset_key)
     timings: dict[str, float] = {}
@@ -116,6 +121,24 @@ def run_single_dataset(
             splink_predictions=splink_predictions,
         )
 
+    persisted_run: PersistedBenchmarkRun | None = None
+    if persist_results:
+        persisted_run = persist_benchmark_run(
+            dataset_key=dataset_key,
+            dataset_label=dataset["label"],
+            stages=stages,
+            accuracy_table=accuracy_rel,
+            stage_diagnostics_table=stage_diagnostics_rel,
+            timings=timings,
+            total_rows=total_rows,
+            matched_rows=matched_rows,
+            correct_matches=correct_matches,
+            precision=precision,
+            recall=recall,
+            results_root=results_root,
+            enable_chart_exports=enable_comparison_charts,
+        )
+
     return BenchmarkRunResult(
         dataset_key=dataset_key,
         dataset_label=dataset["label"],
@@ -132,6 +155,7 @@ def run_single_dataset(
         diagnostics=diagnostics,
         splink_predictions=splink_predictions,
         splink_available=splink_predictions is not None,
+        persisted_run=persisted_run,
     )
 
 
@@ -143,6 +167,9 @@ def run_selected_datasets(
     canonical_address_filter: str | None = None,
     enable_diagnostics: bool = False,
     cleaning_num_chunks: int = 10,
+    persist_results: bool = False,
+    results_root: str = "benchmarking/results",
+    enable_comparison_charts: bool = True,
 ) -> list[BenchmarkRunResult]:
     selected = resolve_dataset_selection(selected_datasets)
     con = setup_connection()
@@ -159,6 +186,9 @@ def run_selected_datasets(
             canonical_address_filter=canonical_address_filter,
             enable_diagnostics=enable_diagnostics,
             cleaning_num_chunks=cleaning_num_chunks,
+            persist_results=persist_results,
+            results_root=results_root,
+            enable_comparison_charts=enable_comparison_charts,
         )
         print(
             f"Completed dataset '{dataset_key}' in {result.timings['total_runtime']:.2f}s"
