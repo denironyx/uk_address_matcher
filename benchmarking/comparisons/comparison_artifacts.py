@@ -266,12 +266,16 @@ def build_stage_diagnostics_compact_table_sql(
             (SELECT baseline_hash FROM metadata) AS version_hash,
             string_agg(stage, ' | ' ORDER BY stage_order) AS stages_run,
             string_agg(
-                CAST(CAST(coalesce(baseline_rows_entering_stage, 0) AS BIGINT) AS VARCHAR),
+                CAST(
+                    CAST(coalesce(baseline_rows_entering_stage, 0) AS BIGINT) AS VARCHAR
+                ),
                 ' | '
                 ORDER BY stage_order
             ) AS delta_rows_entering_stage,
             string_agg(
-                CAST(CAST(coalesce(baseline_rows_matched_in_stage, 0) AS BIGINT) AS VARCHAR),
+                CAST(
+                    CAST(coalesce(baseline_rows_matched_in_stage, 0) AS BIGINT) AS VARCHAR
+                ),
                 ' | '
                 ORDER BY stage_order
             ) AS delta_rows_matched_in_stage,

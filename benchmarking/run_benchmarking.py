@@ -92,13 +92,3 @@ print_benchmark_summary(
     top_k_precision_at_metrics=TOP_K_PRECISION_AT_METRICS,
     output_options=OUTPUT_OPTIONS,
 )
-
-# {
-# 	"UKAM_LAMBETH_DATA_PATH": "/Users/thomas.hepworth/data/address_matcher/secret_data/lambeth/",
-# 	"UKAM_HACKNEY_DATA_PATH": "/Users/thomas.hepworth/data/address_matcher/secret_data/hackney",
-# 	"UKAM_OS_CANONICAL_PREPARED": "/Users/thomas.hepworth/data/address_matcher/secret_data/os/ukam_prepared_canonical"
-# 	"UKAM_OS_CANONICAL_PREPARED": "./data/ukam_prepared_canonical"
-# }
-
-# 3989a44d95e549ea
-# a4b5ed29a00f8360

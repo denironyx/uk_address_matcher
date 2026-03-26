@@ -182,16 +182,11 @@ def build_dataset_diagnostics(
             canonical_rollup_value_expr = "NULL::VARCHAR[]"
 
         if canonical_compare_column is not None:
-            similarity_score_expr = _build_similarity_score_expr(
-                row_alias="m",
-                canonical_compare_source_expr=canonical_compare_source_expr,
-            )
             sampled_similarity_score_expr = _build_similarity_score_expr(
                 row_alias="sampled",
                 canonical_compare_source_expr=canonical_compare_source_expr,
             )
         else:
-            similarity_score_expr = "NULL::DOUBLE"
             sampled_similarity_score_expr = "NULL::DOUBLE"
 
         canonical_rollup_cte_sql = f"""
@@ -212,7 +207,6 @@ def build_dataset_diagnostics(
         canonical_columns = set()
         canonical_rollup_cte_sql = ""
         canonical_rollup_join_sql = ""
-        similarity_score_expr = "NULL::DOUBLE"
         sampled_similarity_score_expr = "NULL::DOUBLE"
 
     con.sql(
