@@ -87,6 +87,40 @@ def print_benchmark_summary(
             print("\nStage diagnostics:")
             _show_via_sql(result, result.stage_diagnostics_table)
 
+        if result.persisted_run is not None:
+            persisted = result.persisted_run
+            print("\nRun persistence:")
+            print(
+                f"hash={persisted.run_hash} "
+                f"deduplicated={persisted.deduplicated} "
+                f"manifest={persisted.manifest_path}"
+            )
+            if persisted.comparison is not None:
+                comparison = persisted.comparison
+                print(
+                    "Compared against baseline "
+                    f"{comparison.baseline_hash}. "
+                    f"Summary: {comparison.summary_path}"
+                )
+                if comparison.notes:
+                    print("Comparison notes:")
+                    for note in comparison.notes:
+                        print(f"- {note}")
+                if comparison.accuracy_comparison_path is not None:
+                    print(
+                        "Accuracy comparison table: "
+                        f"{comparison.accuracy_comparison_path}"
+                    )
+                if comparison.stage_diagnostics_comparison_path is not None:
+                    print(
+                        "Stage diagnostics comparison table: "
+                        f"{comparison.stage_diagnostics_comparison_path}"
+                    )
+                if comparison.chart_paths:
+                    print("Comparison charts:")
+                    for path in comparison.chart_paths:
+                        print(f"- {path}")
+
         if output_options.show_splink_comparisons and splink_baseline_weight is not None:
             table_name = f"simple_bench_matches_{result.dataset_key}"
             relation = result.con.table(table_name)

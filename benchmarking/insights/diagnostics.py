@@ -64,6 +64,38 @@ def _resolve_optional_ukam_address_id_expr(match_columns: set[str]) -> str:
     return "NULL::VARCHAR"
 
 
+def _build_similarity_score_expr(
+    *,
+    row_alias: str,
+    canonical_compare_source_expr: str,
+) -> str:
+    return f"""
+        CASE
+            WHEN {row_alias}.original_address_concat IS NULL
+              OR NOT EXISTS (
+                  SELECT 1
+                  FROM __simple_bench_canonical__ AS c2
+                  WHERE CAST(c2.unique_id AS VARCHAR) =
+                        CAST({row_alias}.resolved_canonical_id AS VARCHAR)
+                    AND {canonical_compare_source_expr} IS NOT NULL
+              )
+                THEN NULL::DOUBLE
+            ELSE (
+                SELECT MAX(
+                    jaro_winkler_similarity(
+                        {row_alias}.original_address_concat,
+                        {canonical_compare_source_expr}
+                    )
+                )
+                FROM __simple_bench_canonical__ AS c2
+                WHERE CAST(c2.unique_id AS VARCHAR) =
+                      CAST({row_alias}.resolved_canonical_id AS VARCHAR)
+                  AND {canonical_compare_source_expr} IS NOT NULL
+            )
+        END
+    """
+
+
 def build_dataset_diagnostics(
     con: duckdb.DuckDBPyConnection,
     *,
@@ -150,33 +182,17 @@ def build_dataset_diagnostics(
             canonical_rollup_value_expr = "NULL::VARCHAR[]"
 
         if canonical_compare_column is not None:
-            similarity_score_expr = f"""
-                CASE
-                    WHEN m.original_address_concat IS NULL
-                      OR NOT EXISTS (
-                          SELECT 1
-                          FROM __simple_bench_canonical__ AS c2
-                          WHERE CAST(c2.unique_id AS VARCHAR) =
-                                CAST(m.resolved_canonical_id AS VARCHAR)
-                            AND {canonical_compare_source_expr} IS NOT NULL
-                      )
-                        THEN NULL::DOUBLE
-                    ELSE (
-                        SELECT MAX(
-                            jaro_winkler_similarity(
-                                m.original_address_concat,
-                                {canonical_compare_source_expr}
-                            )
-                        )
-                        FROM __simple_bench_canonical__ AS c2
-                        WHERE CAST(c2.unique_id AS VARCHAR) =
-                              CAST(m.resolved_canonical_id AS VARCHAR)
-                          AND {canonical_compare_source_expr} IS NOT NULL
-                    )
-                END
-            """
+            similarity_score_expr = _build_similarity_score_expr(
+                row_alias="m",
+                canonical_compare_source_expr=canonical_compare_source_expr,
+            )
+            sampled_similarity_score_expr = _build_similarity_score_expr(
+                row_alias="sampled",
+                canonical_compare_source_expr=canonical_compare_source_expr,
+            )
         else:
             similarity_score_expr = "NULL::DOUBLE"
+            sampled_similarity_score_expr = "NULL::DOUBLE"
 
         canonical_rollup_cte_sql = f"""
             canonical_rollup AS (
@@ -197,6 +213,7 @@ def build_dataset_diagnostics(
         canonical_rollup_cte_sql = ""
         canonical_rollup_join_sql = ""
         similarity_score_expr = "NULL::DOUBLE"
+        sampled_similarity_score_expr = "NULL::DOUBLE"
 
     con.sql(
         f"""
@@ -215,7 +232,7 @@ def build_dataset_diagnostics(
                 canonical_match.clean_full_address_canonical,
                 ROW_NUMBER() OVER (
                     PARTITION BY m.match_reason
-                    ORDER BY RANDOM()
+                    ORDER BY CAST(m.unique_id AS VARCHAR)
                 ) AS rn
             FROM {matches_table_name} AS m
             LEFT JOIN __simple_bench_messy__ AS messy
@@ -268,10 +285,9 @@ def build_dataset_diagnostics(
                 {cleaned_address_expr} AS cleaned_full_address,
                 canonical_match.clean_full_address_canonical,
                 {match_weight_expr},
-                {similarity_score_expr} AS similarity_score,
                 ROW_NUMBER() OVER (
                     PARTITION BY m.match_reason
-                    ORDER BY RANDOM()
+                    ORDER BY CAST(m.unique_id AS VARCHAR)
                 ) AS rn
             FROM {matches_table_name} AS m
             LEFT JOIN __simple_bench_messy__ AS messy
@@ -282,20 +298,33 @@ def build_dataset_diagnostics(
               AND CAST(m.ukam_label AS VARCHAR) !=
                   CAST(m.resolved_canonical_id AS VARCHAR)
               {incorrect_filter}
+        ),
+        sampled_limited AS (
+            SELECT
+                match_reason,
+                unique_id,
+                ukam_label,
+                resolved_canonical_id,
+                postcode,
+                original_address_concat,
+                cleaned_full_address,
+                clean_full_address_canonical,
+                match_weight
+            FROM sampled
+            WHERE rn <= 10
         )
         SELECT
-            match_reason,
-            unique_id,
-            ukam_label,
-            resolved_canonical_id,
-            postcode,
-            original_address_concat,
-            cleaned_full_address,
-            clean_full_address_canonical,
-            match_weight,
-            ROUND(similarity_score, 3) AS similarity_score
-        FROM sampled
-        WHERE rn <= 10
+            sampled.match_reason,
+            sampled.unique_id,
+            sampled.ukam_label,
+            sampled.resolved_canonical_id,
+            sampled.postcode,
+            sampled.original_address_concat,
+            sampled.cleaned_full_address,
+            sampled.clean_full_address_canonical,
+            sampled.match_weight,
+            ROUND({sampled_similarity_score_expr}, 3) AS similarity_score
+        FROM sampled_limited AS sampled
         ORDER BY match_reason, unique_id
         """
     )
@@ -388,7 +417,7 @@ def build_dataset_diagnostics(
         LEFT JOIN __simple_bench_messy__ AS messy
             ON CAST(messy.unique_id AS VARCHAR) = CAST(m.unique_id AS VARCHAR)
         WHERE m.match_reason IS NULL
-        ORDER BY RANDOM()
+        ORDER BY CAST(m.unique_id AS VARCHAR)
         LIMIT 10
         """
     )

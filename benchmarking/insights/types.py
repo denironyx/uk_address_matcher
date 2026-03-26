@@ -37,3 +37,29 @@ class BenchmarkOutputOptions:
                 self.show_unmatched_records,
             )
         )
+
+
+@dataclass(frozen=True)
+class BenchmarkComparisonSummary:
+    baseline_hash: str
+    current_hash: str
+    overall_delta: dict[str, float | None]
+    stage_deltas: dict[str, dict[str, float | None]]
+    notes: list[str]
+    summary_path: str
+    chart_paths: list[str]
+    accuracy_comparison_path: str | None = None
+    stage_diagnostics_comparison_path: str | None = None
+
+
+@dataclass(frozen=True)
+class PersistedBenchmarkRun:
+    run_hash: str
+    group_key: str
+    created_at_utc: str
+    run_dir: str
+    manifest_path: str
+    history_path: str
+    deduplicated: bool
+    git_commit_hash: str | None
+    comparison: BenchmarkComparisonSummary | None = None
