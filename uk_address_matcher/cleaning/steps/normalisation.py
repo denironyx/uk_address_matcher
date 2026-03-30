@@ -347,3 +347,26 @@ def _normalise_abbreviations_and_units() -> list[CTEStep]:
         CTEStep("with_cleaned_address", cleaned_sql),
     ]
     return steps
+
+
+@pipeline_stage(
+    name="join_excluding_with_next_token",
+    description=(
+        "Join EXCLUDING with the following token to avoid false basement/studio "
+        "matches during tokenisation"
+    ),
+    tags=["normalisation", "cleaning"],
+)
+def _join_excluding_with_next_token() -> str:
+    sql = r"""
+    SELECT
+        * EXCLUDE (clean_full_address),
+        regexp_replace(
+            clean_full_address,
+            '(^| )EXCLUDING +([^ ]+)',
+            '\1EXCLUDING\2',
+            'g'
+        ) AS clean_full_address
+    FROM {input}
+    """
+    return sql
