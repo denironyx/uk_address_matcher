@@ -63,6 +63,8 @@ def test_excluding_token_is_joined_with_following_token(duck_con):
         SELECT * FROM (VALUES
             ('EXC BST 238 ALBION ROAD LONDON'),
             ('HSE EXC BST 47 ALKHAM ROAD LONDON'),
+            ('SHOP EXCLUDING BASEMENT 1 TEST ROAD LONDON'),
+            ('SHOP (EXCLUDING BASEMENT) 2 TEST ROAD LONDON'),
             ('HSE EXCL STUDIO 17 ASHTEAD ROAD LONDON'),
             ('SHOP EXCLUDING GARAGE 1 TEST ROAD LONDON')
         ) AS t(clean_full_address)
@@ -83,6 +85,8 @@ def test_excluding_token_is_joined_with_following_token(duck_con):
     assert rows == [
         "EXCLUDINGBASEMENT 238 ALBION ROAD LONDON",
         "HOUSE EXCLUDINGBASEMENT 47 ALKHAM ROAD LONDON",
+        "SHOP EXCLUDINGBASEMENT 1 TEST ROAD LONDON",
+        "SHOP (EXCLUDINGBASEMENT) 2 TEST ROAD LONDON",
         "HOUSE EXCLUDINGSTUDIO 17 ASHTEAD ROAD LONDON",
         "SHOP EXCLUDINGGARAGE 1 TEST ROAD LONDON",
     ]

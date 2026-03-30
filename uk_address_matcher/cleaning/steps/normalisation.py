@@ -363,7 +363,7 @@ def _join_excluding_with_next_token() -> str:
         * EXCLUDE (clean_full_address),
         regexp_replace(
             clean_full_address,
-            '(^| )EXCLUDING +([^ ]+)',
+            '(^|[ (])EXCLUDING +([^ )]+)',
             '\1EXCLUDING\2',
             'g'
         ) AS clean_full_address
