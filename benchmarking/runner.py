@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from time import perf_counter
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from benchmarking.config.datasets import (
     get_dataset_definition,
     list_dataset_keys,
     load_dataset,
 )
+from benchmarking.constants import BENCHMARK_RESULTS_ROOT
 from benchmarking.insights.diagnostics import build_dataset_diagnostics
 from benchmarking.insights.run_persistence import persist_benchmark_run
 from benchmarking.insights.summary import fetch_overall_summary
@@ -35,6 +36,7 @@ class BenchmarkRunResult:
     diagnostics: DatasetDiagnostics | None = None
     accuracy_table: duckdb.DuckDBPyRelation | None = None
     stage_diagnostics_table: duckdb.DuckDBPyRelation | None = None
+    precision_recall_curve_records: list[dict[str, Any]] | None = None
     splink_predictions: duckdb.DuckDBPyRelation | None = None
     splink_available: bool = False
     persisted_run: PersistedBenchmarkRun | None = None
@@ -55,6 +57,15 @@ def resolve_dataset_selection(selection: str | list[str]) -> list[str]:
     return selected
 
 
+def print_available_datasets() -> None:
+    print("Available datasets:")
+    for key in list_dataset_keys():
+        definition = get_dataset_definition(key)
+        print(f"- {key}: {definition['label']} ({definition['s3_key']})")
+
+    print()
+
+
 def run_single_dataset(
     con: duckdb.DuckDBPyConnection,
     dataset_key: str,
@@ -65,8 +76,9 @@ def run_single_dataset(
     enable_diagnostics: bool = False,
     cleaning_num_chunks: int = 10,
     persist_results: bool = False,
-    results_root: str = "benchmarking/results",
+    results_root: str = BENCHMARK_RESULTS_ROOT,
     enable_comparison_charts: bool = True,
+    comparison_baseline_hash: str | None = None,
 ) -> BenchmarkRunResult:
     dataset = get_dataset_definition(dataset_key)
     timings: dict[str, float] = {}
@@ -96,6 +108,7 @@ def run_single_dataset(
     timings["total_runtime"] = perf_counter() - total_start
     accuracy_rel = match_result._accuracy_table()
     stage_diagnostics_rel = match_result._stage_diagnostics_table()
+    precision_recall_curve_records = match_result.accuracy_data()
     by_reason_rel = accuracy_rel
     total_rows, matched_rows, correct_matches, precision, recall = fetch_overall_summary(
         con,
@@ -135,6 +148,8 @@ def run_single_dataset(
             correct_matches=correct_matches,
             precision=precision,
             recall=recall,
+            precision_recall_curve_rows=precision_recall_curve_records,
+            comparison_baseline_hash=comparison_baseline_hash,
             results_root=results_root,
             enable_chart_exports=enable_comparison_charts,
         )
@@ -153,6 +168,7 @@ def run_single_dataset(
         timings=timings,
         con=con,
         diagnostics=diagnostics,
+        precision_recall_curve_records=precision_recall_curve_records,
         splink_predictions=splink_predictions,
         splink_available=splink_predictions is not None,
         persisted_run=persisted_run,
@@ -168,8 +184,9 @@ def run_selected_datasets(
     enable_diagnostics: bool = False,
     cleaning_num_chunks: int = 10,
     persist_results: bool = False,
-    results_root: str = "benchmarking/results",
+    results_root: str = BENCHMARK_RESULTS_ROOT,
     enable_comparison_charts: bool = True,
+    comparison_baseline_hash: str | None = None,
 ) -> list[BenchmarkRunResult]:
     selected = resolve_dataset_selection(selected_datasets)
     con = setup_connection()
@@ -189,6 +206,7 @@ def run_selected_datasets(
             persist_results=persist_results,
             results_root=results_root,
             enable_comparison_charts=enable_comparison_charts,
+            comparison_baseline_hash=comparison_baseline_hash,
         )
         print(
             f"Completed dataset '{dataset_key}' in {result.timings['total_runtime']:.2f}s"
