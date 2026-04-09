@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+from collections.abc import Sequence
 from dataclasses import fields, is_dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -21,10 +22,11 @@ from benchmarking.insights.types import (
     BenchmarkComparisonSummary,
     PersistedBenchmarkRun,
 )
-from uk_address_matcher.analysis import (
+from uk_address_matcher.analysis.accuracy_analysis import (
     build_precision_recall_chart_definition,
-    overlay_precision_recall_charts,
-    write_overlay_precision_recall_chart_html,
+)
+from uk_address_matcher.analysis.overlay_precision_recall_charts import (
+    _overlay_precision_recall_charts,
 )
 
 if TYPE_CHECKING:
@@ -39,6 +41,112 @@ _LEGACY_RESULTS_PREFIXES = (
     Path("results"),
 )
 _PRECISION_RECALL_CURVE_FILE = "precision_recall_curve.json"
+
+
+def _chart_to_definition(chart: Any) -> dict[str, Any]:
+    if isinstance(chart, dict):
+        return chart
+
+    to_dict = getattr(chart, "to_dict", None)
+    if callable(to_dict):
+        chart_definition = to_dict()
+        if isinstance(chart_definition, dict):
+            return chart_definition
+
+    raise TypeError("chart must be a Vega-Lite definition dict or chart object")
+
+
+def _vega_lite_html(*, title: str, chart_definition: dict[str, Any]) -> str:
+    return f"""<!doctype html>
+<html lang=\"en\">
+<head>
+    <meta charset=\"utf-8\" />
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+    <title>{title}</title>
+    <script src=\"https://cdn.jsdelivr.net/npm/vega@5\"></script>
+    <script src=\"https://cdn.jsdelivr.net/npm/vega-lite@5\"></script>
+    <script src=\"https://cdn.jsdelivr.net/npm/vega-embed@6\"></script>
+    <style>
+        body {{
+            font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont,
+                \"Segoe UI\", sans-serif;
+            margin: 24px;
+            background: #f8fafc;
+            color: #0f172a;
+        }}
+        .card {{
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+        }}
+        h1 {{
+            margin: 0 0 8px;
+            font-size: 1.5rem;
+        }}
+        p {{
+            margin: 0 0 18px;
+            color: #475569;
+        }}
+    </style>
+</head>
+<body>
+    <div class=\"card\">
+        <h1>{title}</h1>
+        <p>Overlayed precision-recall curves with recall-aligned precision deltas.</p>
+        <div id=\"chart\"></div>
+    </div>
+    <script>
+        const spec = {json.dumps(chart_definition)};
+        vegaEmbed('#chart', spec, {{ actions: true, renderer: 'svg' }});
+    </script>
+</body>
+</html>
+"""
+
+
+def overlay_precision_recall_charts(
+    baseline_chart: Any,
+    comparison_charts: Any | list[Any],
+    *,
+    baseline_label: str | None = None,
+    comparison_labels: str | Sequence[str] | None = None,
+) -> Any:
+    return _overlay_precision_recall_charts(
+        baseline_chart,
+        comparison_charts,
+        baseline_label=baseline_label,
+        comparison_labels=comparison_labels,
+    )
+
+
+def write_overlay_precision_recall_chart_html(
+    *,
+    path: Path,
+    baseline_chart: Any,
+    comparison_charts: Any | list[Any],
+    baseline_label: str | None = None,
+    comparison_labels: str | Sequence[str] | None = None,
+    title: str | None = None,
+) -> None:
+    chart = overlay_precision_recall_charts(
+        baseline_chart,
+        comparison_charts,
+        baseline_label=baseline_label,
+        comparison_labels=comparison_labels,
+    )
+    chart_definition = _chart_to_definition(chart)
+    chart_title = title or str(
+        chart_definition.get("title") or "Precision-Recall Curve Comparison"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        _vega_lite_html(title=chart_title, chart_definition=chart_definition),
+        encoding="utf-8",
+    )
 
 
 def _safe_path_segment(value: str) -> str:
