@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import duckdb
@@ -48,8 +48,9 @@ class BenchmarkComparisonSummary:
     notes: list[str]
     summary_path: str
     chart_paths: list[str]
-    accuracy_comparison_path: str | None = None
-    stage_diagnostics_comparison_path: str | None = None
+    markdown_report_path: str | None = None
+    accuracy_comparison_rows: list[dict[str, Any]] | None = None
+    stage_diagnostics_comparison_rows: list[dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -63,3 +64,4 @@ class PersistedBenchmarkRun:
     deduplicated: bool
     git_commit_hash: str | None
     comparison: BenchmarkComparisonSummary | None = None
+    comparison_warning: str | None = None

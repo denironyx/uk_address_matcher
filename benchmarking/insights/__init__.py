@@ -3,7 +3,6 @@ from benchmarking.insights.reporting import (
     BenchmarkOutputOptions,
     print_benchmark_summary,
     print_diagnostics,
-    print_results,
 )
 from benchmarking.insights.run_persistence import (
     compare_persisted_runs,
@@ -27,5 +26,4 @@ __all__ = [
     "persist_benchmark_run",
     "print_benchmark_summary",
     "print_diagnostics",
-    "print_results",
 ]

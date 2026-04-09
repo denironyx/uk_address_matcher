@@ -2,51 +2,183 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
+from benchmarking.comparisons.comparison_utils import (
+    comparison_stage_sort_key as _comparison_stage_sort_key,
+    delta as _delta,
+    index_by_stage as _index_by_stage,
+    select_primary_accuracy_row as _select_primary_accuracy_row,
+    to_float as _to_float,
+    to_int as _to_int,
+)
+from benchmarking.comparisons.markdown_summary import (
+    write_comparison_markdown_summary as _write_comparison_markdown_summary,
+)
 from benchmarking.insights.types import BenchmarkComparisonSummary
-
-_OVERALL_STAGE = "overall"
-
-
-def _stage_sort_key(stage: str) -> tuple[int, str]:
-    if stage == _OVERALL_STAGE:
-        return (0, stage)
-    return (1, stage)
-
-
-def _index_by_stage(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    return {str(row["stage"]): row for row in rows if "stage" in row}
-
-
-def _to_float(value: Any) -> float | None:
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _to_int(value: Any) -> int | None:
-    if value is None:
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _delta(current: Any, baseline: Any) -> float | None:
-    current_f = _to_float(current)
-    baseline_f = _to_float(baseline)
-    if current_f is None or baseline_f is None:
-        return None
-    return round(current_f - baseline_f, 8)
 
 
 def _sql_string_literal(value: str) -> str:
     return value.replace("'", "''")
+
+
+def _build_compact_table_sql(
+    *,
+    json_path: str,
+    baseline_run_timestamp: str | None,
+    comparison_run_timestamp: str | None,
+    stage_metric_columns_sql: str,
+    sort_value_sql: str,
+    sort_direction: str,
+    baseline_columns_sql: str,
+    comparison_columns_sql: str,
+    output_columns: list[str],
+) -> str:
+    escaped_path = _sql_string_literal(json_path)
+    baseline_timestamp = _sql_string_literal(baseline_run_timestamp or "unknown")
+    comparison_timestamp = _sql_string_literal(comparison_run_timestamp or "unknown")
+    output_columns_sql = ",\n        ".join(output_columns)
+    return f"""
+    WITH raw AS (
+        SELECT *
+        FROM read_json_auto('{escaped_path}')
+    ),
+    stage_metrics_raw AS (
+        SELECT
+            stage,
+{stage_metric_columns_sql}
+        FROM raw
+        GROUP BY stage
+    ),
+    stage_metrics AS (
+        SELECT
+            *,
+            {sort_value_sql} AS stage_sort_value
+        FROM stage_metrics_raw
+    ),
+    metadata AS (
+        SELECT
+            max(CASE WHEN run_type = 'baseline' THEN run_hash END) AS baseline_hash,
+            max(CASE WHEN run_type = 'comparison' THEN run_hash END)
+                AS comparison_hash
+        FROM raw
+    ),
+    baseline_row AS (
+        SELECT
+            'baseline' AS version,
+            (SELECT baseline_hash FROM metadata) AS version_hash,
+            string_agg(
+                stage,
+                ' | '
+                ORDER BY stage_sort_value {sort_direction}, stage
+            ) AS stages_run,
+{baseline_columns_sql},
+            '{baseline_timestamp}' AS run_timestamp,
+            1 AS _row_order
+        FROM stage_metrics
+    ),
+    comparison_row AS (
+        SELECT
+            'comparison' AS version,
+            (SELECT comparison_hash FROM metadata) AS version_hash,
+            string_agg(
+                stage,
+                ' | '
+                ORDER BY stage_sort_value {sort_direction}, stage
+            ) AS stages_run,
+{comparison_columns_sql},
+            '{comparison_timestamp}' AS run_timestamp,
+            2 AS _row_order
+        FROM stage_metrics
+    )
+    SELECT
+        version,
+        version_hash,
+        stages_run,
+        {output_columns_sql},
+        run_timestamp
+    FROM (
+        SELECT * FROM baseline_row
+        UNION ALL
+        SELECT * FROM comparison_row
+    ) AS combined
+    ORDER BY _row_order
+    """
+
+
+def _build_run_comparison_row(
+    *,
+    row: dict[str, Any],
+    run_type: str,
+    run_hash: str,
+    git_commit_hash: str | None,
+    baseline_hash: str,
+    comparison_hash: str,
+    stage: str,
+    value_builder: Callable[[dict[str, Any]], dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "run_type": run_type,
+        "run_hash": run_hash,
+        "git_commit_hash": git_commit_hash,
+        "baseline_hash": baseline_hash,
+        "comparison_hash": comparison_hash,
+        "stage": stage,
+        **value_builder(row),
+    }
+
+
+def _build_comparison_rows(
+    *,
+    baseline_rows: list[dict[str, Any]],
+    current_rows: list[dict[str, Any]],
+    baseline_hash: str,
+    current_hash: str,
+    baseline_git_commit_hash: str | None,
+    current_git_commit_hash: str | None,
+    value_builder: Callable[[dict[str, Any]], dict[str, Any]],
+) -> list[dict[str, Any]]:
+    baseline_index = _index_by_stage(baseline_rows)
+    current_index = _index_by_stage(current_rows)
+    stages = sorted(
+        set(baseline_index).union(current_index),
+        key=lambda stage: _comparison_stage_sort_key(
+            stage,
+            baseline_index.get(stage, {}),
+            current_index.get(stage, {}),
+        ),
+    )
+
+    rows: list[dict[str, Any]] = []
+    for stage in stages:
+        baseline = baseline_index.get(stage, {})
+        current = current_index.get(stage, {})
+        rows.extend(
+            [
+                _build_run_comparison_row(
+                    row=baseline,
+                    run_type="baseline",
+                    run_hash=baseline_hash,
+                    git_commit_hash=baseline_git_commit_hash,
+                    baseline_hash=baseline_hash,
+                    comparison_hash=current_hash,
+                    stage=stage,
+                    value_builder=value_builder,
+                ),
+                _build_run_comparison_row(
+                    row=current,
+                    run_type="comparison",
+                    run_hash=current_hash,
+                    git_commit_hash=current_git_commit_hash,
+                    baseline_hash=baseline_hash,
+                    comparison_hash=current_hash,
+                    stage=stage,
+                    value_builder=value_builder,
+                ),
+            ]
+        )
+
+    return rows
 
 
 def build_accuracy_compact_table_sql(
@@ -55,24 +187,11 @@ def build_accuracy_compact_table_sql(
     baseline_run_timestamp: str | None = None,
     comparison_run_timestamp: str | None = None,
 ) -> str:
-    escaped_path = _sql_string_literal(json_path)
-    baseline_timestamp = _sql_string_literal(baseline_run_timestamp or "unknown")
-    comparison_timestamp = _sql_string_literal(comparison_run_timestamp or "unknown")
-    return f"""
-    WITH raw AS (
-        SELECT *
-        FROM read_json_auto('{escaped_path}')
-        WHERE stage IN ('exact_matches', 'peeled_address', 'splink')
-    ),
-    stage_metrics AS (
-        SELECT
-            stage,
-            CASE stage
-                WHEN 'exact_matches' THEN 1
-                WHEN 'peeled_address' THEN 2
-                WHEN 'splink' THEN 3
-                ELSE 99
-            END AS stage_order,
+    stage_metric_columns_sql = """
+            max(CASE WHEN run_type = 'baseline' THEN rows_matched_in_stage END)
+                AS baseline_rows_matched_in_stage,
+            max(CASE WHEN run_type = 'comparison' THEN rows_matched_in_stage END)
+                AS comparison_rows_matched_in_stage,
             max(CASE WHEN run_type = 'baseline' THEN correct_matches END)
                 AS baseline_correct_matches,
             max(CASE WHEN run_type = 'comparison' THEN correct_matches END)
@@ -89,24 +208,12 @@ def build_accuracy_compact_table_sql(
                 AS baseline_f1,
             max(CASE WHEN run_type = 'comparison' THEN f1 END)
                 AS comparison_f1
-        FROM raw
-        GROUP BY stage
-    ),
-    metadata AS (
-        SELECT
-            max(CASE WHEN run_type = 'baseline' THEN run_hash END) AS baseline_hash,
-            max(CASE WHEN run_type = 'comparison' THEN run_hash END) AS comparison_hash
-        FROM raw
-    ),
-    baseline_row AS (
-        SELECT
-            'baseline' AS version,
-            (SELECT baseline_hash FROM metadata) AS version_hash,
-            string_agg(stage, ' | ' ORDER BY stage_order) AS stages_run,
+    """.strip()
+    baseline_columns_sql = """
             string_agg(
                 CAST(CAST(coalesce(baseline_correct_matches, 0) AS BIGINT) AS VARCHAR),
                 ' | '
-                ORDER BY stage_order
+                ORDER BY stage_sort_value DESC, stage
             ) AS delta_matches,
             string_agg(
                 CASE
@@ -114,7 +221,7 @@ def build_accuracy_compact_table_sql(
                     ELSE printf('%.4f%%', baseline_precision * 100)
                 END,
                 ' | '
-                ORDER BY stage_order
+                ORDER BY stage_sort_value DESC, stage
             ) AS precision,
             string_agg(
                 CASE
@@ -122,7 +229,7 @@ def build_accuracy_compact_table_sql(
                     ELSE printf('%.4f%%', baseline_recall * 100)
                 END,
                 ' | '
-                ORDER BY stage_order
+                ORDER BY stage_sort_value DESC, stage
             ) AS recall,
             string_agg(
                 CASE
@@ -130,17 +237,10 @@ def build_accuracy_compact_table_sql(
                     ELSE printf('%.4f%%', baseline_f1 * 100)
                 END,
                 ' | '
-                ORDER BY stage_order
-            ) AS f1,
-            '{baseline_timestamp}' AS run_timestamp,
-            1 AS _row_order
-        FROM stage_metrics
-    ),
-    comparison_row AS (
-        SELECT
-            'comparison' AS version,
-            (SELECT comparison_hash FROM metadata) AS version_hash,
-            string_agg(stage, ' | ' ORDER BY stage_order) AS stages_run,
+                ORDER BY stage_sort_value DESC, stage
+            ) AS f1
+    """.strip()
+    comparison_columns_sql = """
             string_agg(
                 CAST(
                     CAST(
@@ -151,7 +251,7 @@ def build_accuracy_compact_table_sql(
                     AS VARCHAR
                 ),
                 ' | '
-                ORDER BY stage_order
+                ORDER BY stage_sort_value DESC, stage
             ) AS delta_matches,
             string_agg(
                 CASE
@@ -163,7 +263,7 @@ def build_accuracy_compact_table_sql(
                     )
                 END,
                 ' | '
-                ORDER BY stage_order
+                ORDER BY stage_sort_value DESC, stage
             ) AS precision,
             string_agg(
                 CASE
@@ -175,7 +275,7 @@ def build_accuracy_compact_table_sql(
                     )
                 END,
                 ' | '
-                ORDER BY stage_order
+                ORDER BY stage_sort_value DESC, stage
             ) AS recall,
             string_agg(
                 CASE
@@ -187,28 +287,25 @@ def build_accuracy_compact_table_sql(
                     )
                 END,
                 ' | '
-                ORDER BY stage_order
-            ) AS f1,
-            '{comparison_timestamp}' AS run_timestamp,
-            2 AS _row_order
-        FROM stage_metrics
+                ORDER BY stage_sort_value DESC, stage
+            ) AS f1
+    """.strip()
+    return _build_compact_table_sql(
+        json_path=json_path,
+        baseline_run_timestamp=baseline_run_timestamp,
+        comparison_run_timestamp=comparison_run_timestamp,
+        stage_metric_columns_sql=stage_metric_columns_sql,
+        sort_value_sql=(
+            "greatest("
+            "coalesce(baseline_rows_matched_in_stage, 0), "
+            "coalesce(comparison_rows_matched_in_stage, 0)"
+            ")"
+        ),
+        sort_direction="DESC",
+        baseline_columns_sql=baseline_columns_sql,
+        comparison_columns_sql=comparison_columns_sql,
+        output_columns=["delta_matches", "precision", "recall", "f1"],
     )
-    SELECT
-        version,
-        version_hash,
-        stages_run,
-        delta_matches,
-        precision,
-        recall,
-        f1,
-        run_timestamp
-    FROM (
-        SELECT * FROM baseline_row
-        UNION ALL
-        SELECT * FROM comparison_row
-    ) AS combined
-    ORDER BY _row_order
-    """
 
 
 def build_stage_diagnostics_compact_table_sql(
@@ -217,24 +314,7 @@ def build_stage_diagnostics_compact_table_sql(
     baseline_run_timestamp: str | None = None,
     comparison_run_timestamp: str | None = None,
 ) -> str:
-    escaped_path = _sql_string_literal(json_path)
-    baseline_timestamp = _sql_string_literal(baseline_run_timestamp or "unknown")
-    comparison_timestamp = _sql_string_literal(comparison_run_timestamp or "unknown")
-    return f"""
-    WITH raw AS (
-        SELECT *
-        FROM read_json_auto('{escaped_path}')
-        WHERE stage IN ('exact_matches', 'peeled_address', 'splink')
-    ),
-    stage_metrics AS (
-        SELECT
-            stage,
-            CASE stage
-                WHEN 'exact_matches' THEN 1
-                WHEN 'peeled_address' THEN 2
-                WHEN 'splink' THEN 3
-                ELSE 99
-            END AS stage_order,
+    stage_metric_columns_sql = """
             max(CASE WHEN run_type = 'baseline' THEN rows_entering_stage END)
                 AS baseline_rows_entering_stage,
             max(CASE WHEN run_type = 'comparison' THEN rows_entering_stage END)
@@ -251,33 +331,21 @@ def build_stage_diagnostics_compact_table_sql(
                 AS baseline_elapsed_seconds,
             max(CASE WHEN run_type = 'comparison' THEN elapsed_seconds END)
                 AS comparison_elapsed_seconds
-        FROM raw
-        GROUP BY stage
-    ),
-    metadata AS (
-        SELECT
-            max(CASE WHEN run_type = 'baseline' THEN run_hash END) AS baseline_hash,
-            max(CASE WHEN run_type = 'comparison' THEN run_hash END) AS comparison_hash
-        FROM raw
-    ),
-    baseline_row AS (
-        SELECT
-            'baseline' AS version,
-            (SELECT baseline_hash FROM metadata) AS version_hash,
-            string_agg(stage, ' | ' ORDER BY stage_order) AS stages_run,
+    """.strip()
+    baseline_columns_sql = """
             string_agg(
                 CAST(
                     CAST(coalesce(baseline_rows_entering_stage, 0) AS BIGINT) AS VARCHAR
                 ),
                 ' | '
-                ORDER BY stage_order
+                ORDER BY stage_sort_value ASC, stage
             ) AS delta_rows_entering_stage,
             string_agg(
                 CAST(
                     CAST(coalesce(baseline_rows_matched_in_stage, 0) AS BIGINT) AS VARCHAR
                 ),
                 ' | '
-                ORDER BY stage_order
+                ORDER BY stage_sort_value ASC, stage
             ) AS delta_rows_matched_in_stage,
             string_agg(
                 CASE
@@ -285,7 +353,7 @@ def build_stage_diagnostics_compact_table_sql(
                     ELSE printf('%.4f%%', baseline_stage_match_rate)
                 END,
                 ' | '
-                ORDER BY stage_order
+                ORDER BY stage_sort_value ASC, stage
             ) AS stage_match_rate,
             string_agg(
                 CASE
@@ -293,17 +361,10 @@ def build_stage_diagnostics_compact_table_sql(
                     ELSE printf('%.4fs', baseline_elapsed_seconds)
                 END,
                 ' | '
-                ORDER BY stage_order
-            ) AS elapsed_seconds,
-            '{baseline_timestamp}' AS run_timestamp,
-            1 AS _row_order
-        FROM stage_metrics
-    ),
-    comparison_row AS (
-        SELECT
-            'comparison' AS version,
-            (SELECT comparison_hash FROM metadata) AS version_hash,
-            string_agg(stage, ' | ' ORDER BY stage_order) AS stages_run,
+                ORDER BY stage_sort_value ASC, stage
+            ) AS elapsed_seconds
+    """.strip()
+    comparison_columns_sql = """
             string_agg(
                 CAST(
                     CAST(
@@ -314,7 +375,7 @@ def build_stage_diagnostics_compact_table_sql(
                     AS VARCHAR
                 ),
                 ' | '
-                ORDER BY stage_order
+                ORDER BY stage_sort_value ASC, stage
             ) AS delta_rows_entering_stage,
             string_agg(
                 CAST(
@@ -326,7 +387,7 @@ def build_stage_diagnostics_compact_table_sql(
                     AS VARCHAR
                 ),
                 ' | '
-                ORDER BY stage_order
+                ORDER BY stage_sort_value ASC, stage
             ) AS delta_rows_matched_in_stage,
             string_agg(
                 CASE
@@ -339,7 +400,7 @@ def build_stage_diagnostics_compact_table_sql(
                     )
                 END,
                 ' | '
-                ORDER BY stage_order
+                ORDER BY stage_sort_value ASC, stage
             ) AS stage_match_rate,
             string_agg(
                 CASE
@@ -352,28 +413,30 @@ def build_stage_diagnostics_compact_table_sql(
                     )
                 END,
                 ' | '
-                ORDER BY stage_order
-            ) AS elapsed_seconds,
-            '{comparison_timestamp}' AS run_timestamp,
-            2 AS _row_order
-        FROM stage_metrics
+                ORDER BY stage_sort_value ASC, stage
+            ) AS elapsed_seconds
+    """.strip()
+    return _build_compact_table_sql(
+        json_path=json_path,
+        baseline_run_timestamp=baseline_run_timestamp,
+        comparison_run_timestamp=comparison_run_timestamp,
+        stage_metric_columns_sql=stage_metric_columns_sql,
+        sort_value_sql=(
+            "least("
+            "coalesce(baseline_elapsed_seconds, 1e308), "
+            "coalesce(comparison_elapsed_seconds, 1e308)"
+            ")"
+        ),
+        sort_direction="ASC",
+        baseline_columns_sql=baseline_columns_sql,
+        comparison_columns_sql=comparison_columns_sql,
+        output_columns=[
+            "delta_rows_entering_stage",
+            "delta_rows_matched_in_stage",
+            "stage_match_rate",
+            "elapsed_seconds",
+        ],
     )
-    SELECT
-        version,
-        version_hash,
-        stages_run,
-        delta_rows_entering_stage,
-        delta_rows_matched_in_stage,
-        stage_match_rate,
-        elapsed_seconds,
-        run_timestamp
-    FROM (
-        SELECT * FROM baseline_row
-        UNION ALL
-        SELECT * FROM comparison_row
-    ) AS combined
-    ORDER BY _row_order
-    """
 
 
 def build_accuracy_comparison_rows(
@@ -385,57 +448,27 @@ def build_accuracy_comparison_rows(
     baseline_git_commit_hash: str | None = None,
     current_git_commit_hash: str | None = None,
 ) -> list[dict[str, Any]]:
-    baseline_index = _index_by_stage(baseline_rows)
-    current_index = _index_by_stage(current_rows)
-    stages = sorted(set(baseline_index).union(current_index), key=_stage_sort_key)
+    def value_builder(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "rows_matched_in_stage": _to_int(row.get("rows_matched_in_stage")),
+            "correct_matches": _to_int(row.get("correct_matches")),
+            "wrong_matches": _to_int(row.get("wrong_matches")),
+            "precision": _to_float(row.get("precision")),
+            "recall": _to_float(row.get("recall")),
+            "f1": _to_float(row.get("f1")),
+            "wrong_match_rate": _to_float(row.get("wrong_match_rate")),
+            "correct_share_of_total": _to_float(row.get("correct_share_of_total")),
+        }
 
-    rows: list[dict[str, Any]] = []
-    for stage in stages:
-        baseline = baseline_index.get(stage, {})
-        current = current_index.get(stage, {})
-
-        rows.append(
-            {
-                "run_type": "baseline",
-                "run_hash": baseline_hash,
-                "git_commit_hash": baseline_git_commit_hash,
-                "baseline_hash": baseline_hash,
-                "comparison_hash": current_hash,
-                "stage": stage,
-                "rows_matched_in_stage": _to_int(baseline.get("rows_matched_in_stage")),
-                "correct_matches": _to_int(baseline.get("correct_matches")),
-                "wrong_matches": _to_int(baseline.get("wrong_matches")),
-                "precision": _to_float(baseline.get("precision")),
-                "recall": _to_float(baseline.get("recall")),
-                "f1": _to_float(baseline.get("f1")),
-                "wrong_match_rate": _to_float(baseline.get("wrong_match_rate")),
-                "correct_share_of_total": _to_float(
-                    baseline.get("correct_share_of_total")
-                ),
-            }
-        )
-        rows.append(
-            {
-                "run_type": "comparison",
-                "run_hash": current_hash,
-                "git_commit_hash": current_git_commit_hash,
-                "baseline_hash": baseline_hash,
-                "comparison_hash": current_hash,
-                "stage": stage,
-                "rows_matched_in_stage": _to_int(current.get("rows_matched_in_stage")),
-                "correct_matches": _to_int(current.get("correct_matches")),
-                "wrong_matches": _to_int(current.get("wrong_matches")),
-                "precision": _to_float(current.get("precision")),
-                "recall": _to_float(current.get("recall")),
-                "f1": _to_float(current.get("f1")),
-                "wrong_match_rate": _to_float(current.get("wrong_match_rate")),
-                "correct_share_of_total": _to_float(
-                    current.get("correct_share_of_total")
-                ),
-            }
-        )
-
-    return rows
+    return _build_comparison_rows(
+        baseline_rows=baseline_rows,
+        current_rows=current_rows,
+        baseline_hash=baseline_hash,
+        current_hash=current_hash,
+        baseline_git_commit_hash=baseline_git_commit_hash,
+        current_git_commit_hash=current_git_commit_hash,
+        value_builder=value_builder,
+    )
 
 
 def build_stage_diagnostics_comparison_rows(
@@ -447,52 +480,27 @@ def build_stage_diagnostics_comparison_rows(
     baseline_git_commit_hash: str | None = None,
     current_git_commit_hash: str | None = None,
 ) -> list[dict[str, Any]]:
-    baseline_index = _index_by_stage(baseline_rows)
-    current_index = _index_by_stage(current_rows)
-    stages = sorted(set(baseline_index).union(current_index), key=_stage_sort_key)
+    def value_builder(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "stage_order": _to_int(row.get("stage_order")),
+            "rows_entering_stage": _to_int(row.get("rows_entering_stage")),
+            "rows_matched_in_stage": _to_int(row.get("rows_matched_in_stage")),
+            "stage_match_rate": _to_float(row.get("stage_match_rate")),
+            "share_of_total_input_matched": _to_float(
+                row.get("share_of_total_input_matched")
+            ),
+            "elapsed_seconds": _to_float(row.get("elapsed_seconds")),
+        }
 
-    rows: list[dict[str, Any]] = []
-    for stage in stages:
-        baseline = baseline_index.get(stage, {})
-        current = current_index.get(stage, {})
-        rows.append(
-            {
-                "run_type": "baseline",
-                "run_hash": baseline_hash,
-                "git_commit_hash": baseline_git_commit_hash,
-                "baseline_hash": baseline_hash,
-                "comparison_hash": current_hash,
-                "stage": stage,
-                "stage_order": _to_int(baseline.get("stage_order")),
-                "rows_entering_stage": _to_int(baseline.get("rows_entering_stage")),
-                "rows_matched_in_stage": _to_int(baseline.get("rows_matched_in_stage")),
-                "stage_match_rate": _to_float(baseline.get("stage_match_rate")),
-                "share_of_total_input_matched": _to_float(
-                    baseline.get("share_of_total_input_matched")
-                ),
-                "elapsed_seconds": _to_float(baseline.get("elapsed_seconds")),
-            }
-        )
-        rows.append(
-            {
-                "run_type": "comparison",
-                "run_hash": current_hash,
-                "git_commit_hash": current_git_commit_hash,
-                "baseline_hash": baseline_hash,
-                "comparison_hash": current_hash,
-                "stage": stage,
-                "stage_order": _to_int(current.get("stage_order")),
-                "rows_entering_stage": _to_int(current.get("rows_entering_stage")),
-                "rows_matched_in_stage": _to_int(current.get("rows_matched_in_stage")),
-                "stage_match_rate": _to_float(current.get("stage_match_rate")),
-                "share_of_total_input_matched": _to_float(
-                    current.get("share_of_total_input_matched")
-                ),
-                "elapsed_seconds": _to_float(current.get("elapsed_seconds")),
-            }
-        )
-
-    return rows
+    return _build_comparison_rows(
+        baseline_rows=baseline_rows,
+        current_rows=current_rows,
+        baseline_hash=baseline_hash,
+        current_hash=current_hash,
+        baseline_git_commit_hash=baseline_git_commit_hash,
+        current_git_commit_hash=current_git_commit_hash,
+        value_builder=value_builder,
+    )
 
 
 def _build_notes(overall_delta: dict[str, float | None]) -> list[str]:
@@ -507,9 +515,11 @@ def _build_notes(overall_delta: dict[str, float | None]) -> list[str]:
         if delta is None:
             continue
         if delta > 0:
-            notes.append(f"Overall {direction_text} improved by {delta:.4f}.")
+            notes.append(f"Overall {direction_text} improved by {delta * 100:.4f} pp.")
         elif delta < 0:
-            notes.append(f"Overall {direction_text} regressed by {abs(delta):.4f}.")
+            notes.append(
+                f"Overall {direction_text} regressed by {abs(delta) * 100:.4f} pp."
+            )
 
     runtime_delta = overall_delta.get("total_runtime_seconds")
     if runtime_delta is not None:
@@ -535,16 +545,20 @@ def build_comparison_summary(
     current_total_runtime_seconds: float | None,
     summary_path: Path,
     chart_paths: list[Path],
-    accuracy_comparison_path: Path | None = None,
-    stage_diagnostics_comparison_path: Path | None = None,
+    markdown_report_path: Path | None = None,
+    dataset_label: str | None = None,
+    baseline_git_commit_hash: str | None = None,
+    current_git_commit_hash: str | None = None,
+    baseline_created_at_utc: str | None = None,
+    current_created_at_utc: str | None = None,
+    accuracy_comparison_rows: list[dict[str, Any]] | None = None,
+    stage_diagnostics_comparison_rows: list[dict[str, Any]] | None = None,
 ) -> BenchmarkComparisonSummary:
-    baseline_accuracy = _index_by_stage(baseline_accuracy_rows)
-    current_accuracy = _index_by_stage(current_accuracy_rows)
     baseline_stages = _index_by_stage(baseline_stage_rows)
     current_stages = _index_by_stage(current_stage_rows)
 
-    overall_current = current_accuracy.get(_OVERALL_STAGE, {})
-    overall_baseline = baseline_accuracy.get(_OVERALL_STAGE, {})
+    overall_baseline = _select_primary_accuracy_row(baseline_accuracy_rows)
+    overall_current = _select_primary_accuracy_row(current_accuracy_rows)
     overall_delta = {
         "precision": _delta(
             overall_current.get("precision"),
@@ -593,16 +607,11 @@ def build_comparison_summary(
         notes=_build_notes(overall_delta),
         summary_path=summary_path.as_posix(),
         chart_paths=[path.as_posix() for path in chart_paths],
-        accuracy_comparison_path=(
-            accuracy_comparison_path.as_posix()
-            if accuracy_comparison_path is not None
-            else None
+        markdown_report_path=(
+            markdown_report_path.as_posix() if markdown_report_path is not None else None
         ),
-        stage_diagnostics_comparison_path=(
-            stage_diagnostics_comparison_path.as_posix()
-            if stage_diagnostics_comparison_path is not None
-            else None
-        ),
+        accuracy_comparison_rows=accuracy_comparison_rows,
+        stage_diagnostics_comparison_rows=stage_diagnostics_comparison_rows,
     )
 
     summary_path.write_text(
@@ -614,10 +623,7 @@ def build_comparison_summary(
                 "stage_deltas": summary.stage_deltas,
                 "notes": summary.notes,
                 "chart_paths": summary.chart_paths,
-                "accuracy_comparison_path": summary.accuracy_comparison_path,
-                "stage_diagnostics_comparison_path": (
-                    summary.stage_diagnostics_comparison_path
-                ),
+                "markdown_report_path": summary.markdown_report_path,
             },
             indent=2,
             sort_keys=True,
@@ -625,155 +631,23 @@ def build_comparison_summary(
         encoding="utf-8",
     )
 
+    if markdown_report_path is not None:
+        _write_comparison_markdown_summary(
+            path=markdown_report_path,
+            dataset_label=dataset_label,
+            baseline_hash=baseline_hash,
+            current_hash=current_hash,
+            baseline_git_commit_hash=baseline_git_commit_hash,
+            current_git_commit_hash=current_git_commit_hash,
+            baseline_created_at_utc=baseline_created_at_utc,
+            current_created_at_utc=current_created_at_utc,
+            notes=summary.notes,
+            baseline_accuracy_rows=baseline_accuracy_rows,
+            current_accuracy_rows=current_accuracy_rows,
+            baseline_stage_rows=baseline_stage_rows,
+            current_stage_rows=current_stage_rows,
+            chart_paths=chart_paths,
+            summary_path=summary_path,
+        )
+
     return summary
-
-
-def write_comparison_chart_html(
-    *,
-    path: Path,
-    title: str,
-    labels: list[str],
-    baseline_values: list[float | None],
-    current_values: list[float | None],
-) -> None:
-    safe_baseline = [0.0 if value is None else float(value) for value in baseline_values]
-    safe_current = [0.0 if value is None else float(value) for value in current_values]
-
-    all_values = [*safe_baseline, *safe_current]
-    minimum = min(all_values) if all_values else 0.0
-    maximum = max(all_values) if all_values else 1.0
-    spread = max(maximum - minimum, 0.0001)
-    zoom_padding = spread * 0.25
-    zoom_min = minimum - zoom_padding
-    zoom_max = maximum + zoom_padding
-
-    deltas = [
-        round(current - baseline, 8)
-        for baseline, current in zip(safe_baseline, safe_current)
-    ]
-
-    html = f"""<!doctype html>
-<html lang=\"en\">
-<head>
-  <meta charset=\"utf-8\" />
-  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
-  <title>{title}</title>
-  <script src=\"https://cdn.jsdelivr.net/npm/chart.js\"></script>
-  <style>
-        body {{
-            font-family: ui-sans-serif, -apple-system, Segoe UI, sans-serif;
-            margin: 24px;
-        }}
-        .card {{ max-width: 1080px; margin: 0 auto; }}
-    h1 {{ margin-bottom: 12px; }}
-        .grid {{
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 20px;
-        }}
-        .subtle {{ color: #4b5563; margin: 0; }}
-  </style>
-</head>
-<body>
-  <div class=\"card\">
-    <h1>{title}</h1>
-        <p class=\"subtle\">Overlaid series with shaded difference and zoomed inset.</p>
-        <div class=\"grid\">
-            <canvas id=\"chart\" height=\"260\"></canvas>
-            <canvas id=\"zoomChart\" height=\"170\"></canvas>
-        </div>
-  </div>
-  <script>
-    const labels = {json.dumps(labels)};
-    const baseline = {json.dumps(safe_baseline)};
-    const current = {json.dumps(safe_current)};
-        const deltas = {json.dumps(deltas)};
-
-    new Chart(document.getElementById('chart'), {{
-            type: 'line',
-      data: {{
-        labels,
-        datasets: [
-                    {{
-                        label: 'Baseline',
-                        data: baseline,
-                        borderColor: '#5f6b7a',
-                        backgroundColor: 'rgba(95, 107, 122, 0.18)',
-                        pointRadius: 3,
-                        borderWidth: 2,
-                        tension: 0.25
-                    }},
-                    {{
-                        label: 'Comparison',
-                        data: current,
-                        borderColor: '#1f8a70',
-                        backgroundColor: 'rgba(31, 138, 112, 0.28)',
-                        pointRadius: 3,
-                        borderWidth: 2,
-                        tension: 0.25,
-                        fill: '-1'
-                    }}
-        ]
-      }},
-      options: {{
-        responsive: true,
-        interaction: {{ mode: 'index', intersect: false }},
-                plugins: {{
-                    tooltip: {{
-                        callbacks: {{
-                            afterBody: (ctx) => {{
-                                const i = ctx[0].dataIndex;
-                                const sign = deltas[i] >= 0 ? '+' : '';
-                                return `delta: ${{sign}}${{deltas[i]}}`;
-                            }}
-                        }}
-                    }}
-                }},
-                scales: {{
-                    y: {{ beginAtZero: false }}
-                }}
-            }}
-        }});
-
-        new Chart(document.getElementById('zoomChart'), {{
-            type: 'line',
-            data: {{
-                labels,
-                datasets: [
-                    {{
-                        label: 'Baseline (zoom)',
-                        data: baseline,
-                        borderColor: '#5f6b7a',
-                        backgroundColor: 'rgba(95, 107, 122, 0.08)',
-                        pointRadius: 2,
-                        borderWidth: 2,
-                        tension: 0.2
-                    }},
-                    {{
-                        label: 'Comparison (zoom)',
-                        data: current,
-                        borderColor: '#1f8a70',
-                        backgroundColor: 'rgba(31, 138, 112, 0.16)',
-                        pointRadius: 2,
-                        borderWidth: 2,
-                        tension: 0.2,
-                        fill: '-1'
-                    }}
-                ]
-            }},
-            options: {{
-                responsive: true,
-                interaction: {{ mode: 'index', intersect: false }},
-                scales: {{
-                    y: {{
-                        min: {zoom_min},
-                        max: {zoom_max}
-                    }}
-                }}
-      }}
-    }});
-  </script>
-</body>
-</html>
-"""
-    path.write_text(html, encoding="utf-8")
