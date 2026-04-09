@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -97,8 +97,8 @@ def _format_run_timestamp(value: str | None) -> str:
         return value
 
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    utc_time = parsed.astimezone(UTC)
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    utc_time = parsed.astimezone(timezone.utc)
     return utc_time.strftime("%Y-%m-%d %H:%M:%S UTC")
 
 

@@ -5,7 +5,7 @@ import json
 import subprocess
 from collections.abc import Sequence
 from dataclasses import fields, is_dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
 from pathlib import Path
@@ -156,7 +156,7 @@ def _safe_path_segment(value: str) -> str:
 
 
 def _now_utc_iso() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _normalise_value(value: Any) -> Any:
@@ -415,17 +415,17 @@ def _records_to_hash_records(
 
 def _parse_created_at(value: str | None) -> datetime:
     if not value:
-        return datetime.min.replace(tzinfo=UTC)
+        return datetime.min.replace(tzinfo=timezone.utc)
 
     normalised = value.replace("Z", "+00:00")
     try:
         parsed = datetime.fromisoformat(normalised)
     except ValueError:
-        return datetime.min.replace(tzinfo=UTC)
+        return datetime.min.replace(tzinfo=timezone.utc)
 
     if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _sorted_dataset_runs(

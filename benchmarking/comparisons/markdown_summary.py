@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -87,9 +87,9 @@ def _format_utc_timestamp(value: str | None) -> str:
         return value
 
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
+        parsed = parsed.replace(tzinfo=timezone.utc)
 
-    return parsed.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+    return parsed.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
 def _markdown_table(headers: list[str], rows: list[list[str]]) -> str:
