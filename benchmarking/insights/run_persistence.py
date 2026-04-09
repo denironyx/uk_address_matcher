@@ -621,8 +621,10 @@ def _resolve_requested_baseline_info(
 
     baseline_info = runs_by_hash.get(normalised_baseline_hash)
     if baseline_info is None:
-        raise ValueError(
-            f"Unknown comparison_baseline_hash '{normalised_baseline_hash}'."
+        return (
+            None,
+            "Comparison skipped: unknown comparison_baseline_hash "
+            f"'{normalised_baseline_hash}'.",
         )
     return baseline_info, None
 
