@@ -58,6 +58,9 @@ def _build_compact_table_sql(
     ),
     metadata AS (
         SELECT
+            max(CASE WHEN run_type = 'baseline' THEN run_id END) AS baseline_run_id,
+            max(CASE WHEN run_type = 'comparison' THEN run_id END)
+                AS comparison_run_id,
             max(CASE WHEN run_type = 'baseline' THEN run_hash END) AS baseline_hash,
             max(CASE WHEN run_type = 'comparison' THEN run_hash END)
                 AS comparison_hash
@@ -66,7 +69,10 @@ def _build_compact_table_sql(
     baseline_row AS (
         SELECT
             'baseline' AS version,
-            (SELECT baseline_hash FROM metadata) AS version_hash,
+            coalesce(
+                (SELECT baseline_run_id FROM metadata),
+                (SELECT baseline_hash FROM metadata)
+            ) AS run_id,
             string_agg(
                 stage,
                 ' | '
@@ -80,7 +86,10 @@ def _build_compact_table_sql(
     comparison_row AS (
         SELECT
             'comparison' AS version,
-            (SELECT comparison_hash FROM metadata) AS version_hash,
+            coalesce(
+                (SELECT comparison_run_id FROM metadata),
+                (SELECT comparison_hash FROM metadata)
+            ) AS run_id,
             string_agg(
                 stage,
                 ' | '
@@ -93,7 +102,7 @@ def _build_compact_table_sql(
     )
     SELECT
         version,
-        version_hash,
+        run_id,
         stages_run,
         {output_columns_sql},
         run_timestamp
@@ -110,6 +119,7 @@ def _build_run_comparison_row(
     *,
     row: dict[str, Any],
     run_type: str,
+    run_id: str,
     run_hash: str,
     git_commit_hash: str | None,
     baseline_hash: str,
@@ -119,6 +129,7 @@ def _build_run_comparison_row(
 ) -> dict[str, Any]:
     return {
         "run_type": run_type,
+        "run_id": run_id,
         "run_hash": run_hash,
         "git_commit_hash": git_commit_hash,
         "baseline_hash": baseline_hash,
@@ -132,6 +143,8 @@ def _build_comparison_rows(
     *,
     baseline_rows: list[dict[str, Any]],
     current_rows: list[dict[str, Any]],
+    baseline_run_id: str,
+    current_run_id: str,
     baseline_hash: str,
     current_hash: str,
     baseline_git_commit_hash: str | None,
@@ -158,6 +171,7 @@ def _build_comparison_rows(
                 _build_run_comparison_row(
                     row=baseline,
                     run_type="baseline",
+                    run_id=baseline_run_id,
                     run_hash=baseline_hash,
                     git_commit_hash=baseline_git_commit_hash,
                     baseline_hash=baseline_hash,
@@ -168,6 +182,7 @@ def _build_comparison_rows(
                 _build_run_comparison_row(
                     row=current,
                     run_type="comparison",
+                    run_id=current_run_id,
                     run_hash=current_hash,
                     git_commit_hash=current_git_commit_hash,
                     baseline_hash=baseline_hash,
@@ -443,6 +458,8 @@ def build_accuracy_comparison_rows(
     *,
     baseline_rows: list[dict[str, Any]],
     current_rows: list[dict[str, Any]],
+    baseline_run_id: str,
+    current_run_id: str,
     baseline_hash: str,
     current_hash: str,
     baseline_git_commit_hash: str | None = None,
@@ -463,6 +480,8 @@ def build_accuracy_comparison_rows(
     return _build_comparison_rows(
         baseline_rows=baseline_rows,
         current_rows=current_rows,
+        baseline_run_id=baseline_run_id,
+        current_run_id=current_run_id,
         baseline_hash=baseline_hash,
         current_hash=current_hash,
         baseline_git_commit_hash=baseline_git_commit_hash,
@@ -475,6 +494,8 @@ def build_stage_diagnostics_comparison_rows(
     *,
     baseline_rows: list[dict[str, Any]],
     current_rows: list[dict[str, Any]],
+    baseline_run_id: str,
+    current_run_id: str,
     baseline_hash: str,
     current_hash: str,
     baseline_git_commit_hash: str | None = None,
@@ -495,6 +516,8 @@ def build_stage_diagnostics_comparison_rows(
     return _build_comparison_rows(
         baseline_rows=baseline_rows,
         current_rows=current_rows,
+        baseline_run_id=baseline_run_id,
+        current_run_id=current_run_id,
         baseline_hash=baseline_hash,
         current_hash=current_hash,
         baseline_git_commit_hash=baseline_git_commit_hash,
@@ -535,6 +558,8 @@ def _build_notes(overall_delta: dict[str, float | None]) -> list[str]:
 
 def build_comparison_summary(
     *,
+    baseline_run_id: str,
+    current_run_id: str,
     baseline_hash: str,
     current_hash: str,
     baseline_accuracy_rows: list[dict[str, Any]],
@@ -600,6 +625,8 @@ def build_comparison_summary(
         }
 
     summary = BenchmarkComparisonSummary(
+        baseline_run_id=baseline_run_id,
+        current_run_id=current_run_id,
         baseline_hash=baseline_hash,
         current_hash=current_hash,
         overall_delta=overall_delta,
@@ -617,6 +644,8 @@ def build_comparison_summary(
     summary_path.write_text(
         json.dumps(
             {
+                "baseline_run_id": summary.baseline_run_id,
+                "current_run_id": summary.current_run_id,
                 "baseline_hash": summary.baseline_hash,
                 "current_hash": summary.current_hash,
                 "overall_delta": summary.overall_delta,
@@ -635,6 +664,8 @@ def build_comparison_summary(
         _write_comparison_markdown_summary(
             path=markdown_report_path,
             dataset_label=dataset_label,
+            baseline_run_id=baseline_run_id,
+            current_run_id=current_run_id,
             baseline_hash=baseline_hash,
             current_hash=current_hash,
             baseline_git_commit_hash=baseline_git_commit_hash,

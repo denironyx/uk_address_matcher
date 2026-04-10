@@ -155,8 +155,14 @@ def _safe_path_segment(value: str) -> str:
     return safe or "unknown_dataset"
 
 
-def _now_utc_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+def generate_benchmark_run_id(*, at: datetime | None = None) -> str:
+    timestamp = at or datetime.now(timezone.utc)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    else:
+        timestamp = timestamp.astimezone(timezone.utc)
+    seed = timestamp.strftime("%Y%m%dT%H%M%S%fZ")
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
 
 
 def _normalise_value(value: Any) -> Any:
@@ -403,6 +409,29 @@ def _build_group_key(*, dataset_key: str, stage_fingerprint: str) -> str:
     return f"{dataset_key}:{stage_fingerprint}"
 
 
+def _normalise_run_id(*, run_id: str | None, fallback_at: datetime) -> str:
+    if run_id is None:
+        return generate_benchmark_run_id(at=fallback_at)
+
+    normalised = run_id.strip()
+    if not normalised:
+        return generate_benchmark_run_id(at=fallback_at)
+    return normalised
+
+
+def _run_info_run_id(
+    run_info: dict[str, Any],
+    *,
+    fallback_hash: str | None = None,
+) -> str | None:
+    run_id = run_info.get("run_id")
+    if run_id is None:
+        return fallback_hash
+
+    normalised = str(run_id).strip()
+    return normalised or fallback_hash
+
+
 def _records_to_hash_records(
     rows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -447,33 +476,6 @@ def _sorted_dataset_runs(
             str(run_info.get("run_hash", "")),
         ),
     )
-
-
-def resolve_latest_dataset_hashes(
-    *,
-    results_root: str = BENCHMARK_RESULTS_ROOT,
-    dataset_key: str,
-) -> tuple[str, str]:
-    root = Path(results_root)
-    history = _load_history(root / _HISTORY_FILE)
-    runs_by_hash: dict[str, Any] = history.get("runs_by_hash", {})
-    dataset_runs = _sorted_dataset_runs(
-        runs_by_hash=runs_by_hash,
-        dataset_key=dataset_key,
-    )
-
-    if len(dataset_runs) < 2:
-        available = sorted(
-            {str(run_info.get("dataset_key", "")) for run_info in runs_by_hash.values()}
-        )
-        raise ValueError(
-            "Need at least two persisted runs for dataset "
-            f"'{dataset_key}'. Available datasets in history: {', '.join(available)}"
-        )
-
-    baseline_info = dataset_runs[-2]
-    comparison_info = dataset_runs[-1]
-    return str(baseline_info["run_hash"]), str(comparison_info["run_hash"])
 
 
 def _manifest_artifact_path(
@@ -572,37 +574,50 @@ def _backfill_precision_recall_curve_artifact(
     return updated_run_info
 
 
-def _normalise_comparison_baseline_hash(
-    comparison_baseline_hash: str | None,
-) -> str | None:
-    if comparison_baseline_hash is None:
+def _find_dataset_run_by_run_id(
+    *,
+    runs_by_hash: dict[str, Any],
+    dataset_key: str,
+    run_id: str,
+) -> dict[str, Any] | None:
+    normalised_run_id = run_id.strip()
+    if not normalised_run_id:
         return None
 
-    normalised = comparison_baseline_hash.strip()
-    if not normalised:
-        return None
-    if normalised.lower() == "latest":
-        return "latest"
-    return normalised
+    for run_info in reversed(
+        _sorted_dataset_runs(
+            runs_by_hash=runs_by_hash,
+            dataset_key=dataset_key,
+        )
+    ):
+        if _run_info_run_id(run_info) == normalised_run_id:
+            return run_info
+    return None
 
 
 def _resolve_requested_baseline_info(
     *,
     runs_by_hash: dict[str, Any],
     dataset_key: str,
-    comparison_baseline_hash: str | None,
+    comparison_baseline_run_id: str | None,
+    current_run_id: str,
     current_run_hash: str,
 ) -> tuple[dict[str, Any] | None, str | None]:
-    normalised_baseline_hash = _normalise_comparison_baseline_hash(
-        comparison_baseline_hash
-    )
+    if comparison_baseline_run_id is None:
+        normalised_baseline_run_id = None
+    else:
+        normalised_baseline_run_id = comparison_baseline_run_id.strip() or None
+        if normalised_baseline_run_id is not None:
+            normalised_baseline_run_id = normalised_baseline_run_id.lower()
+            if normalised_baseline_run_id != "latest":
+                normalised_baseline_run_id = comparison_baseline_run_id.strip()
 
-    if normalised_baseline_hash == current_run_hash:
+    if normalised_baseline_run_id == current_run_id:
         raise ValueError(
-            "comparison_baseline_hash must differ from the current run hash."
+            "comparison_baseline_run_id must differ from the current run_id."
         )
 
-    if normalised_baseline_hash == "latest":
+    if normalised_baseline_run_id == "latest":
         dataset_runs = _sorted_dataset_runs(
             runs_by_hash=runs_by_hash,
             dataset_key=dataset_key,
@@ -616,21 +631,27 @@ def _resolve_requested_baseline_info(
             f"'latest' baseline on dataset '{dataset_key}'.",
         )
 
-    if normalised_baseline_hash is None:
+    if normalised_baseline_run_id is None:
         return None, None
 
-    baseline_info = runs_by_hash.get(normalised_baseline_hash)
-    if baseline_info is None:
-        return (
-            None,
-            "Comparison skipped: unknown comparison_baseline_hash "
-            f"'{normalised_baseline_hash}'.",
-        )
-    return baseline_info, None
+    baseline_info = _find_dataset_run_by_run_id(
+        runs_by_hash=runs_by_hash,
+        dataset_key=dataset_key,
+        run_id=normalised_baseline_run_id,
+    )
+    if baseline_info is not None:
+        return baseline_info, None
+
+    return (
+        None,
+        "Comparison skipped: unknown comparison_baseline_run_id "
+        f"'{normalised_baseline_run_id}' for dataset '{dataset_key}'.",
+    )
 
 
 def persist_benchmark_run(
     *,
+    run_id: str | None = None,
     dataset_key: str,
     dataset_label: str,
     stages: list[Any],
@@ -643,14 +664,16 @@ def persist_benchmark_run(
     precision: float | None,
     recall: float | None,
     precision_recall_curve_rows: list[dict[str, Any]] | None = None,
-    comparison_baseline_hash: str | None = None,
+    comparison_baseline_run_id: str | None = None,
     results_root: str = BENCHMARK_RESULTS_ROOT,
     enable_chart_exports: bool = True,
 ) -> PersistedBenchmarkRun:
     root = Path(results_root)
     history_path = root / _HISTORY_FILE
 
-    created_at = _now_utc_iso()
+    created_at_dt = datetime.now(timezone.utc)
+    created_at = created_at_dt.isoformat()
+    run_id = _normalise_run_id(run_id=run_id, fallback_at=created_at_dt)
     stage_fingerprint, stage_definition = _stage_fingerprint(stages)
     group_key = _build_group_key(
         dataset_key=dataset_key,
@@ -676,9 +699,6 @@ def persist_benchmark_run(
         stage_rows=stage_hash_rows,
         precision_recall_curve_rows=precision_recall_curve_hash_rows,
     )
-    comparison_baseline_hash = _normalise_comparison_baseline_hash(
-        comparison_baseline_hash
-    )
 
     history = _load_history(history_path)
     runs_by_hash: dict[str, Any] = history["runs_by_hash"]
@@ -695,7 +715,8 @@ def persist_benchmark_run(
         baseline_info, comparison_warning = _resolve_requested_baseline_info(
             runs_by_hash=runs_by_hash,
             dataset_key=dataset_key,
-            comparison_baseline_hash=comparison_baseline_hash,
+            comparison_baseline_run_id=comparison_baseline_run_id,
+            current_run_id=run_id,
             current_run_hash=run_hash,
         )
         if baseline_info is not None:
@@ -711,6 +732,7 @@ def persist_benchmark_run(
         history["latest_by_group"] = latest_by_group
         _atomic_write_json(history_path, history)
         return PersistedBenchmarkRun(
+            run_id=_run_info_run_id(updated_existing, fallback_hash=run_hash),
             run_hash=run_hash,
             group_key=group_key,
             created_at_utc=updated_existing.get("created_at_utc", created_at),
@@ -725,7 +747,7 @@ def persist_benchmark_run(
 
     date_bucket = created_at.split("T", 1)[0]
     dataset_segment = _safe_path_segment(dataset_key)
-    run_dir = root / dataset_segment / date_bucket / run_hash
+    run_dir = root / dataset_segment / date_bucket / run_id
     charts_dir = run_dir / "charts"
     run_dir.mkdir(parents=True, exist_ok=True)
     charts_dir.mkdir(parents=True, exist_ok=True)
@@ -754,7 +776,8 @@ def persist_benchmark_run(
     baseline_info, comparison_warning = _resolve_requested_baseline_info(
         runs_by_hash=runs_by_hash,
         dataset_key=dataset_key,
-        comparison_baseline_hash=comparison_baseline_hash,
+        comparison_baseline_run_id=comparison_baseline_run_id,
+        current_run_id=run_id,
         current_run_hash=run_hash,
     )
     if baseline_info is None and previous_dataset_runs:
@@ -766,6 +789,7 @@ def persist_benchmark_run(
             baseline_info=baseline_info,
             current_info={
                 "run_hash": run_hash,
+                "run_id": run_id,
                 "run_dir": _to_relative(run_dir),
                 "manifest_path": _to_relative(manifest_path),
                 "dataset_key": dataset_key,
@@ -787,6 +811,7 @@ def persist_benchmark_run(
         )
 
     manifest = {
+        "run_id": run_id,
         "run_hash": run_hash,
         "dataset_key": dataset_key,
         "dataset_label": dataset_label,
@@ -825,6 +850,7 @@ def persist_benchmark_run(
 
     runs_by_hash[run_hash] = {
         "run_hash": run_hash,
+        "run_id": run_id,
         "dataset_key": dataset_key,
         "dataset_label": dataset_label,
         "created_at_utc": created_at,
@@ -849,6 +875,7 @@ def persist_benchmark_run(
     _atomic_write_json(history_path, history)
 
     return PersistedBenchmarkRun(
+        run_id=run_id,
         run_hash=run_hash,
         group_key=group_key,
         created_at_utc=created_at,
@@ -874,15 +901,17 @@ def _resolve_artifact_path(path_value: str, *, results_root: Path) -> Path:
 def _comparison_artifact_paths(
     *,
     current_run_dir: Path,
-    baseline_hash: str,
-    current_hash: str,
+    baseline_run_id: str,
+    current_run_id: str,
     export_charts: bool,
 ) -> dict[str, Path]:
     charts_dir = current_run_dir / "charts"
     if export_charts:
         charts_dir.mkdir(parents=True, exist_ok=True)
 
-    file_suffix = f"{baseline_hash}_vs_{current_hash}"
+    file_suffix = (
+        f"{_safe_path_segment(baseline_run_id)}_vs_{_safe_path_segment(current_run_id)}"
+    )
     return {
         "summary_path": current_run_dir / f"comparison_summary_{file_suffix}.json",
         "markdown_report_path": (current_run_dir / f"comparison_report_{file_suffix}.md"),
@@ -920,13 +949,21 @@ def _build_overlay_chart(
         return None
 
     try:
+        baseline_run_id = _run_info_run_id(
+            baseline_info,
+            fallback_hash=str(baseline_info["run_hash"]),
+        )
+        current_run_id = _run_info_run_id(
+            current_info,
+            fallback_hash=str(current_info["run_hash"]),
+        )
         baseline_chart = build_precision_recall_chart_definition(baseline_curve_rows)
         current_chart = build_precision_recall_chart_definition(current_curve_rows)
         overlay_chart = overlay_precision_recall_charts(
             baseline_chart=baseline_chart,
             comparison_charts=current_chart,
-            baseline_label=f"Baseline {baseline_info['run_hash']}",
-            comparison_labels=f"Comparison {current_info['run_hash']}",
+            baseline_label=f"Baseline {baseline_run_id}",
+            comparison_labels=f"Comparison {current_run_id}",
         )
         chart_definition = (
             overlay_chart.to_dict()
@@ -936,16 +973,15 @@ def _build_overlay_chart(
         if not isinstance(chart_definition, dict):
             return None
         chart_definition["title"] = (
-            "Precision-Recall Curve Comparison: "
-            f"{baseline_info['run_hash']} vs {current_info['run_hash']}"
+            f"Precision-Recall Curve Comparison: {baseline_run_id} vs {current_run_id}"
         )
         _atomic_write_json(output_spec_path, chart_definition)
         write_overlay_precision_recall_chart_html(
             path=output_html_path,
             baseline_chart=baseline_chart,
             comparison_charts=current_chart,
-            baseline_label=f"Baseline {baseline_info['run_hash']}",
-            comparison_labels=f"Comparison {current_info['run_hash']}",
+            baseline_label=f"Baseline {baseline_run_id}",
+            comparison_labels=f"Comparison {current_run_id}",
             title=str(chart_definition["title"]),
         )
     except (TypeError, ValueError):
@@ -962,6 +998,14 @@ def _build_persisted_run_comparison(
 ) -> BenchmarkComparisonSummary:
     _validate_comparison_pair(baseline_info=baseline_info, current_info=current_info)
 
+    baseline_run_id = _run_info_run_id(
+        baseline_info,
+        fallback_hash=str(baseline_info["run_hash"]),
+    )
+    current_run_id = _run_info_run_id(
+        current_info,
+        fallback_hash=str(current_info["run_hash"]),
+    )
     baseline_hash = str(baseline_info["run_hash"])
     current_hash = str(current_info["run_hash"])
 
@@ -1003,14 +1047,16 @@ def _build_persisted_run_comparison(
     )
     artifact_paths = _comparison_artifact_paths(
         current_run_dir=current_run_dir,
-        baseline_hash=baseline_hash,
-        current_hash=current_hash,
+        baseline_run_id=baseline_run_id,
+        current_run_id=current_run_id,
         export_charts=export_charts,
     )
 
     accuracy_comparison_rows = build_accuracy_comparison_rows(
         baseline_rows=baseline_accuracy_rows,
         current_rows=current_accuracy_rows,
+        baseline_run_id=baseline_run_id,
+        current_run_id=current_run_id,
         baseline_hash=baseline_hash,
         current_hash=current_hash,
         baseline_git_commit_hash=baseline_info.get("git_commit_hash"),
@@ -1019,6 +1065,8 @@ def _build_persisted_run_comparison(
     stage_diagnostics_comparison_rows = build_stage_diagnostics_comparison_rows(
         baseline_rows=baseline_stage_rows,
         current_rows=current_stage_rows,
+        baseline_run_id=baseline_run_id,
+        current_run_id=current_run_id,
         baseline_hash=baseline_hash,
         current_hash=current_hash,
         baseline_git_commit_hash=baseline_info.get("git_commit_hash"),
@@ -1039,6 +1087,8 @@ def _build_persisted_run_comparison(
             chart_paths.append(overlay_chart)
 
     return build_comparison_summary(
+        baseline_run_id=baseline_run_id,
+        current_run_id=current_run_id,
         baseline_hash=baseline_hash,
         current_hash=current_hash,
         baseline_accuracy_rows=baseline_accuracy_rows,
@@ -1067,14 +1117,15 @@ def _build_persisted_run_comparison(
 def compare_persisted_runs(
     *,
     results_root: str = BENCHMARK_RESULTS_ROOT,
-    comparison_hash: str,
-    baseline_hash: str,
+    dataset_key: str,
+    comparison_run_id: str,
+    baseline_run_id: str,
     export_charts: bool = True,
 ) -> PersistedBenchmarkRun:
-    """Compare two explicit persisted runs by hash.
+    """Compare two explicit persisted runs by dataset-scoped run_id.
 
-    ``baseline_hash`` provides baseline values, and ``comparison_hash`` is compared
-    against it.
+    ``baseline_run_id`` provides baseline values, and ``comparison_run_id`` is
+    compared against it.
     """
     root = Path(results_root)
     history_path = root / _HISTORY_FILE
@@ -1084,19 +1135,28 @@ def compare_persisted_runs(
     if not runs_by_hash:
         raise ValueError(f"No persisted benchmark runs found under '{results_root}'.")
 
-    if comparison_hash not in runs_by_hash:
+    current_info = _find_dataset_run_by_run_id(
+        runs_by_hash=runs_by_hash,
+        dataset_key=dataset_key,
+        run_id=comparison_run_id,
+    )
+    if current_info is None:
         raise ValueError(
-            f"Unknown comparison_hash '{comparison_hash}'. "
-            f"Check {_history_hint(root)} for available hashes."
-        )
-    if baseline_hash not in runs_by_hash:
-        raise ValueError(
-            f"Unknown baseline_hash '{baseline_hash}'. "
-            f"Check {_history_hint(root)} for available hashes."
+            f"Unknown comparison_run_id '{comparison_run_id}' for dataset "
+            f"'{dataset_key}'. Check {_history_hint(root)} for available run_ids."
         )
 
-    current_info = runs_by_hash[comparison_hash]
-    baseline_info = runs_by_hash[baseline_hash]
+    baseline_info = _find_dataset_run_by_run_id(
+        runs_by_hash=runs_by_hash,
+        dataset_key=dataset_key,
+        run_id=baseline_run_id,
+    )
+    if baseline_info is None:
+        raise ValueError(
+            f"Unknown baseline_run_id '{baseline_run_id}' for dataset "
+            f"'{dataset_key}'. Check {_history_hint(root)} for available run_ids."
+        )
+
     comparison = _build_persisted_run_comparison(
         results_root=root,
         baseline_info=baseline_info,
@@ -1105,7 +1165,11 @@ def compare_persisted_runs(
     )
 
     return PersistedBenchmarkRun(
-        run_hash=comparison_hash,
+        run_id=_run_info_run_id(
+            current_info,
+            fallback_hash=str(current_info.get("run_hash", "")),
+        ),
+        run_hash=str(current_info.get("run_hash", "")),
         group_key=str(current_info.get("group_key", "")),
         created_at_utc=str(current_info.get("created_at_utc", "")),
         run_dir=str(current_info.get("run_dir", "")),
