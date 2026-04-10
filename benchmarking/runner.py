@@ -11,7 +11,11 @@ from benchmarking.config.datasets import (
 )
 from benchmarking.constants import BENCHMARK_RESULTS_ROOT
 from benchmarking.insights.diagnostics import build_dataset_diagnostics
-from benchmarking.insights.run_persistence import persist_benchmark_run
+from benchmarking.insights.reporting import print_run_persistence_summary
+from benchmarking.insights.run_persistence import (
+    generate_benchmark_run_id,
+    persist_benchmark_run,
+)
 from benchmarking.insights.summary import fetch_overall_summary
 from benchmarking.insights.types import DatasetDiagnostics, PersistedBenchmarkRun
 from benchmarking.utils.io import setup_connection
@@ -71,6 +75,7 @@ def run_single_dataset(
     dataset_key: str,
     canonical_path: str,
     stages: list,
+    run_id: str | None = None,
     sample_mode: bool = False,
     canonical_address_filter: str | None = None,
     enable_diagnostics: bool = False,
@@ -78,7 +83,7 @@ def run_single_dataset(
     persist_results: bool = False,
     results_root: str = BENCHMARK_RESULTS_ROOT,
     enable_comparison_charts: bool = True,
-    comparison_baseline_hash: str | None = None,
+    comparison_baseline_run_id: str | None = None,
 ) -> BenchmarkRunResult:
     dataset = get_dataset_definition(dataset_key)
     timings: dict[str, float] = {}
@@ -137,6 +142,7 @@ def run_single_dataset(
     persisted_run: PersistedBenchmarkRun | None = None
     if persist_results:
         persisted_run = persist_benchmark_run(
+            run_id=run_id,
             dataset_key=dataset_key,
             dataset_label=dataset["label"],
             stages=stages,
@@ -149,7 +155,7 @@ def run_single_dataset(
             precision=precision,
             recall=recall,
             precision_recall_curve_rows=precision_recall_curve_records,
-            comparison_baseline_hash=comparison_baseline_hash,
+            comparison_baseline_run_id=comparison_baseline_run_id,
             results_root=results_root,
             enable_chart_exports=enable_comparison_charts,
         )
@@ -179,6 +185,7 @@ def run_selected_datasets(
     selected_datasets: str | list[str],
     canonical_path: str,
     stages: list,
+    run_id: str | None = None,
     sample_mode: bool = False,
     canonical_address_filter: str | None = None,
     enable_diagnostics: bool = False,
@@ -186,19 +193,23 @@ def run_selected_datasets(
     persist_results: bool = False,
     results_root: str = BENCHMARK_RESULTS_ROOT,
     enable_comparison_charts: bool = True,
-    comparison_baseline_hash: str | None = None,
+    comparison_baseline_run_id: str | None = None,
 ) -> list[BenchmarkRunResult]:
     selected = resolve_dataset_selection(selected_datasets)
-    con = setup_connection()
+    effective_run_id = run_id.strip() if isinstance(run_id, str) else run_id
+    if not effective_run_id:
+        effective_run_id = generate_benchmark_run_id()
 
     results: list[BenchmarkRunResult] = []
     for dataset_key in selected:
+        con = setup_connection()
         print(f"\nRunning benchmark for dataset: {dataset_key}")
         result = run_single_dataset(
             con=con,
             dataset_key=dataset_key,
             canonical_path=canonical_path,
             stages=stages,
+            run_id=effective_run_id,
             sample_mode=sample_mode,
             canonical_address_filter=canonical_address_filter,
             enable_diagnostics=enable_diagnostics,
@@ -206,11 +217,14 @@ def run_selected_datasets(
             persist_results=persist_results,
             results_root=results_root,
             enable_comparison_charts=enable_comparison_charts,
-            comparison_baseline_hash=comparison_baseline_hash,
+            comparison_baseline_run_id=comparison_baseline_run_id,
         )
         print(
             f"Completed dataset '{dataset_key}' in {result.timings['total_runtime']:.2f}s"
         )
         results.append(result)
+
+    if persist_results:
+        print_run_persistence_summary(results)
 
     return results
