@@ -3,9 +3,10 @@ from __future__ import annotations
 import duckdb
 import pytest
 
+import benchmarking.insights.reporting as reporting_module
 from benchmarking.config.datasets import _clean_output
 from benchmarking.insights.diagnostics import build_dataset_diagnostics
-from benchmarking.insights.reporting import print_diagnostics
+from benchmarking.insights.reporting import print_benchmark_summary, print_diagnostics
 from benchmarking.insights.types import BenchmarkOutputOptions
 from benchmarking.runner import BenchmarkRunResult, resolve_dataset_selection
 
@@ -99,6 +100,7 @@ def test_build_dataset_diagnostics_filters_unmatchable_incorrect_rows() -> None:
     assert incorrect_ids == {"i1"}
     assert "i2" not in incorrect_ids
     assert unmatched_ids == {"u1"}
+    assert diagnostics.unmatched_records.fetchall()[0][4] == ["13 HIGH STREET"]
     assert diagnostics.unmatched_top_splink is None
     assert diagnostics.splink_available is False
 
@@ -140,6 +142,8 @@ def test_build_dataset_diagnostics_adds_top_splink_for_unmatched() -> None:
         SELECT *
         FROM (
             VALUES
+                ('200', '1 MAIN ROAD ACTUAL'),
+                ('201', '2 MAIN ROAD ACTUAL'),
                 ('canon-1', '1 MAIN ROAD CANDIDATE'),
                 ('canon-2', '2 MAIN ROAD CANDIDATE')
         ) AS t(unique_id, clean_full_address)
@@ -176,13 +180,19 @@ def test_build_dataset_diagnostics_adds_top_splink_for_unmatched() -> None:
         "ukam_address_id",
         "original_address_concat",
         "cleaned_full_address",
+        "actual_clean_full_address_canonical",
+        "highest_splink_clean_full_address_canonical",
         "highest_splink_comparison",
         "match_weight",
     ]
     assert diagnostics.splink_available is True
-    assert float(by_unique_id["u1"][4]) == pytest.approx(0.85, rel=1e-6)
-    assert float(by_unique_id["u1"][5]) == pytest.approx(4.0, rel=1e-6)
-    assert float(by_unique_id["u2"][4]) == pytest.approx(0.55, rel=1e-6)
+    assert by_unique_id["u1"][4] == ["1 MAIN ROAD ACTUAL"]
+    assert by_unique_id["u1"][5] == ["1 MAIN ROAD CANDIDATE"]
+    assert float(by_unique_id["u1"][6]) == pytest.approx(0.85, rel=1e-6)
+    assert float(by_unique_id["u1"][7]) == pytest.approx(4.0, rel=1e-6)
+    assert by_unique_id["u2"][4] == ["2 MAIN ROAD ACTUAL"]
+    assert by_unique_id["u2"][5] == ["2 MAIN ROAD CANDIDATE"]
+    assert float(by_unique_id["u2"][6]) == pytest.approx(0.55, rel=1e-6)
 
 
 def test_build_dataset_diagnostics_adds_top_splink_for_unmatched_by_ukam_id() -> None:
@@ -229,8 +239,11 @@ def test_build_dataset_diagnostics_adds_top_splink_for_unmatched_by_ukam_id() ->
         SELECT *
         FROM (
             VALUES
-                ('200', 'unused')
-        ) AS t(unique_id, clean_full_address)
+                ('200', '1 MAIN ROAD ACTUAL', 100),
+                ('201', '2 MAIN ROAD ACTUAL', 101),
+                ('canon-1', '1 MAIN ROAD CANDIDATE', 10),
+                ('canon-2', '2 MAIN ROAD CANDIDATE', 20)
+        ) AS t(unique_id, clean_full_address, ukam_address_id)
         """
     )
     splink_predictions = con.sql(
@@ -238,10 +251,10 @@ def test_build_dataset_diagnostics_adds_top_splink_for_unmatched_by_ukam_id() ->
         SELECT *
         FROM (
             VALUES
-                ('addr-1', 0.10, -3.0),
-                ('addr-1', 0.90, 6.0),
-                ('addr-2', 0.42, 1.5)
-        ) AS t(ukam_address_id_r, match_probability, match_weight)
+                (10, 'addr-1', 0.10, -3.0),
+                (10, 'addr-1', 0.90, 6.0),
+                (20, 'addr-2', 0.42, 1.5)
+        ) AS t(ukam_address_id_l, ukam_address_id_r, match_probability, match_weight)
         """
     )
 
@@ -256,10 +269,73 @@ def test_build_dataset_diagnostics_adds_top_splink_for_unmatched_by_ukam_id() ->
     assert diagnostics.unmatched_top_splink is not None
     rows = diagnostics.unmatched_top_splink.fetchall()
     by_unique_id = {row[0]: row for row in rows}
-    assert float(by_unique_id["u1"][4]) == pytest.approx(0.90, rel=1e-6)
-    assert float(by_unique_id["u2"][4]) == pytest.approx(0.42, rel=1e-6)
-    assert float(by_unique_id["u1"][5]) == pytest.approx(6.0, rel=1e-6)
-    assert float(by_unique_id["u2"][5]) == pytest.approx(1.5, rel=1e-6)
+    assert by_unique_id["u1"][4] == ["1 MAIN ROAD ACTUAL"]
+    assert by_unique_id["u1"][5] == ["1 MAIN ROAD CANDIDATE"]
+    assert float(by_unique_id["u1"][6]) == pytest.approx(0.90, rel=1e-6)
+    assert float(by_unique_id["u1"][7]) == pytest.approx(6.0, rel=1e-6)
+    assert by_unique_id["u2"][4] == ["2 MAIN ROAD ACTUAL"]
+    assert by_unique_id["u2"][5] == ["2 MAIN ROAD CANDIDATE"]
+    assert float(by_unique_id["u2"][6]) == pytest.approx(0.42, rel=1e-6)
+    assert float(by_unique_id["u2"][7]) == pytest.approx(1.5, rel=1e-6)
+
+
+def test_build_dataset_diagnostics_unmatched_records_require_canonical_match() -> None:
+    con = duckdb.connect(database=":memory:")
+    con.sql(
+        """
+        CREATE TABLE matches AS
+        SELECT *
+        FROM (
+            VALUES
+                ('u1', '102', NULL, NULL, '13 HIGH ST', '13 HIGH STREET', NULL, NULL),
+                ('u2', '999', NULL, NULL, '99 UNKNOWN RD', '99 UNKNOWN ROAD', NULL, NULL)
+        ) AS t(
+            unique_id,
+            ukam_label,
+            resolved_canonical_id,
+            match_reason,
+            original_address_concat,
+            clean_full_address,
+            original_address_concat_canonical,
+            match_weight
+        )
+        """
+    )
+
+    diagnostics = build_dataset_diagnostics(
+        con,
+        matches_table_name="matches",
+        messy_relation=con.sql(
+            """
+            SELECT *
+            FROM (
+                VALUES
+                    ('u1', '13 HIGH STREET'),
+                    ('u2', '99 UNKNOWN ROAD')
+            ) AS t(unique_id, clean_full_address)
+            """
+        ),
+        canonical_relation=con.sql(
+            """
+            SELECT *
+            FROM (
+                VALUES
+                    ('102', '13 HIGH STREET')
+            ) AS t(unique_id, clean_full_address)
+            """
+        ),
+        splink_predictions=None,
+        output_options=BenchmarkOutputOptions(
+            show_successful_matches=False,
+            show_incorrect_matches=False,
+            show_similarity_score_checks=False,
+            show_unmatched_records=True,
+        ),
+    )
+
+    assert diagnostics.unmatched_records is not None
+    rows = diagnostics.unmatched_records.fetchall()
+    assert [row[0] for row in rows] == ["u1"]
 
 
 def test_build_dataset_diagnostics_rolls_up_canonical_variants() -> None:
@@ -515,3 +591,122 @@ def test_print_diagnostics_respects_output_toggles(
     assert "---- INCORRECT MATCHES ----" in output
     assert "Diagnostics: similarity score checks" in output
     assert "Diagnostics: suspicious incorrect-match summary" in output
+
+
+def test_print_diagnostics_shows_unmatched_records_when_enabled(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    con = duckdb.connect(database=":memory:")
+
+    con.sql(
+        """
+        CREATE TABLE matches_for_unmatched_output AS
+        SELECT *
+        FROM (
+            VALUES
+                ('u1', '102', NULL, NULL, '12 HIGH ST', '12 HIGH STREET', NULL, NULL)
+        ) AS t(
+            unique_id,
+            ukam_label,
+            resolved_canonical_id,
+            match_reason,
+            original_address_concat,
+            clean_full_address,
+            original_address_concat_canonical,
+            match_weight
+        )
+        """
+    )
+
+    diagnostics = build_dataset_diagnostics(
+        con,
+        matches_table_name="matches_for_unmatched_output",
+        messy_relation=con.sql(
+            """
+            SELECT *
+            FROM (
+                VALUES
+                    ('u1', '12 HIGH STREET')
+            ) AS t(unique_id, clean_full_address)
+            """
+        ),
+        canonical_relation=con.sql(
+            """
+            SELECT *
+            FROM (
+                VALUES
+                    ('102', '12 HIGH STREET')
+            ) AS t(unique_id, clean_full_address)
+            """
+        ),
+        splink_predictions=None,
+    )
+
+    run_result = BenchmarkRunResult(
+        dataset_key="hackney",
+        dataset_label="Hackney",
+        total_rows=1,
+        matched_rows=0,
+        correct_matches=0,
+        precision=0.0,
+        recall=0.0,
+        match_reason_breakdown=con.sql("SELECT 1 AS x"),
+        timings={"data_load": 0.1, "match_pipeline": 0.2, "total_runtime": 0.3},
+        con=con,
+        diagnostics=diagnostics,
+    )
+
+    options = BenchmarkOutputOptions(
+        show_successful_matches=False,
+        show_incorrect_matches=False,
+        show_similarity_score_checks=False,
+        show_unmatched_records=True,
+    )
+    print_diagnostics([run_result], output_options=options)
+    output = capsys.readouterr().out
+
+    assert "Dataset diagnostics: hackney" in output
+    assert "Diagnostics: unmatched records" in output
+    assert "u1" in output
+    assert "Splink not active for this run." in output
+
+
+def test_print_benchmark_summary_prints_diagnostics_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_calls: list[
+        tuple[list[BenchmarkRunResult], BenchmarkOutputOptions | None]
+    ] = []
+
+    def fake_print_diagnostics(
+        results: list[BenchmarkRunResult],
+        output_options: BenchmarkOutputOptions | None = None,
+    ) -> None:
+        captured_calls.append((results, output_options))
+
+    run_result = BenchmarkRunResult(
+        dataset_key="hackney",
+        dataset_label="Hackney",
+        total_rows=1,
+        matched_rows=1,
+        correct_matches=1,
+        precision=1.0,
+        recall=1.0,
+        match_reason_breakdown=object(),
+        timings={"data_load": 0.1, "match_pipeline": 0.2, "total_runtime": 0.3},
+        con=object(),
+        diagnostics=object(),
+    )
+    options = BenchmarkOutputOptions(
+        show_splink_comparisons=False,
+        show_successful_matches=False,
+        show_incorrect_matches=False,
+        show_similarity_score_checks=False,
+        show_unmatched_records=True,
+    )
+
+    monkeypatch.setattr(reporting_module, "print_diagnostics", fake_print_diagnostics)
+
+    print_benchmark_summary([run_result], output_options=options)
+
+    assert captured_calls == [([run_result], options)]

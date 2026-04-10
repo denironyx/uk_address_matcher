@@ -46,6 +46,38 @@ def _resolve_splink_id_column(predictions: duckdb.DuckDBPyRelation) -> str:
     raise ValueError("Splink predictions table is missing expected unique-id columns.")
 
 
+def _resolve_splink_candidate_id_column(
+    predictions: duckdb.DuckDBPyRelation,
+) -> str | None:
+    columns = set(predictions.columns)
+    if "unique_id_l" in columns:
+        return "unique_id_l"
+    if "unique_id" in columns:
+        return "unique_id"
+    if "ukam_address_id_l" in columns:
+        return "ukam_address_id_l"
+    return None
+
+
+def _resolve_canonical_join_key_expr(
+    *,
+    canonical_columns: set[str],
+    id_column: str,
+    row_alias: str = "c",
+) -> str | None:
+    if id_column in {"unique_id", "unique_id_l", "unique_id_r"}:
+        if "unique_id" in canonical_columns:
+            return f"CAST({row_alias}.unique_id AS VARCHAR)"
+        return None
+
+    if id_column in {"ukam_address_id", "ukam_address_id_l", "ukam_address_id_r"}:
+        if "ukam_address_id" in canonical_columns:
+            return f"CAST({row_alias}.ukam_address_id AS VARCHAR)"
+        return None
+
+    return None
+
+
 def _resolve_unmatched_join_key_expr(
     *,
     match_columns: set[str],
@@ -243,6 +275,9 @@ def build_dataset_diagnostics(
     classified_table_name = f"__simple_bench_classified_{table_suffix}"
     if has_canonical:
         classified_canonical_expr = "canonical_match.clean_full_address_canonical"
+        classified_actual_canonical_expr = (
+            "actual_canonical_match.clean_full_address_canonical"
+        )
         classified_with_sql = f"""
             WITH
                 canonical_label_lookup AS (
@@ -261,6 +296,9 @@ def build_dataset_diagnostics(
             LEFT JOIN canonical_rollup AS canonical_match
               ON CAST(canonical_match.canonical_id AS VARCHAR) =
                  CAST(m.resolved_canonical_id AS VARCHAR)
+                        LEFT JOIN canonical_rollup AS actual_canonical_match
+                            ON CAST(actual_canonical_match.canonical_id AS VARCHAR) =
+                                 CAST(m.ukam_label AS VARCHAR)
             LEFT JOIN canonical_label_lookup AS label_lookup
               ON CAST(m.ukam_label AS VARCHAR) = label_lookup.canonical_id
         """
@@ -277,6 +315,7 @@ def build_dataset_diagnostics(
         """
     else:
         classified_canonical_expr = "NULL::VARCHAR[]"
+        classified_actual_canonical_expr = "NULL::VARCHAR[]"
         classified_with_sql = ""
         classified_joins_sql = ""
         classified_match_outcome_expr = """
@@ -303,6 +342,7 @@ def build_dataset_diagnostics(
             m.original_address_concat,
             {cleaned_address_expr} AS cleaned_full_address,
             {classified_canonical_expr} AS clean_full_address_canonical,
+            {classified_actual_canonical_expr} AS actual_clean_full_address_canonical,
             {match_weight_expr},
             {optional_ukam_address_id_expr} AS ukam_address_id,
             {classified_match_outcome_expr} AS match_outcome
@@ -499,9 +539,11 @@ def build_dataset_diagnostics(
                 unique_id,
                 postcode,
                 original_address_concat,
-                cleaned_full_address
+                cleaned_full_address,
+                actual_clean_full_address_canonical AS clean_full_address_canonical
             FROM {classified_table_name}
             WHERE match_outcome = 'unmatched'
+              AND actual_clean_full_address_canonical IS NOT NULL
             ORDER BY CAST(unique_id AS VARCHAR)
             LIMIT 10
             """
@@ -518,11 +560,43 @@ def build_dataset_diagnostics(
             relation=splink_predictions,
         )
         splink_id_column = _resolve_splink_id_column(splink_predictions)
+        splink_candidate_id_column = _resolve_splink_candidate_id_column(
+            splink_predictions
+        )
         unmatched_join_key_expr = _resolve_unmatched_join_key_expr(
             match_columns=match_columns,
             splink_id_column=splink_id_column,
             row_alias="classified",
         )
+        candidate_rollup_cte_sql = ""
+        candidate_id_expr = "NULL::VARCHAR"
+        candidate_value_select_sql = (
+            "NULL::VARCHAR[] AS highest_splink_clean_full_address_canonical"
+        )
+        candidate_value_join_sql = ""
+        if has_canonical and splink_candidate_id_column is not None:
+            canonical_candidate_join_key_expr = _resolve_canonical_join_key_expr(
+                canonical_columns=canonical_columns,
+                id_column=splink_candidate_id_column,
+            )
+            if canonical_candidate_join_key_expr is not None:
+                candidate_rollup_cte_sql = f"""
+            , candidate_canonical_rollup AS (
+                SELECT
+                    {canonical_candidate_join_key_expr} AS candidate_canonical_id,
+                    {canonical_rollup_value_expr} AS highest_splink_clean_full_address_canonical
+                FROM {canonical_table_name} AS c
+                GROUP BY 1
+            )
+                """
+                candidate_id_expr = f"CAST(pred.{splink_candidate_id_column} AS VARCHAR)"
+                candidate_value_select_sql = (
+                    "candidate_rollup.highest_splink_clean_full_address_canonical"
+                )
+                candidate_value_join_sql = """
+            LEFT JOIN candidate_canonical_rollup AS candidate_rollup
+                ON tsc.candidate_canonical_id = candidate_rollup.candidate_canonical_id
+                """
 
         unmatched_top_splink = con.sql(
             f"""
@@ -532,21 +606,24 @@ def build_dataset_diagnostics(
                     {unmatched_join_key_expr} AS unmatched_join_key,
                     classified.ukam_address_id,
                     classified.original_address_concat,
-                    classified.cleaned_full_address
+                    classified.cleaned_full_address,
+                    classified.actual_clean_full_address_canonical
                 FROM {classified_table_name} AS classified
                 WHERE classified.match_outcome = 'unmatched'
+                  AND classified.actual_clean_full_address_canonical IS NOT NULL
                 ORDER BY RANDOM()
                 LIMIT 10
             ),
             top_splink_candidates AS (
                 SELECT
                     CAST(pred.{splink_id_column} AS VARCHAR) AS splink_join_key,
+                    {candidate_id_expr} AS candidate_canonical_id,
                     pred.match_probability AS highest_splink_comparison,
                     pred.match_weight,
                     ROW_NUMBER() OVER (
                         PARTITION BY CAST(pred.{splink_id_column} AS VARCHAR)
-                        ORDER BY pred.match_probability DESC NULLS LAST,
-                                 pred.match_weight DESC NULLS LAST
+                        ORDER BY pred.match_weight DESC NULLS LAST,
+                                 pred.match_probability DESC NULLS LAST
                     ) AS rn
                 FROM {splink_predictions_table_name} AS pred
                 WHERE CAST(pred.{splink_id_column} AS VARCHAR) IN (
@@ -555,17 +632,21 @@ def build_dataset_diagnostics(
                     WHERE unmatched_join_key IS NOT NULL
                 )
             )
+            {candidate_rollup_cte_sql}
             SELECT
                 su.unique_id,
                 su.ukam_address_id,
                 su.original_address_concat,
                 su.cleaned_full_address,
+                su.actual_clean_full_address_canonical,
+                {candidate_value_select_sql},
                 tsc.highest_splink_comparison,
                 tsc.match_weight
             FROM sampled_unmatched AS su
             LEFT JOIN top_splink_candidates AS tsc
                 ON su.unmatched_join_key = tsc.splink_join_key
                AND tsc.rn = 1
+            {candidate_value_join_sql}
             ORDER BY su.unique_id
             """
         )
