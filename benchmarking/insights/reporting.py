@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 
 _REPO_ROOT = Path(BENCHMARK_PROJECT_ROOT)
+_NOT_MATERIALISED_MESSAGE = "Diagnostics were not materialised for this run."
 
 
 def _display_path(path_value: str | None) -> str | None:
@@ -42,6 +43,12 @@ def _print_by_match_reason(
     title: str,
     section_header: str,
 ) -> None:
+    if relation is None:
+        print(f"\n{section_header}")
+        print(title)
+        print(_NOT_MATERIALISED_MESSAGE)
+        return
+
     reason_rel = result.con.sql(
         f"""
         SELECT DISTINCT match_reason
@@ -93,6 +100,11 @@ def print_benchmark_summary(
             "Timings: "
             f"data_load={result.timings['data_load']:.2f}s, "
             f"match_pipeline={result.timings['match_pipeline']:.2f}s"
+            + (
+                f", diagnostics={result.timings['diagnostics']:.2f}s"
+                if "diagnostics" in result.timings
+                else ""
+            )
         )
 
         if result.accuracy_table is not None:
@@ -210,12 +222,19 @@ def print_diagnostics(
 
         if output_options.show_similarity_score_checks:
             print("\nDiagnostics: similarity score checks")
-            print("\nDiagnostics: 10 incorrect matches with lowest similarity")
-            _show_via_sql(result, diagnostics.lowest_similarity_incorrect)
-            print("\nDiagnostics: 10 incorrect matches with highest similarity")
-            _show_via_sql(result, diagnostics.highest_similarity_incorrect)
-            print("\nDiagnostics: suspicious incorrect-match summary")
-            _show_via_sql(result, diagnostics.suspicious_incorrect_summary)
+            if (
+                diagnostics.lowest_similarity_incorrect is None
+                or diagnostics.highest_similarity_incorrect is None
+                or diagnostics.suspicious_incorrect_summary is None
+            ):
+                print(_NOT_MATERIALISED_MESSAGE)
+            else:
+                print("\nDiagnostics: 10 incorrect matches with lowest similarity")
+                _show_via_sql(result, diagnostics.lowest_similarity_incorrect)
+                print("\nDiagnostics: 10 incorrect matches with highest similarity")
+                _show_via_sql(result, diagnostics.highest_similarity_incorrect)
+                print("\nDiagnostics: suspicious incorrect-match summary")
+                _show_via_sql(result, diagnostics.suspicious_incorrect_summary)
 
         if output_options.show_unmatched_records:
             print("\nDiagnostics: unmatched records with highest Splink comparison")

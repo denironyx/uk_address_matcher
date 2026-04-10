@@ -9,13 +9,13 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class DatasetDiagnostics:
-    successful_matches: duckdb.DuckDBPyRelation
-    incorrect_matches: duckdb.DuckDBPyRelation
-    lowest_similarity_incorrect: duckdb.DuckDBPyRelation
-    highest_similarity_incorrect: duckdb.DuckDBPyRelation
-    suspicious_incorrect_summary: duckdb.DuckDBPyRelation
-    suspicious_incorrect_records: duckdb.DuckDBPyRelation
-    unmatched_records: duckdb.DuckDBPyRelation
+    successful_matches: duckdb.DuckDBPyRelation | None
+    incorrect_matches: duckdb.DuckDBPyRelation | None
+    lowest_similarity_incorrect: duckdb.DuckDBPyRelation | None
+    highest_similarity_incorrect: duckdb.DuckDBPyRelation | None
+    suspicious_incorrect_summary: duckdb.DuckDBPyRelation | None
+    suspicious_incorrect_records: duckdb.DuckDBPyRelation | None
+    unmatched_records: duckdb.DuckDBPyRelation | None
     unmatched_top_splink: duckdb.DuckDBPyRelation | None
     splink_available: bool
 
@@ -37,6 +37,18 @@ class BenchmarkOutputOptions:
                 self.show_unmatched_records,
             )
         )
+
+    def include_successful_matches(self) -> bool:
+        return self.show_successful_matches
+
+    def include_incorrect_matches(self) -> bool:
+        return self.show_incorrect_matches or self.show_similarity_score_checks
+
+    def include_similarity_score_checks(self) -> bool:
+        return self.show_similarity_score_checks
+
+    def include_unmatched_records(self) -> bool:
+        return self.show_unmatched_records
 
 
 @dataclass(frozen=True)

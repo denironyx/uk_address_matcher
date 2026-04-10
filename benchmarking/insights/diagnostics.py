@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from benchmarking.insights.types import DatasetDiagnostics
+from benchmarking.insights.types import BenchmarkOutputOptions, DatasetDiagnostics
 
 if TYPE_CHECKING:
     import duckdb
@@ -50,12 +50,13 @@ def _resolve_unmatched_join_key_expr(
     *,
     match_columns: set[str],
     splink_id_column: str,
+    row_alias: str = "m",
 ) -> str:
     if splink_id_column in {"ukam_address_id_r", "ukam_address_id"}:
         if "ukam_address_id" in match_columns:
-            return "CAST(m.ukam_address_id AS VARCHAR)"
+            return f"CAST({row_alias}.ukam_address_id AS VARCHAR)"
         return "NULL::VARCHAR"
-    return "CAST(m.unique_id AS VARCHAR)"
+    return f"CAST({row_alias}.unique_id AS VARCHAR)"
 
 
 def _resolve_optional_ukam_address_id_expr(match_columns: set[str]) -> str:
@@ -67,6 +68,7 @@ def _resolve_optional_ukam_address_id_expr(match_columns: set[str]) -> str:
 def _build_similarity_score_expr(
     *,
     row_alias: str,
+    canonical_table_name: str,
     canonical_compare_source_expr: str,
 ) -> str:
     return f"""
@@ -74,7 +76,7 @@ def _build_similarity_score_expr(
             WHEN {row_alias}.original_address_concat IS NULL
               OR NOT EXISTS (
                   SELECT 1
-                  FROM __simple_bench_canonical__ AS c2
+                  FROM {canonical_table_name} AS c2
                   WHERE CAST(c2.unique_id AS VARCHAR) =
                         CAST({row_alias}.resolved_canonical_id AS VARCHAR)
                     AND {canonical_compare_source_expr} IS NOT NULL
@@ -87,13 +89,42 @@ def _build_similarity_score_expr(
                         {canonical_compare_source_expr}
                     )
                 )
-                FROM __simple_bench_canonical__ AS c2
+                FROM {canonical_table_name} AS c2
                 WHERE CAST(c2.unique_id AS VARCHAR) =
                       CAST({row_alias}.resolved_canonical_id AS VARCHAR)
                   AND {canonical_compare_source_expr} IS NOT NULL
             )
         END
     """
+
+
+def _create_temp_view_from_relation(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    view_name: str,
+    relation: duckdb.DuckDBPyRelation,
+) -> None:
+    con.sql(
+        "CREATE OR REPLACE TEMP VIEW "
+        + view_name
+        + " AS SELECT * FROM ("
+        + relation.sql_query()
+        + ")"
+    )
+
+
+def _empty_dataset_diagnostics(*, splink_available: bool) -> DatasetDiagnostics:
+    return DatasetDiagnostics(
+        successful_matches=None,
+        incorrect_matches=None,
+        lowest_similarity_incorrect=None,
+        highest_similarity_incorrect=None,
+        suspicious_incorrect_summary=None,
+        suspicious_incorrect_records=None,
+        unmatched_records=None,
+        unmatched_top_splink=None,
+        splink_available=splink_available,
+    )
 
 
 def build_dataset_diagnostics(
@@ -103,15 +134,40 @@ def build_dataset_diagnostics(
     messy_relation: duckdb.DuckDBPyRelation,
     canonical_relation: duckdb.DuckDBPyRelation | None,
     splink_predictions: duckdb.DuckDBPyRelation | None,
+    output_options: BenchmarkOutputOptions | None = None,
 ) -> DatasetDiagnostics:
+    splink_available = splink_predictions is not None
+
+    if output_options is None:
+        include_successful_matches = True
+        include_incorrect_matches = True
+        include_similarity_score_checks = True
+        include_unmatched_records = True
+    else:
+        if not output_options.enable_diagnostics():
+            return _empty_dataset_diagnostics(
+                splink_available=splink_available,
+            )
+
+        include_successful_matches = output_options.include_successful_matches()
+        include_incorrect_matches = output_options.include_incorrect_matches()
+        include_similarity_score_checks = output_options.include_similarity_score_checks()
+        include_unmatched_records = output_options.include_unmatched_records()
+
     table_suffix = "".join(ch if ch.isalnum() else "_" for ch in matches_table_name)
     match_columns = set(con.table(matches_table_name).columns)
     messy_columns = set(messy_relation.columns)
     cleaned_address_expr = _resolve_cleaned_address_expr(match_columns, messy_columns)
     match_weight_expr = _optional_match_column_expr(match_columns, "match_weight")
     postcode_expr = _resolve_postcode_expr(match_columns, messy_columns)
+    optional_ukam_address_id_expr = _resolve_optional_ukam_address_id_expr(match_columns)
 
-    con.register("__simple_bench_messy__", messy_relation)
+    messy_table_name = f"__simple_bench_messy_{table_suffix}"
+    _create_temp_view_from_relation(
+        con,
+        view_name=messy_table_name,
+        relation=messy_relation,
+    )
 
     incorrect_projection_without_reason_sql = """
         unique_id,
@@ -150,8 +206,14 @@ def build_dataset_diagnostics(
     has_canonical = (
         canonical_relation is not None and "unique_id" in canonical_relation.columns
     )
+    canonical_table_name: str | None = None
     if has_canonical and canonical_relation is not None:
-        con.register("__simple_bench_canonical__", canonical_relation)
+        canonical_table_name = f"__simple_bench_canonical_{table_suffix}"
+        _create_temp_view_from_relation(
+            con,
+            view_name=canonical_table_name,
+            relation=canonical_relation,
+        )
         canonical_columns = set(canonical_relation.columns)
         canonical_clean_column = (
             "clean_full_address" if "clean_full_address" in canonical_columns else None
@@ -168,11 +230,6 @@ def build_dataset_diagnostics(
         canonical_clean_source_expr = (
             f"c.{canonical_clean_column}" if canonical_clean_column else None
         )
-        canonical_compare_source_expr = (
-            f"c2.{canonical_compare_column}"
-            if canonical_compare_column
-            else "NULL::VARCHAR"
-        )
         if canonical_clean_source_expr is not None:
             canonical_rollup_value_expr = (
                 f"list(DISTINCT {canonical_clean_source_expr}) "
@@ -180,120 +237,104 @@ def build_dataset_diagnostics(
             )
         else:
             canonical_rollup_value_expr = "NULL::VARCHAR[]"
+    else:
+        canonical_columns = set()
 
-        if canonical_compare_column is not None:
-            sampled_similarity_score_expr = _build_similarity_score_expr(
-                row_alias="sampled",
-                canonical_compare_source_expr=canonical_compare_source_expr,
-            )
-        else:
-            sampled_similarity_score_expr = "NULL::DOUBLE"
-
-        canonical_rollup_cte_sql = f"""
-            canonical_rollup AS (
-                SELECT
-                    CAST(c.unique_id AS VARCHAR) AS canonical_id,
-                    {canonical_rollup_value_expr} AS clean_full_address_canonical
-                FROM __simple_bench_canonical__ AS c
-                GROUP BY 1
-            ),
+    classified_table_name = f"__simple_bench_classified_{table_suffix}"
+    if has_canonical:
+        classified_canonical_expr = "canonical_match.clean_full_address_canonical"
+        classified_with_sql = f"""
+            WITH
+                canonical_label_lookup AS (
+                    SELECT DISTINCT CAST(unique_id AS VARCHAR) AS canonical_id
+                    FROM {canonical_table_name}
+                ),
+                canonical_rollup AS (
+                    SELECT
+                        CAST(c.unique_id AS VARCHAR) AS canonical_id,
+                        {canonical_rollup_value_expr} AS clean_full_address_canonical
+                    FROM {canonical_table_name} AS c
+                    GROUP BY 1
+                )
         """
-        canonical_rollup_join_sql = """
+        classified_joins_sql = """
             LEFT JOIN canonical_rollup AS canonical_match
               ON CAST(canonical_match.canonical_id AS VARCHAR) =
                  CAST(m.resolved_canonical_id AS VARCHAR)
+            LEFT JOIN canonical_label_lookup AS label_lookup
+              ON CAST(m.ukam_label AS VARCHAR) = label_lookup.canonical_id
+        """
+        classified_match_outcome_expr = """
+            CASE
+                WHEN m.match_reason IS NULL OR m.resolved_canonical_id IS NULL
+                    THEN 'unmatched'
+                WHEN CAST(m.ukam_label AS VARCHAR) =
+                     CAST(m.resolved_canonical_id AS VARCHAR)
+                    THEN 'successful'
+                WHEN label_lookup.canonical_id IS NOT NULL THEN 'incorrect'
+                ELSE 'ignored'
+            END
         """
     else:
-        canonical_columns = set()
-        canonical_rollup_cte_sql = ""
-        canonical_rollup_join_sql = ""
-        sampled_similarity_score_expr = "NULL::DOUBLE"
+        classified_canonical_expr = "NULL::VARCHAR[]"
+        classified_with_sql = ""
+        classified_joins_sql = ""
+        classified_match_outcome_expr = """
+            CASE
+                WHEN m.match_reason IS NULL OR m.resolved_canonical_id IS NULL
+                    THEN 'unmatched'
+                WHEN CAST(m.ukam_label AS VARCHAR) =
+                     CAST(m.resolved_canonical_id AS VARCHAR)
+                    THEN 'successful'
+                ELSE 'incorrect'
+            END
+        """
 
     con.sql(
         f"""
-        CREATE OR REPLACE TEMP TABLE __simple_bench_successful_{table_suffix} AS
-        WITH
-            {canonical_rollup_cte_sql}
-            sampled AS (
-            SELECT
-                m.match_reason,
-                m.unique_id,
-                m.ukam_label,
-                m.resolved_canonical_id,
-                {postcode_expr} AS postcode,
-                m.original_address_concat,
-                {cleaned_address_expr} AS cleaned_full_address,
-                canonical_match.clean_full_address_canonical,
-                ROW_NUMBER() OVER (
-                    PARTITION BY m.match_reason
-                    ORDER BY CAST(m.unique_id AS VARCHAR)
-                ) AS rn
-            FROM {matches_table_name} AS m
-            LEFT JOIN __simple_bench_messy__ AS messy
-                ON CAST(messy.unique_id AS VARCHAR) = CAST(m.unique_id AS VARCHAR)
-            {canonical_rollup_join_sql}
-            WHERE m.match_reason IS NOT NULL
-              AND m.resolved_canonical_id IS NOT NULL
-              AND CAST(m.ukam_label AS VARCHAR) = CAST(m.resolved_canonical_id AS VARCHAR)
-        )
+        CREATE OR REPLACE TEMP TABLE {classified_table_name} AS
+        {classified_with_sql}
         SELECT
-            match_reason,
-            unique_id,
-            ukam_label,
-            resolved_canonical_id,
-            postcode,
-            original_address_concat,
-            cleaned_full_address,
-            clean_full_address_canonical
-        FROM sampled
-        WHERE rn <= 5
-        ORDER BY match_reason, unique_id
+            m.match_reason,
+            m.unique_id,
+            m.ukam_label,
+            m.resolved_canonical_id,
+            {postcode_expr} AS postcode,
+            m.original_address_concat,
+            {cleaned_address_expr} AS cleaned_full_address,
+            {classified_canonical_expr} AS clean_full_address_canonical,
+            {match_weight_expr},
+            {optional_ukam_address_id_expr} AS ukam_address_id,
+            {classified_match_outcome_expr} AS match_outcome
+        FROM {matches_table_name} AS m
+        LEFT JOIN {messy_table_name} AS messy
+            ON CAST(messy.unique_id AS VARCHAR) =
+               CAST(m.unique_id AS VARCHAR)
+        {classified_joins_sql}
         """
     )
-    successful_matches = con.table(f"__simple_bench_successful_{table_suffix}")
 
-    if has_canonical:
-        incorrect_filter = """
-          AND EXISTS (
-              SELECT 1
-              FROM __simple_bench_canonical__ AS c
-              WHERE CAST(c.unique_id AS VARCHAR) = CAST(m.ukam_label AS VARCHAR)
-          )
-        """
-    else:
-        incorrect_filter = ""
-
-    con.sql(
-        f"""
-        CREATE OR REPLACE TEMP TABLE __simple_bench_incorrect_{table_suffix} AS
-        WITH
-            {canonical_rollup_cte_sql}
-            sampled AS (
-            SELECT
-                m.match_reason,
-                m.unique_id,
-                m.ukam_label,
-                m.resolved_canonical_id,
-                {postcode_expr} AS postcode,
-                m.original_address_concat,
-                {cleaned_address_expr} AS cleaned_full_address,
-                canonical_match.clean_full_address_canonical,
-                {match_weight_expr},
-                ROW_NUMBER() OVER (
-                    PARTITION BY m.match_reason
-                    ORDER BY CAST(m.unique_id AS VARCHAR)
-                ) AS rn
-            FROM {matches_table_name} AS m
-            LEFT JOIN __simple_bench_messy__ AS messy
-                ON CAST(messy.unique_id AS VARCHAR) = CAST(m.unique_id AS VARCHAR)
-            {canonical_rollup_join_sql}
-            WHERE m.match_reason IS NOT NULL
-              AND m.resolved_canonical_id IS NOT NULL
-              AND CAST(m.ukam_label AS VARCHAR) !=
-                  CAST(m.resolved_canonical_id AS VARCHAR)
-              {incorrect_filter}
-        ),
-        sampled_limited AS (
+    successful_matches: duckdb.DuckDBPyRelation | None = None
+    if include_successful_matches:
+        successful_matches = con.sql(
+            f"""
+            WITH sampled AS (
+                SELECT
+                    match_reason,
+                    unique_id,
+                    ukam_label,
+                    resolved_canonical_id,
+                    postcode,
+                    original_address_concat,
+                    cleaned_full_address,
+                    clean_full_address_canonical,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY match_reason
+                        ORDER BY CAST(unique_id AS VARCHAR)
+                    ) AS rn
+                FROM {classified_table_name}
+                WHERE match_outcome = 'successful'
+            )
             SELECT
                 match_reason,
                 unique_id,
@@ -302,150 +343,198 @@ def build_dataset_diagnostics(
                 postcode,
                 original_address_concat,
                 cleaned_full_address,
-                clean_full_address_canonical,
-                match_weight
+                clean_full_address_canonical
             FROM sampled
-            WHERE rn <= 10
+            WHERE rn <= 5
+            ORDER BY match_reason, unique_id
+            """
         )
-        SELECT
-            sampled.match_reason,
-            sampled.unique_id,
-            sampled.ukam_label,
-            sampled.resolved_canonical_id,
-            sampled.postcode,
-            sampled.original_address_concat,
-            sampled.cleaned_full_address,
-            sampled.clean_full_address_canonical,
-            sampled.match_weight,
-            ROUND({sampled_similarity_score_expr}, 3) AS similarity_score
-        FROM sampled_limited AS sampled
-        ORDER BY match_reason, unique_id
-        """
-    )
-    incorrect_matches = con.table(f"__simple_bench_incorrect_{table_suffix}")
 
-    con.sql(
-        f"""
-        CREATE OR REPLACE TEMP TABLE
-            __simple_bench_lowest_similarity_{table_suffix} AS
-        SELECT
-            {incorrect_projection_sql}
-        FROM __simple_bench_incorrect_{table_suffix}
-        ORDER BY similarity_score ASC NULLS LAST, match_reason, unique_id
-        LIMIT 10
-        """
-    )
-    lowest_similarity_incorrect = con.table(
-        f"__simple_bench_lowest_similarity_{table_suffix}"
-    )
+    incorrect_table_name = f"__simple_bench_incorrect_{table_suffix}"
+    incorrect_matches: duckdb.DuckDBPyRelation | None = None
+    if include_incorrect_matches:
+        if has_canonical:
+            if include_similarity_score_checks and canonical_compare_column is not None:
+                incorrect_similarity_score_expr = _build_similarity_score_expr(
+                    row_alias="sampled",
+                    canonical_table_name="relevant_canonical",
+                    canonical_compare_source_expr=f"c2.{canonical_compare_column}",
+                )
+            else:
+                incorrect_similarity_score_expr = "NULL::DOUBLE"
 
-    con.sql(
-        f"""
-        CREATE OR REPLACE TEMP TABLE
-            __simple_bench_highest_similarity_{table_suffix} AS
-        SELECT
-            {incorrect_projection_sql}
-        FROM __simple_bench_incorrect_{table_suffix}
-        ORDER BY similarity_score DESC NULLS LAST, match_reason, unique_id
-        LIMIT 10
-        """
-    )
-    highest_similarity_incorrect = con.table(
-        f"__simple_bench_highest_similarity_{table_suffix}"
-    )
+            incorrect_canonical_lookup_cte_sql = f"""
+                    , relevant_canonical AS (
+                        SELECT *
+                        FROM {canonical_table_name} AS c
+                        WHERE CAST(c.unique_id AS VARCHAR) IN (
+                            SELECT CAST(resolved_canonical_id AS VARCHAR)
+                            FROM sampled_limited
+                        )
+                    )
+                """
+        else:
+            incorrect_similarity_score_expr = "NULL::DOUBLE"
+            incorrect_canonical_lookup_cte_sql = ""
 
-    con.sql(
-        f"""
-        CREATE OR REPLACE TEMP TABLE
-            __simple_bench_suspicious_summary_{table_suffix} AS
-        SELECT
-            issue_type,
-            COUNT(*) AS issue_count
-        FROM (
+        con.sql(
+            f"""
+            CREATE OR REPLACE TEMP TABLE {incorrect_table_name} AS
+            WITH
+                sampled AS (
+                    SELECT
+                        classified.match_reason,
+                        classified.unique_id,
+                        classified.ukam_label,
+                        classified.resolved_canonical_id,
+                        classified.postcode,
+                        classified.original_address_concat,
+                        classified.cleaned_full_address,
+                        classified.clean_full_address_canonical,
+                        classified.match_weight,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY classified.match_reason
+                            ORDER BY CAST(classified.unique_id AS VARCHAR)
+                        ) AS rn
+                    FROM {classified_table_name} AS classified
+                    WHERE classified.match_outcome = 'incorrect'
+                ),
+                sampled_limited AS (
+                    SELECT
+                        match_reason,
+                        unique_id,
+                        ukam_label,
+                        resolved_canonical_id,
+                        postcode,
+                        original_address_concat,
+                        cleaned_full_address,
+                        clean_full_address_canonical,
+                        match_weight
+                    FROM sampled
+                    WHERE rn <= 10
+                )
+            {incorrect_canonical_lookup_cte_sql}
             SELECT
-                {suspicious_issue_type_sql} AS issue_type
-            FROM __simple_bench_incorrect_{table_suffix}
-        ) AS issues
-        GROUP BY issue_type
-        ORDER BY issue_count DESC, issue_type
-        """
-    )
-    suspicious_incorrect_summary = con.table(
-        f"__simple_bench_suspicious_summary_{table_suffix}"
-    )
+                sampled.match_reason,
+                sampled.unique_id,
+                sampled.ukam_label,
+                sampled.resolved_canonical_id,
+                sampled.postcode,
+                sampled.original_address_concat,
+                sampled.cleaned_full_address,
+                sampled.clean_full_address_canonical,
+                sampled.match_weight,
+                ROUND({incorrect_similarity_score_expr}, 3) AS similarity_score
+            FROM sampled_limited AS sampled
+            ORDER BY match_reason, unique_id
+            """
+        )
+        incorrect_matches = con.sql(f"SELECT * FROM {incorrect_table_name}")
 
-    con.sql(
-        f"""
-        CREATE OR REPLACE TEMP TABLE
-            __simple_bench_suspicious_records_{table_suffix} AS
-        SELECT
-            {incorrect_projection_without_reason_sql},
-            {suspicious_issue_type_sql} AS issue_type,
-            match_reason
-        FROM __simple_bench_incorrect_{table_suffix}
-        ORDER BY
-            CASE
-                WHEN similarity_score IS NULL THEN 1
-                WHEN similarity_score <= 0.60 THEN 2
-                WHEN similarity_score >= 0.98 THEN 3
-                ELSE 4
-            END,
-            similarity_score ASC NULLS LAST,
-            unique_id
-        LIMIT 20
-        """
-    )
-    suspicious_incorrect_records = con.table(
-        f"__simple_bench_suspicious_records_{table_suffix}"
-    )
+    lowest_similarity_incorrect: duckdb.DuckDBPyRelation | None = None
+    highest_similarity_incorrect: duckdb.DuckDBPyRelation | None = None
+    suspicious_incorrect_summary: duckdb.DuckDBPyRelation | None = None
+    suspicious_incorrect_records: duckdb.DuckDBPyRelation | None = None
+    if include_similarity_score_checks:
+        lowest_similarity_incorrect = con.sql(
+            f"""
+            SELECT
+                {incorrect_projection_sql}
+            FROM {incorrect_table_name}
+            ORDER BY similarity_score ASC NULLS LAST, match_reason, unique_id
+            LIMIT 10
+            """
+        )
 
-    con.sql(
-        f"""
-        CREATE OR REPLACE TEMP TABLE __simple_bench_unmatched_{table_suffix} AS
-        SELECT
-            m.unique_id,
-            {postcode_expr} AS postcode,
-            m.original_address_concat,
-            {cleaned_address_expr} AS cleaned_full_address
-        FROM {matches_table_name} AS m
-        LEFT JOIN __simple_bench_messy__ AS messy
-            ON CAST(messy.unique_id AS VARCHAR) = CAST(m.unique_id AS VARCHAR)
-        WHERE m.match_reason IS NULL
-        ORDER BY CAST(m.unique_id AS VARCHAR)
-        LIMIT 10
-        """
-    )
-    unmatched_records = con.table(f"__simple_bench_unmatched_{table_suffix}")
+        highest_similarity_incorrect = con.sql(
+            f"""
+            SELECT
+                {incorrect_projection_sql}
+            FROM {incorrect_table_name}
+            ORDER BY similarity_score DESC NULLS LAST, match_reason, unique_id
+            LIMIT 10
+            """
+        )
+
+        suspicious_incorrect_summary = con.sql(
+            f"""
+            SELECT
+                issue_type,
+                COUNT(*) AS issue_count
+            FROM (
+                SELECT
+                    {suspicious_issue_type_sql} AS issue_type
+                FROM {incorrect_table_name}
+            ) AS issues
+            GROUP BY issue_type
+            ORDER BY issue_count DESC, issue_type
+            """
+        )
+
+        suspicious_incorrect_records = con.sql(
+            f"""
+            SELECT
+                {incorrect_projection_without_reason_sql},
+                {suspicious_issue_type_sql} AS issue_type,
+                match_reason
+            FROM {incorrect_table_name}
+            ORDER BY
+                CASE
+                    WHEN similarity_score IS NULL THEN 1
+                    WHEN similarity_score <= 0.60 THEN 2
+                    WHEN similarity_score >= 0.98 THEN 3
+                    ELSE 4
+                END,
+                similarity_score ASC NULLS LAST,
+                unique_id
+            LIMIT 20
+            """
+        )
+
+    unmatched_records: duckdb.DuckDBPyRelation | None = None
+    if include_unmatched_records:
+        unmatched_records = con.sql(
+            f"""
+            SELECT
+                unique_id,
+                postcode,
+                original_address_concat,
+                cleaned_full_address
+            FROM {classified_table_name}
+            WHERE match_outcome = 'unmatched'
+            ORDER BY CAST(unique_id AS VARCHAR)
+            LIMIT 10
+            """
+        )
 
     unmatched_top_splink: duckdb.DuckDBPyRelation | None = None
-    splink_available = splink_predictions is not None
-
-    if splink_predictions is not None:
-        con.register("__simple_bench_splink_predictions__", splink_predictions)
+    if include_unmatched_records and splink_predictions is not None:
+        splink_predictions_table_name = (
+            f"__simple_bench_splink_predictions_{table_suffix}"
+        )
+        _create_temp_view_from_relation(
+            con,
+            view_name=splink_predictions_table_name,
+            relation=splink_predictions,
+        )
         splink_id_column = _resolve_splink_id_column(splink_predictions)
         unmatched_join_key_expr = _resolve_unmatched_join_key_expr(
             match_columns=match_columns,
             splink_id_column=splink_id_column,
-        )
-        optional_ukam_address_id_expr = _resolve_optional_ukam_address_id_expr(
-            match_columns
+            row_alias="classified",
         )
 
-        con.sql(
+        unmatched_top_splink = con.sql(
             f"""
-            CREATE OR REPLACE TEMP TABLE
-                __simple_bench_unmatched_splink_{table_suffix} AS
             WITH sampled_unmatched AS (
                 SELECT
-                    CAST(m.unique_id AS VARCHAR) AS unique_id,
+                    CAST(classified.unique_id AS VARCHAR) AS unique_id,
                     {unmatched_join_key_expr} AS unmatched_join_key,
-                    {optional_ukam_address_id_expr} AS ukam_address_id,
-                    m.original_address_concat,
-                    {cleaned_address_expr} AS cleaned_full_address
-                FROM {matches_table_name} AS m
-                LEFT JOIN __simple_bench_messy__ AS messy
-                    ON CAST(messy.unique_id AS VARCHAR) = CAST(m.unique_id AS VARCHAR)
-                WHERE m.match_reason IS NULL
+                    classified.ukam_address_id,
+                    classified.original_address_concat,
+                    classified.cleaned_full_address
+                FROM {classified_table_name} AS classified
+                WHERE classified.match_outcome = 'unmatched'
                 ORDER BY RANDOM()
                 LIMIT 10
             ),
@@ -459,7 +548,7 @@ def build_dataset_diagnostics(
                         ORDER BY pred.match_probability DESC NULLS LAST,
                                  pred.match_weight DESC NULLS LAST
                     ) AS rn
-                FROM __simple_bench_splink_predictions__ AS pred
+                FROM {splink_predictions_table_name} AS pred
                 WHERE CAST(pred.{splink_id_column} AS VARCHAR) IN (
                     SELECT unmatched_join_key
                     FROM sampled_unmatched
@@ -480,15 +569,6 @@ def build_dataset_diagnostics(
             ORDER BY su.unique_id
             """
         )
-        unmatched_top_splink = con.table(
-            f"__simple_bench_unmatched_splink_{table_suffix}"
-        )
-
-    con.unregister("__simple_bench_messy__")
-    if has_canonical:
-        con.unregister("__simple_bench_canonical__")
-    if splink_predictions is not None:
-        con.unregister("__simple_bench_splink_predictions__")
 
     return DatasetDiagnostics(
         successful_matches=successful_matches,
