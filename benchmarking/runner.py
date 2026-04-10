@@ -13,7 +13,11 @@ from benchmarking.constants import BENCHMARK_RESULTS_ROOT
 from benchmarking.insights.diagnostics import build_dataset_diagnostics
 from benchmarking.insights.run_persistence import persist_benchmark_run
 from benchmarking.insights.summary import fetch_overall_summary
-from benchmarking.insights.types import DatasetDiagnostics, PersistedBenchmarkRun
+from benchmarking.insights.types import (
+    BenchmarkOutputOptions,
+    DatasetDiagnostics,
+    PersistedBenchmarkRun,
+)
 from benchmarking.utils.io import setup_connection
 from uk_address_matcher import AddressMatcher
 
@@ -74,6 +78,7 @@ def run_single_dataset(
     sample_mode: bool = False,
     canonical_address_filter: str | None = None,
     enable_diagnostics: bool = False,
+    diagnostic_output_options: BenchmarkOutputOptions | None = None,
     cleaning_num_chunks: int = 10,
     persist_results: bool = False,
     results_root: str = BENCHMARK_RESULTS_ROOT,
@@ -125,6 +130,7 @@ def run_single_dataset(
     diagnostics: DatasetDiagnostics | None = None
     if enable_diagnostics:
         canonical_relation = getattr(match_result, "_canonical_relation", None)
+        diagnostics_start = perf_counter()
 
         diagnostics = build_dataset_diagnostics(
             con,
@@ -132,7 +138,9 @@ def run_single_dataset(
             messy_relation=df_messy,
             canonical_relation=canonical_relation,
             splink_predictions=splink_predictions,
+            output_options=diagnostic_output_options,
         )
+        timings["diagnostics"] = perf_counter() - diagnostics_start
 
     persisted_run: PersistedBenchmarkRun | None = None
     if persist_results:
@@ -182,6 +190,7 @@ def run_selected_datasets(
     sample_mode: bool = False,
     canonical_address_filter: str | None = None,
     enable_diagnostics: bool = False,
+    diagnostic_output_options: BenchmarkOutputOptions | None = None,
     cleaning_num_chunks: int = 10,
     persist_results: bool = False,
     results_root: str = BENCHMARK_RESULTS_ROOT,
@@ -202,6 +211,7 @@ def run_selected_datasets(
             sample_mode=sample_mode,
             canonical_address_filter=canonical_address_filter,
             enable_diagnostics=enable_diagnostics,
+            diagnostic_output_options=diagnostic_output_options,
             cleaning_num_chunks=cleaning_num_chunks,
             persist_results=persist_results,
             results_root=results_root,
