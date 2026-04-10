@@ -537,6 +537,8 @@ def write_comparison_markdown_summary(
     *,
     path: Path,
     dataset_label: str | None,
+    baseline_run_id: str,
+    current_run_id: str,
     baseline_hash: str,
     current_hash: str,
     baseline_git_commit_hash: str | None,
@@ -617,23 +619,31 @@ def write_comparison_markdown_summary(
 
     markdown = "\n".join(
         [
-            f"# Benchmark Comparison: {baseline_hash} vs {current_hash}",
+            f"# Benchmark Comparison: {baseline_run_id} vs {current_run_id}",
             "",
             f"Dataset: {_format_optional_text(dataset_label)}",
             "",
             "## Runs",
             "",
             _markdown_table(
-                ["Run", "Hash", "Git commit", "Created at (UTC)"],
+                [
+                    "Run",
+                    "Run ID",
+                    "Internal dedupe hash",
+                    "Git commit",
+                    "Created at (UTC)",
+                ],
                 [
                     [
                         "Baseline",
+                        baseline_run_id,
                         baseline_hash,
                         _format_optional_text(baseline_git_commit_hash),
                         _format_utc_timestamp(baseline_created_at_utc),
                     ],
                     [
                         "Current",
+                        current_run_id,
                         current_hash,
                         _format_optional_text(current_git_commit_hash),
                         _format_utc_timestamp(current_created_at_utc),

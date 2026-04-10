@@ -64,7 +64,7 @@ def build_accuracy_table(
     splink_reason_sql = f"'{splink_value}'::ENUM {enum_values}"
     precision_sql = ratio_sql(
         "correct_matches",
-        "matched_row_count",
+        "rows_matched_in_stage",
         when_zero_sql="NULL::DOUBLE",
     )
     recall_sql = ratio_sql(
@@ -74,11 +74,11 @@ def build_accuracy_table(
     )
     f1_sql = f1_from_counts_sql(
         tp_sql="correct_matches",
-        fp_sql="(matched_row_count - correct_matches)",
+        fp_sql="(rows_matched_in_stage - correct_matches)",
         fn_sql="((SELECT total_input_rows FROM totals) - correct_matches)",
     )
     wrong_match_rate_expr = wrong_match_rate_sql(
-        rows_matched_sql="matched_row_count",
+        rows_matched_sql="rows_matched_in_stage",
         correct_matches_sql="correct_matches",
     )
     correct_share_expr = correct_share_of_total_sql(
@@ -92,8 +92,6 @@ def build_accuracy_table(
             SELECT
                 CASE
                     WHEN m.match_reason IS NULL THEN 'unmatched'
-                    WHEN m.match_reason = {splink_reason_sql}
-                        AND NOT ({splink_accepted_sql}) THEN 'unmatched'
                     WHEN split_part(m.match_reason::VARCHAR, ':', 1) = 'exact'
                         THEN 'exact_matches'
                     ELSE split_part(m.match_reason::VARCHAR, ':', 1)
@@ -121,40 +119,37 @@ def build_accuracy_table(
                     WHEN GROUPING(stage) = 1 THEN 'overall'
                     ELSE stage
                 END AS stage,
-                COUNT(*) AS stage_row_count,
-                SUM(CASE WHEN is_matched THEN 1 ELSE 0 END) AS matched_row_count,
+                COUNT(*) AS total_rows_in_stage,
+                SUM(CASE WHEN is_matched THEN 1 ELSE 0 END) AS matched_rows_in_stage,
                 SUM(CASE WHEN is_correct THEN 1 ELSE 0 END) AS correct_matches
             FROM scored
             GROUP BY GROUPING SETS ((stage), ())
-        ),
-        display_rows AS (
-            SELECT
-                stage,
-                CASE
-                    WHEN stage = 'unmatched' THEN stage_row_count
-                    ELSE matched_row_count
-                END AS rows_matched_in_stage,
-                matched_row_count,
-                correct_matches,
-                CASE
-                    WHEN stage = 'unmatched' THEN 0
-                    ELSE matched_row_count - correct_matches
-                END AS wrong_matches
-            FROM all_rows
         )
         SELECT
             stage,
-            rows_matched_in_stage,
+            CASE
+                WHEN stage = 'unmatched' THEN total_rows_in_stage
+                ELSE matched_rows_in_stage
+            END AS rows_matched_in_stage,
             correct_matches,
-            wrong_matches,
-            ROUND(
-                {precision_sql},
-                6
-            ) AS precision,
-            ROUND(
-                {wrong_match_rate_expr},
-                2
-            ) AS wrong_match_rate,
+            CASE
+                WHEN stage = 'unmatched' THEN 0
+                ELSE matched_rows_in_stage - correct_matches
+            END AS wrong_matches,
+            CASE
+                WHEN stage = 'unmatched' THEN NULL
+                ELSE ROUND(
+                    {precision_sql},
+                    6
+                )
+            END AS precision,
+            CASE
+                WHEN stage = 'unmatched' THEN NULL
+                ELSE ROUND(
+                    {wrong_match_rate_expr},
+                    2
+                )
+            END AS wrong_match_rate,
             ROUND(
                 {correct_share_expr},
                 2
@@ -167,9 +162,12 @@ def build_accuracy_table(
                 {f1_sql},
                 6
             ) AS f1
-        FROM display_rows
+        FROM all_rows
         ORDER BY
-            rows_matched_in_stage DESC,
+            CASE
+                WHEN stage = 'unmatched' THEN total_rows_in_stage
+                ELSE matched_rows_in_stage
+            END DESC,
             stage
         """
     )

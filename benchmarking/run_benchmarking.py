@@ -12,7 +12,6 @@ from benchmarking.constants import (
 )
 from benchmarking.insights.reporting import (
     print_benchmark_summary,
-    print_run_persistence_summary,
 )
 from benchmarking.insights.types import BenchmarkOutputOptions
 from benchmarking.runner import print_available_datasets, run_selected_datasets
@@ -38,8 +37,8 @@ STAGES = [
 ]
 # Set to a persisted run hash to force a specific baseline, or use "latest"
 # to compare against the latest other persisted run for the same dataset.
-# Set to None to disable persisting results locally.
-COMPARISON_BASELINE_HASH: str | None = "latest"
+# Run IDs are preferred; internal dedupe hashes are still accepted for older runs.
+COMPARISON_BASELINE_RUN_ID: str | None = "latest"
 
 
 # Defaults: print benchmark summaries and persistence output.
@@ -68,7 +67,7 @@ results = run_selected_datasets(
     persist_results=True,
     results_root=BENCHMARK_RESULTS_ROOT,
     enable_comparison_charts=True,
-    comparison_baseline_hash=COMPARISON_BASELINE_HASH,
+    comparison_baseline_run_id=COMPARISON_BASELINE_RUN_ID,
 )
 print_benchmark_summary(
     results,
@@ -77,4 +76,3 @@ print_benchmark_summary(
     top_k_precision_at_metrics=TOP_K_PRECISION_AT_METRICS,
     output_options=OUTPUT_OPTIONS,
 )
-print_run_persistence_summary(results)

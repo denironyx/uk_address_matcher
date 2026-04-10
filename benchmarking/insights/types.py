@@ -53,6 +53,8 @@ class BenchmarkOutputOptions:
 
 @dataclass(frozen=True)
 class BenchmarkComparisonSummary:
+    baseline_run_id: str
+    current_run_id: str
     baseline_hash: str
     current_hash: str
     overall_delta: dict[str, float | None]
@@ -67,6 +69,7 @@ class BenchmarkComparisonSummary:
 
 @dataclass(frozen=True)
 class PersistedBenchmarkRun:
+    run_id: str
     run_hash: str
     group_key: str
     created_at_utc: str

@@ -6,6 +6,7 @@ from benchmarking.insights.reporting import (
 )
 from benchmarking.insights.run_persistence import (
     compare_persisted_runs,
+    generate_benchmark_run_id,
     persist_benchmark_run,
 )
 from benchmarking.insights.summary import fetch_overall_summary
@@ -23,6 +24,7 @@ __all__ = [
     "build_dataset_diagnostics",
     "fetch_overall_summary",
     "compare_persisted_runs",
+    "generate_benchmark_run_id",
     "persist_benchmark_run",
     "print_benchmark_summary",
     "print_diagnostics",

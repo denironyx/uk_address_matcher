@@ -162,10 +162,11 @@ def print_run_persistence_summary(results: list[BenchmarkRunResult]) -> None:
 
         print(f"\nDataset: {result.dataset_key}")
         print(
-            f"hash={persisted.run_hash} "
+            f"run_id={persisted.run_id} "
             f"deduplicated={persisted.deduplicated} "
             f"manifest={_display_path(persisted.manifest_path)}"
         )
+        print(f"internal_dedupe_hash={persisted.run_hash}")
         if persisted.comparison_warning is not None:
             print(f"Warning: {persisted.comparison_warning}")
         if persisted.comparison is None:
@@ -174,9 +175,10 @@ def print_run_persistence_summary(results: list[BenchmarkRunResult]) -> None:
         comparison = persisted.comparison
         summary_path = _display_path(comparison.summary_path)
         print(
-            "Compared against baseline "
-            f"{comparison.baseline_hash}. Summary: {summary_path}"
+            "Compared against baseline run_id "
+            f"{comparison.baseline_run_id}. Summary: {summary_path}"
         )
+        print(f"Baseline internal dedupe hash: {comparison.baseline_hash}")
         if comparison.markdown_report_path is not None:
             print(f"PR markdown: {_display_path(comparison.markdown_report_path)}")
         if comparison.notes:

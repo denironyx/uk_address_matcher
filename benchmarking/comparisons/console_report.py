@@ -148,8 +148,10 @@ def print_comparison_report(
     comparison_ts = _format_run_timestamp(comparison_ts_raw)
 
     print("Comparison completed")
-    print(f"- current_hash: {comparison.current_hash}")
-    print(f"- baseline_hash: {comparison.baseline_hash}")
+    print(f"- current_run_id: {comparison.current_run_id}")
+    print(f"- baseline_run_id: {comparison.baseline_run_id}")
+    print(f"- current_dedupe_hash: {comparison.current_hash}")
+    print(f"- baseline_dedupe_hash: {comparison.baseline_hash}")
     print(f"- summary: {_absolute_path(comparison.summary_path)}")
     if comparison.markdown_report_path is not None:
         print(f"- pr_markdown: {_absolute_path(comparison.markdown_report_path)}")
