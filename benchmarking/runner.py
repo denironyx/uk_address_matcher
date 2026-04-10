@@ -82,7 +82,6 @@ def run_single_dataset(
     run_id: str | None = None,
     sample_mode: bool = False,
     canonical_address_filter: str | None = None,
-    enable_diagnostics: bool = False,
     diagnostic_output_options: BenchmarkOutputOptions | None = None,
     cleaning_num_chunks: int = 10,
     persist_results: bool = False,
@@ -133,7 +132,10 @@ def run_single_dataset(
         splink_predictions = None
 
     diagnostics: DatasetDiagnostics | None = None
-    if enable_diagnostics:
+    if (
+        diagnostic_output_options is not None
+        and diagnostic_output_options.enable_diagnostics()
+    ):
         canonical_relation = getattr(match_result, "_canonical_relation", None)
         diagnostics_start = perf_counter()
 
@@ -196,7 +198,6 @@ def run_selected_datasets(
     run_id: str | None = None,
     sample_mode: bool = False,
     canonical_address_filter: str | None = None,
-    enable_diagnostics: bool = False,
     diagnostic_output_options: BenchmarkOutputOptions | None = None,
     cleaning_num_chunks: int = 10,
     persist_results: bool = False,
@@ -221,7 +222,6 @@ def run_selected_datasets(
             run_id=effective_run_id,
             sample_mode=sample_mode,
             canonical_address_filter=canonical_address_filter,
-            enable_diagnostics=enable_diagnostics,
             diagnostic_output_options=diagnostic_output_options,
             cleaning_num_chunks=cleaning_num_chunks,
             persist_results=persist_results,
