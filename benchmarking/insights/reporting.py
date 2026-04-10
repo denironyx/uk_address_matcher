@@ -148,6 +148,9 @@ def print_benchmark_summary(
             print("--- SPLINK Comparison: Delta ---")
             _show_via_sql(result, splink_matches.delta_table)
 
+    if output_options.enable_diagnostics():
+        print_diagnostics(results, output_options=output_options)
+
 
 def print_run_persistence_summary(results: list[BenchmarkRunResult]) -> None:
     persisted_results = [result for result in results if result.persisted_run is not None]
@@ -237,6 +240,12 @@ def print_diagnostics(
                 _show_via_sql(result, diagnostics.suspicious_incorrect_summary)
 
         if output_options.show_unmatched_records:
+            print("\nDiagnostics: unmatched records")
+            if diagnostics.unmatched_records is None:
+                print(_NOT_MATERIALISED_MESSAGE)
+            else:
+                _show_via_sql(result, diagnostics.unmatched_records)
+
             print("\nDiagnostics: unmatched records with highest Splink comparison")
             if diagnostics.unmatched_top_splink is None:
                 if diagnostics.splink_available:
