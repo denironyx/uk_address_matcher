@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from benchmarking.config.sources import resolve_data_path
+from benchmarking.config.sources import resolve_data_source
 from benchmarking.utils.io import load_duckdb_httpfs
 
 if TYPE_CHECKING:
@@ -32,35 +32,44 @@ def _normalise_uprn_expr(expr: str) -> str:
 _DATASETS: dict[str, dict[str, str]] = {
     "hackney": {
         "label": "Hackney council tax",
-        "s3_key": "HACKNEY_CTBANDS_ONSUD_202507.csv",
+        "file_name": "HACKNEY_CTBANDS_ONSUD_202507.csv",
         "data_path_env": "UKAM_HACKNEY_DATA_PATH",
     },
     "lambeth_council_tax": {
         "label": "Lambeth council tax",
-        "s3_key": "ctax.parquet",
+        "file_name": "ctax.parquet",
         "data_path_env": "UKAM_LAMBETH_DATA_PATH",
     },
     "lambeth_electoral_register": {
         "label": "Lambeth electoral register",
-        "s3_key": "elecreg.parquet",
+        "file_name": "elecreg.parquet",
         "data_path_env": "UKAM_LAMBETH_DATA_PATH",
     },
     "lambeth_llpg": {
         "label": "Lambeth LLPG",
-        "s3_key": "llpg.parquet",
+        "file_name": "llpg.parquet",
         "data_path_env": "UKAM_LAMBETH_DATA_PATH",
+    },
+    "rhondda": {
+        "label": "Rhondda council tax",
+        "file_name": "RHONDDA_CYNON_TAF_CTBANDS_ONSUD_202512.csv",
+        "data_path_env": "UKAM_RHONDDA_DATA_PATH",
     },
 }
 
 
-def _file_reader_for(s3_key: str) -> str:
-    suffix = s3_key.rsplit(".", maxsplit=1)[-1].lower()
+def _file_reader_for(source_path: str) -> str:
+    suffix = source_path.rsplit(".", maxsplit=1)[-1].lower()
     if suffix == "csv":
         return "read_csv"
     if suffix == "parquet":
         return "read_parquet"
 
-    raise ValueError(f"Unsupported file format for dataset file '{s3_key}'.")
+    raise ValueError(f"Unsupported file format for dataset file '{source_path}'.")
+
+
+def _resolve_dataset_source(dataset: dict[str, str]) -> str:
+    return resolve_data_source(dataset["data_path_env"], dataset["file_name"])
 
 
 def _quote_identifier(identifier: str) -> str:
@@ -89,10 +98,9 @@ def _clean_output(
 
 def _load_hackney(
     con: duckdb.DuckDBPyConnection,
-    base_path: str,
-    s3_key: str,
+    source_path: str,
 ) -> duckdb.DuckDBPyRelation:
-    reader = _file_reader_for(s3_key)
+    reader = _file_reader_for(source_path)
     address_expr = (
         'regexp_replace(trim(concat_ws(\' \', "ADDR1", "ADDR2", '
         "\"ADDR3\", \"ADDR4\")), '\\s+', ' ')"
@@ -104,7 +112,7 @@ def _load_hackney(
             CAST("UPRN" AS VARCHAR) AS ukam_label,
             {address_expr} AS address_concat,
             "POSTCODE" AS postcode
-        FROM {reader}('{base_path}{s3_key}')
+        FROM {reader}('{source_path}')
         WHERE "UPRN" IS NOT NULL
         """
     )
@@ -113,10 +121,9 @@ def _load_hackney(
 
 def _load_lambeth_council_tax(
     con: duckdb.DuckDBPyConnection,
-    base_path: str,
-    s3_key: str,
+    source_path: str,
 ) -> duckdb.DuckDBPyRelation:
-    reader = _file_reader_for(s3_key)
+    reader = _file_reader_for(source_path)
     uprn_expr = _normalise_uprn_expr('"UPRN"')
     address_expr = (
         'regexp_replace(trim(concat_ws(\' \', "ADDR1", "ADDR2", '
@@ -130,7 +137,7 @@ def _load_lambeth_council_tax(
                 {uprn_expr} AS ukam_label,
                 {address_expr} AS address_concat,
                 "POSTCODE" AS postcode
-            FROM {reader}('{base_path}{s3_key}')
+            FROM {reader}('{source_path}')
             WHERE "UPRN" IS NOT NULL
         )
         SELECT
@@ -147,10 +154,9 @@ def _load_lambeth_council_tax(
 
 def _load_lambeth_electoral_register(
     con: duckdb.DuckDBPyConnection,
-    base_path: str,
-    s3_key: str,
+    source_path: str,
 ) -> duckdb.DuckDBPyRelation:
-    reader = _file_reader_for(s3_key)
+    reader = _file_reader_for(source_path)
     uprn_column = _quote_identifier("Unique property reference number (UPRN)")
     address_1 = _quote_identifier("Address 1")
     address_2 = _quote_identifier("Address 2")
@@ -170,7 +176,7 @@ def _load_lambeth_electoral_register(
             {uprn_expr} AS ukam_label,
             {address_expr} AS address_concat,
             {postcode} AS postcode
-        FROM {reader}('{base_path}{s3_key}')
+        FROM {reader}('{source_path}')
         WHERE {uprn_column} IS NOT NULL
         """
     )
@@ -179,10 +185,9 @@ def _load_lambeth_electoral_register(
 
 def _load_lambeth_llpg(
     con: duckdb.DuckDBPyConnection,
-    base_path: str,
-    s3_key: str,
+    source_path: str,
 ) -> duckdb.DuckDBPyRelation:
-    reader = _file_reader_for(s3_key)
+    reader = _file_reader_for(source_path)
 
     relation = con.sql(
         f"""
@@ -196,8 +201,32 @@ def _load_lambeth_llpg(
                 'i'
             )) AS address_concat,
             "Postcode_LPI" AS postcode
-        FROM {reader}('{base_path}{s3_key}')
+        FROM {reader}('{source_path}')
         WHERE "UPRN_BLPU" IS NOT NULL
+        """
+    )
+    return _clean_output(con, relation)
+
+
+def _load_rhondda(
+    con: duckdb.DuckDBPyConnection,
+    source_path: str,
+) -> duckdb.DuckDBPyRelation:
+    reader = _file_reader_for(source_path)
+    uprn_expr = _normalise_uprn_expr('"UPRN"')
+    address_expr = (
+        'regexp_replace(trim(concat_ws(\' \', "ADDR1", "ADDR2", '
+        "\"ADDR3\", \"ADDR4\")), '\\s+', ' ')"
+    )
+    relation = con.sql(
+        f"""
+        SELECT
+            CAST("PROPREF" AS VARCHAR) AS unique_id,
+            {uprn_expr} AS ukam_label,
+            {address_expr} AS address_concat,
+            "POSTCODE" AS postcode
+        FROM {reader}('{source_path}')
+        WHERE "UPRN" IS NOT NULL
         """
     )
     return _clean_output(con, relation)
@@ -223,19 +252,20 @@ def load_dataset(
     sample_mode: bool = False,
 ) -> duckdb.DuckDBPyRelation:
     dataset = get_dataset_definition(dataset_key)
-    base_path = resolve_data_path(dataset["data_path_env"])
+    source_path = _resolve_dataset_source(dataset)
 
-    maybe_enable_s3_for_path(con, base_path)
+    maybe_enable_s3_for_path(con, source_path)
 
-    print(f"Reading {dataset['label']} from: {base_path}{dataset['s3_key']}")
+    print(f"Reading {dataset['label']} from: {source_path}")
 
     loaders = {
         "hackney": _load_hackney,
         "lambeth_council_tax": _load_lambeth_council_tax,
         "lambeth_electoral_register": _load_lambeth_electoral_register,
         "lambeth_llpg": _load_lambeth_llpg,
+        "rhondda": _load_rhondda,
     }
-    df_messy = loaders[dataset_key](con, base_path, dataset["s3_key"])
+    df_messy = loaders[dataset_key](con, source_path)
 
     if sample_mode:
         df_messy = con.sql(
