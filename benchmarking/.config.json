@@ -1,5 +1,7 @@
 {
-	"UKAM_S3_BASE_PREFIX": "s3://dummy-bucket",
-	"UKAM_LAMBETH_DATA_PATH": "placeholder/path/for/lambeth/",
-	"UKAM_OS_CANONICAL_PATH": "/path/to/local/os/canonical.parquet"
+	"UKAM_ABERDEENSHIRE_DATA_PATH": "/path/to/local/aberdeenshire/",
+	"UKAM_LAMBETH_DATA_PATH": "/path/to/local/lambeth/",
+	"UKAM_HACKNEY_DATA_PATH": "/path/to/local/hackney/",
+	"UKAM_OS_CANONICAL_PREPARED": "/path/to/local/os/ukam_prepared_canonical",
+	"UKAM_RHONDDA_DATA_PATH": "/path/to/local/rhondda"
 }
