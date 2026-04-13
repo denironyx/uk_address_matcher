@@ -584,7 +584,8 @@ def build_dataset_diagnostics(
             , candidate_canonical_rollup AS (
                 SELECT
                     {canonical_candidate_join_key_expr} AS candidate_canonical_id,
-                    {canonical_rollup_value_expr} AS highest_splink_clean_full_address_canonical
+                    {canonical_rollup_value_expr} AS
+                        highest_splink_clean_full_address_canonical
                 FROM {canonical_table_name} AS c
                 GROUP BY 1
             )

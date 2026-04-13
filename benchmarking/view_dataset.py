@@ -26,7 +26,7 @@ def print_available_datasets() -> None:
     print("Available datasets:")
     for key in list_dataset_keys():
         definition = get_dataset_definition(key)
-        print(f"- {key}: {definition['label']} ({definition['s3_key']})")
+        print(f"- {key}: {definition['label']} ({definition['file_name']})")
     print()
 
 
