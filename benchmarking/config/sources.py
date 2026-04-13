@@ -51,8 +51,8 @@ def resolve_data_path(env_var_path: str) -> str:
 def resolve_data_source(env_var_path: str, default_name: str) -> str:
     """Resolve a dataset file path or object URI from a single environment variable.
 
-    The configured value may point directly to a ``.csv``/``.parquet``/``.xlsx`` file or to a
-    directory/prefix, in which case ``default_name`` is appended.
+    The configured value may point directly to a ``.csv``/``.parquet``/``.xlsx``
+    file or to a directory/prefix, in which case ``default_name`` is appended.
     """
     path = _get_configured_path(env_var_path)
 
