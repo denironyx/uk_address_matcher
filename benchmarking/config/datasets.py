@@ -30,6 +30,11 @@ def _normalise_uprn_expr(expr: str) -> str:
 
 
 _DATASETS: dict[str, dict[str, str]] = {
+    "aberdeenshire": {
+        "label": "Aberdeenshire council tax",
+        "file_name": "ABERDEENSHIRE_CTBANDS_ONSUD_202512.csv",
+        "data_path_env": "UKAM_ABERDEENSHIRE_DATA_PATH",
+    },
     "hackney": {
         "label": "Hackney council tax",
         "file_name": "HACKNEY_CTBANDS_ONSUD_202507.csv",
@@ -232,6 +237,27 @@ def _load_rhondda(
     return _clean_output(con, relation)
 
 
+def _load_aberdeenshire(
+    con: duckdb.DuckDBPyConnection,
+    source_path: str,
+) -> duckdb.DuckDBPyRelation:
+    reader = _file_reader_for(source_path)
+    uprn_expr = _normalise_uprn_expr('"UPRN"')
+    address_expr = "regexp_replace(trim(\"ADDR\"), '\\s+', ' ')"
+    relation = con.sql(
+        f"""
+        SELECT
+            {uprn_expr} AS unique_id,
+            {uprn_expr} AS ukam_label,
+            {address_expr} AS address_concat,
+            "POSTCODE" AS postcode
+        FROM {reader}('{source_path}')
+        WHERE "UPRN" IS NOT NULL
+        """
+    )
+    return _clean_output(con, relation)
+
+
 def list_dataset_keys() -> list[str]:
     return sorted(_DATASETS.keys())
 
@@ -259,6 +285,7 @@ def load_dataset(
     print(f"Reading {dataset['label']} from: {source_path}")
 
     loaders = {
+        "aberdeenshire": _load_aberdeenshire,
         "hackney": _load_hackney,
         "lambeth_council_tax": _load_lambeth_council_tax,
         "lambeth_electoral_register": _load_lambeth_electoral_register,
