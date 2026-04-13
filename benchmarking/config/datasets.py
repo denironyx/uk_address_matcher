@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from benchmarking.config.sources import resolve_data_source
-from benchmarking.utils.io import load_duckdb_httpfs
+from benchmarking.utils.io import load_duckdb_excel, load_duckdb_httpfs
 
 if TYPE_CHECKING:
     import duckdb
@@ -55,6 +55,11 @@ _DATASETS: dict[str, dict[str, str]] = {
         "file_name": "llpg.parquet",
         "data_path_env": "UKAM_LAMBETH_DATA_PATH",
     },
+    "mid_sussex": {
+        "label": "Mid Sussex business rates",
+        "file_name": "mid_sussex_district_council_redacted-database-020226.xlsx",
+        "data_path_env": "UKAM_MID_SUSSEX_DATA_PATH",
+    },
     "rhondda": {
         "label": "Rhondda council tax",
         "file_name": "RHONDDA_CYNON_TAF_CTBANDS_ONSUD_202512.csv",
@@ -69,6 +74,8 @@ def _file_reader_for(source_path: str) -> str:
         return "read_csv"
     if suffix == "parquet":
         return "read_parquet"
+    if suffix == "xlsx":
+        return "read_xlsx"
 
     raise ValueError(f"Unsupported file format for dataset file '{source_path}'.")
 
@@ -258,6 +265,58 @@ def _load_aberdeenshire(
     return _clean_output(con, relation)
 
 
+def _load_mid_sussex(
+    con: duckdb.DuckDBPyConnection,
+    source_path: str,
+) -> duckdb.DuckDBPyRelation:
+    relation = con.sql(
+        f"""
+        WITH cleaned AS (
+            SELECT
+                NULLIF(NULLIF(TRIM("Property Reference"), ''), 'NULL') AS unique_id,
+                {_normalise_uprn_expr('"UPRN"')} AS ukam_label,
+                NULLIF(NULLIF(TRIM("Post Code"), ''), 'NULL') AS postcode_raw,
+                NULLIF(NULLIF(TRIM("Property Name 1"), ''), 'NULL') AS property_name_1,
+                NULLIF(NULLIF(TRIM("Property Name 2"), ''), 'NULL') AS property_name_2,
+                NULLIF(NULLIF(TRIM("Address 1"), ''), 'NULL') AS address_1,
+                NULLIF(NULLIF(TRIM("Address 2"), ''), 'NULL') AS address_2,
+                NULLIF(NULLIF(TRIM("Address 3"), ''), 'NULL') AS address_3,
+                NULLIF(NULLIF(TRIM("Address 4"), ''), 'NULL') AS address_4
+            FROM read_xlsx('{source_path}', all_varchar = true)
+        )
+        SELECT
+            unique_id,
+            regexp_replace(
+                trim(
+                    concat_ws(
+                        ' ',
+                        property_name_1,
+                        property_name_2,
+                        address_1,
+                        address_2
+                    )
+                ),
+                '\\s+',
+                ' '
+            ) AS address_concat,
+            ukam_label,
+            UPPER(REPLACE(postcode_raw, ' ', '')) AS postcode
+        FROM cleaned
+        WHERE unique_id IS NOT NULL
+          AND ukam_label IS NOT NULL
+          AND (
+              property_name_1 IS NOT NULL
+              OR property_name_2 IS NOT NULL
+              OR address_1 IS NOT NULL
+              OR address_2 IS NOT NULL
+              OR address_3 IS NOT NULL
+              OR address_4 IS NOT NULL
+          )
+        """
+    )
+    return _clean_output(con, relation)
+
+
 def list_dataset_keys() -> list[str]:
     return sorted(_DATASETS.keys())
 
@@ -281,6 +340,8 @@ def load_dataset(
     source_path = _resolve_dataset_source(dataset)
 
     maybe_enable_s3_for_path(con, source_path)
+    if source_path.lower().endswith(".xlsx"):
+        load_duckdb_excel(con)
 
     print(f"Reading {dataset['label']} from: {source_path}")
 
@@ -290,6 +351,7 @@ def load_dataset(
         "lambeth_council_tax": _load_lambeth_council_tax,
         "lambeth_electoral_register": _load_lambeth_electoral_register,
         "lambeth_llpg": _load_lambeth_llpg,
+        "mid_sussex": _load_mid_sussex,
         "rhondda": _load_rhondda,
     }
     df_messy = loaders[dataset_key](con, source_path)
