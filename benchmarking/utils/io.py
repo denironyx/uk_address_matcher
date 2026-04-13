@@ -109,6 +109,21 @@ def load_duckdb_httpfs(con: duckdb.DuckDBPyConnection) -> None:
         con.execute(f"SET s3_session_token='{token}';")
 
 
+def load_duckdb_excel(con: duckdb.DuckDBPyConnection) -> None:
+    """Ensure DuckDB has Excel reader support available."""
+
+    already_loaded = (
+        con.execute(
+            "SELECT 1 FROM duckdb_extensions() WHERE extension_name = 'excel' AND loaded"
+        ).fetchone()
+        is not None
+    )
+    if already_loaded:
+        return
+
+    con.execute("INSTALL excel; LOAD excel;")
+
+
 def setup_connection() -> duckdb.DuckDBPyConnection:
     """Initialise DuckDB connection with required extensions for benchmarking."""
     con = duckdb.connect(database=":memory:")
@@ -119,6 +134,7 @@ def setup_connection() -> duckdb.DuckDBPyConnection:
 __all__ = [
     "apply_env_from_private_config",
     "get_env_setting",
+    "load_duckdb_excel",
     "load_duckdb_httpfs",
     "load_private_config",
     "setup_connection",
