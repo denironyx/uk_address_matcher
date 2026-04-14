@@ -11,6 +11,7 @@
 - For test changes and validation evidence, read `.github/instructions/testing.instructions.md` first.
 - For fixtures, privacy, and schema-safety concerns, read `.github/instructions/data-handling.instructions.md` first.
 - For workflow, scope control, and commit hygiene, read `.github/instructions/repo-workflow.instructions.md` first.
+- For benchmark experiments, canonical rebuilds, persisted run comparisons, and record-level audit work, read `.github/instructions/benchmark-experiments.instructions.md` first.
 - Detailed behavioural rules, checklists, and coding standards should be taken from those instruction files instead of duplicated here.
 
 ## Project defaults
