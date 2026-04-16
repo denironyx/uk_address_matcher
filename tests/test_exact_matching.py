@@ -6,6 +6,7 @@ from uk_address_matcher import (
 )
 from uk_address_matcher.linking_model.matching import runner as matching_runner
 from uk_address_matcher.linking_model.matching.runner import _run_matching
+from uk_address_matcher.sql_pipeline.match_reasons import MatchReason
 
 
 @pytest.fixture
@@ -124,6 +125,82 @@ def test_data(duck_con):
     )
 
     return df_fuzzy, df_canonical
+
+
+def test_exact_matching_applies_no_whitespace_fallback_by_default(duck_con):
+    df_messy = duck_con.sql(
+        """
+        SELECT *
+        FROM (
+            VALUES
+                (
+                    1,
+                    '12 HIGH ROAD',
+                    '12 HIGH ROAD',
+                    'AA1 1AA',
+                    CAST([] AS VARCHAR[]),
+                    1::BIGINT
+                )
+        ) AS t(
+            unique_id,
+            original_address_concat,
+            clean_full_address,
+            postcode,
+            peeled_tokens_list,
+            ukam_address_id
+        )
+        """
+    )
+
+    df_canonical = duck_con.sql(
+        """
+        SELECT *
+        FROM (
+            VALUES
+                (
+                    1001,
+                    '12HIGHROAD',
+                    '12HIGHROAD',
+                    'AA1 1AA',
+                    CAST([] AS VARCHAR[]),
+                    ARRAY['12']::VARCHAR[],
+                    FALSE,
+                    NULL::VARCHAR,
+                    NULL::VARCHAR,
+                    NULL::VARCHAR,
+                    FALSE,
+                    NULL::VARCHAR,
+                    NULL::VARCHAR,
+                    10::BIGINT
+                )
+        ) AS t(
+            unique_id,
+            original_address_concat,
+            clean_full_address,
+            postcode,
+            peeled_tokens_list,
+            numeric_tokens,
+            has_flat_indicator,
+            flat_positional,
+            flat_letter,
+            flat_number,
+            has_business_unit,
+            business_unit_type,
+            business_unit_id,
+            ukam_address_id
+        )
+        """
+    )
+
+    results, _ = _run_matching(
+        con=duck_con,
+        df_messy_clean=df_messy,
+        df_canonical_clean=df_canonical,
+        stages=[ExactMatchStage()],
+    )
+    row = results.fetchdf().iloc[0]
+    assert row["resolved_canonical_id"] == 1001
+    assert row["match_reason"] == MatchReason.EXACT_NO_WHITESPACE.value
 
 
 # -----------------------------------------------------------------------------
