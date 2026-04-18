@@ -1,8 +1,10 @@
 # 4. API Refactor
 
+Date: 2026-02-16
+
 ## Status
 
-Proposed
+Accepted 2026-02-23
 
 ## Context
 
