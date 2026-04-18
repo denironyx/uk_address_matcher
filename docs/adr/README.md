@@ -10,7 +10,7 @@ ADRs are a way to capture the context, decision, and consequences of a design ch
 
 We will document design decisions to ensure we preserve the context of our choices. These will be written in the format proposed by Michael Nygard in his [blog post](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions).
 
-All existing ADRs can be found within the [decisions directory](./decisions/). For a working example of effective ADR use, see the [GOV.UK AWS repository](https://github.com/alphagov/govuk-aws/tree/main/docs/architecture).
+All existing ADRs can be found within this directory. For a working example of effective ADR use, see the [GOV.UK AWS repository](https://github.com/alphagov/govuk-aws/tree/main/docs/architecture).
 
 ### Tooling
 
