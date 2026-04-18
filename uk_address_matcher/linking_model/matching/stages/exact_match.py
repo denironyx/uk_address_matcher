@@ -174,6 +174,17 @@ def _exact_matches(
         if enable_flat_retraction
         else ""
     )
+    _flat_extra_cols_sql = (
+        """,
+            base.flat_number,
+            base.flat_letter,
+            base.flat_positional,
+            base.has_business_unit,
+            base.business_unit_id,
+            base.numeric_tokens"""
+        if enable_flat_retraction
+        else ""
+    )
     _flat_key_sql = (
         r""",
             CASE
@@ -192,9 +203,7 @@ def _exact_matches(
             base.ukam_address_id,
             base.postcode,
             base.clean_full_address,
-            base.clean_full_address_no_ws{_flat_key_sql}
-            {"," if enable_flat_retraction else ""}
-            {"base.flat_number, base.flat_letter, base.flat_positional, base.has_business_unit, base.business_unit_id, base.numeric_tokens" if enable_flat_retraction else ""}
+            base.clean_full_address_no_ws{_flat_key_sql}{_flat_extra_cols_sql}
         FROM (
             SELECT
                 messy.ukam_address_id,
@@ -212,9 +221,7 @@ def _exact_matches(
             base.canonical_unique_id,
             base.postcode,
             base.clean_full_address,
-            base.clean_full_address_no_ws{_flat_key_sql}
-            {"," if enable_flat_retraction else ""}
-            {"base.flat_number, base.flat_letter, base.flat_positional, base.has_business_unit, base.business_unit_id, base.numeric_tokens" if enable_flat_retraction else ""}
+            base.clean_full_address_no_ws{_flat_key_sql}{_flat_extra_cols_sql}
         FROM (
             SELECT
                 canon.ukam_address_id AS canonical_ukam_address_id,
