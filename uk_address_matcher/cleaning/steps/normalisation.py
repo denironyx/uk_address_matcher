@@ -303,7 +303,9 @@ def _normalise_abbreviations_and_units() -> list[CTEStep]:
 
     Also normalise unit types using a vectorised map lookup.
 
-    - 1. Load lookup (upper-case keys for case-insensitive match)
+    - 1. Load lookup (upper-case keys for case-insensitive match), extended with
+         generated compact-floor rows so the JSON file only carries genuinely
+         arbitrary abbreviations.
     - 2. Build a single-row MAP (hashmap) using list aggregations
     - 3. Vectorised transform over token list, then join back to a string
     """
@@ -311,6 +313,35 @@ def _normalise_abbreviations_and_units() -> list[CTEStep]:
     read_abbr_sql = package_resource_read_sql(
         "uk_address_matcher.data", "address_abbreviations.json"
     )
+
+    # Compact-floor tokens are a regular cartesian product: floor code x suffix.
+    # Forward slashes are already normalised to dashes by an earlier cleaning
+    # pass, so only dash forms need expanding here.
+    floor_names = [
+        "GROUND",
+        "FIRST",
+        "SECOND",
+        "THIRD",
+        "FOURTH",
+        "FIFTH",
+        "SIXTH",
+        "SEVENTH",
+        "EIGHTH",
+        "NINTH",
+        "TENTH",
+    ]
+    floor_codes = ["G"] + [str(i) for i in range(1, len(floor_names))]
+    compact_floor_rows: list[tuple[str, str]] = []
+    for code, name in zip(floor_codes, floor_names):
+        compact_floor_rows.append((f"{code}FR", f"{name} FLOOR"))
+        compact_floor_rows.append((f"{code}F-R", f"{name} FLOOR RIGHT"))
+        compact_floor_rows.append((f"{code}F-L", f"{name} FLOOR LEFT"))
+        compact_floor_rows.append((f"{code}R-R", f"{name} FLOOR RIGHT"))
+        compact_floor_rows.append((f"{code}L-L", f"{name} FLOOR LEFT"))
+    compact_floor_values = ", ".join(
+        f"('{token}', '{replacement}')" for token, replacement in compact_floor_rows
+    )
+
     # 1) Load lookup (upper-case keys for case-insensitive match)
     abbr_lookup_sql = f"""
     SELECT
@@ -318,6 +349,9 @@ def _normalise_abbreviations_and_units() -> list[CTEStep]:
         TRIM(replacement)        AS replacement
     FROM ({read_abbr_sql})
     WHERE token IS NOT NULL AND replacement IS NOT NULL
+    UNION ALL
+    SELECT token, replacement
+    FROM (VALUES {compact_floor_values}) AS compact_floors(token, replacement)
     """
 
     # 2) Build a single-row MAP using list aggregations (works on DuckDB without map_agg)

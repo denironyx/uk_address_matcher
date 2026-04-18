@@ -165,6 +165,7 @@ def _parse_out_flat_position_and_letter():
         "SEVENTH",
         "EIGHTH",
         "NINTH",
+        "TENTH",
         "TOP",
     ]
     # Build regex: standalone floors OR (prefix + FLOOR) OR
@@ -174,9 +175,9 @@ def _parse_out_flat_position_and_letter():
     # Pattern handles: WORD, or WORD (space) or AND, followed by final floor + FLOORS
     multi_floor_pattern = (
         r"(?:(?:GROUND|FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|"
-        r"SEVENTH|EIGHTH|NINTH|TOP),? ?|AND )*"
+        r"SEVENTH|EIGHTH|NINTH|TENTH|TOP),? ?|AND )*"
         r"(?:GROUND|FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|"
-        r"SEVENTH|EIGHTH|NINTH|TOP) FLOORS"
+        r"SEVENTH|EIGHTH|NINTH|TENTH|TOP) FLOORS"
     )
     floor_positions = (
         r"\b("
@@ -188,6 +189,18 @@ def _parse_out_flat_position_and_letter():
         + r"|"
         + multi_floor_pattern
         + r")\b"
+    )
+    leading_bare_floor_position = (
+        r"^\s*(GROUND|FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|"
+        r"SEVENTH|EIGHTH|NINTH|TENTH|TOP)\s+\d"
+    )
+    # Side marker (R/L or RIGHT/LEFT) sitting immediately after an expanded
+    # floor position. Compact forms like GFR, GR-R, 1F-L, 10L-L are rewritten
+    # to "{NAME} FLOOR {RIGHT|LEFT}" by the abbreviation normalisation stage
+    # before the parser runs, so we only recognise the expanded form here.
+    expanded_floor_side = (
+        r"\b(?:GROUND|FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|SEVENTH|"
+        r"EIGHTH|NINTH|TENTH)\s+FLOOR\s+(?:([LR])|(LEFT|RIGHT))\b"
     )
 
     # Core token patterns (RE2-compatible; avoid lookbehind)
@@ -226,6 +239,25 @@ def _parse_out_flat_position_and_letter():
                 ''
             ) = 'LOWER FLOOR'
                 THEN 'LOWER FLOOR'
+            WHEN NULLIF(
+                regexp_extract(
+                    i.clean_full_address,
+                    '{leading_bare_floor_position}',
+                    1
+                ),
+                ''
+            ) IS NOT NULL
+                THEN CONCAT(
+                    NULLIF(
+                        regexp_extract(
+                            i.clean_full_address,
+                            '{leading_bare_floor_position}',
+                            1
+                        ),
+                        ''
+                    ),
+                    ' FLOOR'
+                )
             ELSE NULLIF(
                 regexp_extract(i.clean_full_address, '{floor_positions}', 1),
                 ''
@@ -252,6 +284,18 @@ def _parse_out_flat_position_and_letter():
                 regexp_extract(i.clean_full_address, '{block_letter}', 1),
                 ''
             ),
+            NULLIF(
+                regexp_extract(i.clean_full_address, '{expanded_floor_side}', 1),
+                ''
+            ),
+            CASE NULLIF(
+                regexp_extract(i.clean_full_address, '{expanded_floor_side}', 2),
+                ''
+            )
+                WHEN 'LEFT' THEN 'L'
+                WHEN 'RIGHT' THEN 'R'
+                ELSE NULL
+            END,
             NULLIF(
                 regexp_extract(i.clean_full_address, '{leading_num_letter}', 2),
                 ''
