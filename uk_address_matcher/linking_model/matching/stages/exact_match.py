@@ -18,26 +18,6 @@ if TYPE_CHECKING:
 MessyInputName = Literal["__ukam__tmp_messy_addresses", "unmatched_records"]
 
 
-def _remove_flat_keyword_sql(column_reference: str) -> str:
-    """Return SQL that strips standalone FLAT and re-normalises spaces."""
-
-    return f"""
-        TRIM(
-            REGEXP_REPLACE(
-                REGEXP_REPLACE(
-                    ' ' || {column_reference} || ' ',
-                    '\\bFLAT\\b',
-                    ' ',
-                    'g'
-                ),
-                '\\s+',
-                ' ',
-                'g'
-            )
-        )
-    """
-
-
 def _flat_field_compatibility_sql() -> str:
     """Return SQL requiring flat fields to be non-contradictory."""
 
@@ -94,8 +74,8 @@ class ExactMatchStage(MatchingStage):
     This stage applies three deterministic phases in priority order:
     1. exact ``clean_full_address + postcode``
     2. exact after removing all whitespace
-    3. exact after removing standalone ``FLAT``, gated by parsed-unit
-       heuristics and flat-field compatibility checks
+    3. exact after removing standalone ``FLAT`` *and* all whitespace, gated by
+       parsed-unit heuristics and flat-field compatibility checks
 
     Set ``enable_flat_retraction=False`` to skip phase 3.
     """
@@ -159,29 +139,92 @@ def _exact_matches(
         ``exact_flat_retraction: match after removing FLAT keyword`` when it
         yields an unambiguous candidate. If ``False``, skip phase 3.
     """
-    no_ws_expression = "regexp_replace(clean_full_address, '\\s+', '', 'g')"
     exact_value = MatchReason.EXACT.value
     exact_no_whitespace_value = MatchReason.EXACT_NO_WHITESPACE.value
     exact_flat_retraction_value = MatchReason.EXACT_FLAT_RETRACTION.value
     enum_values = str(MatchReason.enum_values())
 
-    messy_keys_sql = f"""
+    # Both messy_keys and canon_keys compute every derived key (plus the flat
+    # metadata phase 3 needs) in a single pass so we never rescan the source
+    # relation. Phase 3 reads from the same CTEs as phases 1 & 2.
+    #
+    # Key derivation strategy (one regex pass per row when FLAT is absent):
+    #   clean_full_address_no_ws         : strip whitespace only
+    #   clean_full_address_no_flat_no_ws : strip FLAT + whitespace, via an
+    #       alternation regex gated by a cheap contains() check. When no
+    #       "FLAT" token is present the column degrades to the no-ws value
+    #       with no extra regex work.
+    _flat_metadata_messy_sql = (
+        ",\n                messy.flat_number,"
+        "\n                messy.flat_letter,"
+        "\n                messy.flat_positional,"
+        "\n                messy.has_business_unit,"
+        "\n                messy.business_unit_id,"
+        "\n                messy.numeric_tokens"
+        if enable_flat_retraction
+        else ""
+    )
+    _flat_metadata_canon_sql = (
+        ",\n                canon.flat_number,"
+        "\n                canon.flat_letter,"
+        "\n                canon.flat_positional,"
+        "\n                canon.has_business_unit,"
+        "\n                canon.business_unit_id,"
+        "\n                canon.numeric_tokens"
+        if enable_flat_retraction
+        else ""
+    )
+    _flat_key_sql = (
+        r""",
+            CASE
+                WHEN contains(base.clean_full_address, 'FLAT')
+                THEN regexp_replace(
+                    base.clean_full_address, '\bFLAT\b|\s+', '', 'g'
+                )
+                ELSE base.clean_full_address_no_ws
+            END AS clean_full_address_no_flat_no_ws"""
+        if enable_flat_retraction
+        else ""
+    )
+
+    messy_keys_sql = rf"""
         SELECT
-            messy.ukam_address_id,
-            messy.postcode,
-            messy.clean_full_address,
-            {no_ws_expression} AS clean_full_address_no_ws
-        FROM {{{messy_input_name}}} AS messy
+            base.ukam_address_id,
+            base.postcode,
+            base.clean_full_address,
+            base.clean_full_address_no_ws{_flat_key_sql}
+            {"," if enable_flat_retraction else ""}
+            {"base.flat_number, base.flat_letter, base.flat_positional, base.has_business_unit, base.business_unit_id, base.numeric_tokens" if enable_flat_retraction else ""}
+        FROM (
+            SELECT
+                messy.ukam_address_id,
+                messy.postcode,
+                messy.clean_full_address,
+                regexp_replace(messy.clean_full_address, '\s+', '', 'g')
+                    AS clean_full_address_no_ws{_flat_metadata_messy_sql}
+            FROM {{{messy_input_name}}} AS messy
+        ) AS base
     """
 
-    canon_keys_sql = f"""
+    canon_keys_sql = rf"""
         SELECT
-            canon.ukam_address_id AS canonical_ukam_address_id,
-            canon.canonical_unique_id,
-            canon.postcode,
-            canon.clean_full_address,
-            {no_ws_expression} AS clean_full_address_no_ws
-        FROM {{canonical_addresses_restricted}} AS canon
+            base.canonical_ukam_address_id,
+            base.canonical_unique_id,
+            base.postcode,
+            base.clean_full_address,
+            base.clean_full_address_no_ws{_flat_key_sql}
+            {"," if enable_flat_retraction else ""}
+            {"base.flat_number, base.flat_letter, base.flat_positional, base.has_business_unit, base.business_unit_id, base.numeric_tokens" if enable_flat_retraction else ""}
+        FROM (
+            SELECT
+                canon.ukam_address_id AS canonical_ukam_address_id,
+                canon.canonical_unique_id,
+                canon.postcode,
+                canon.clean_full_address,
+                regexp_replace(canon.clean_full_address, '\s+', '', 'g')
+                    AS clean_full_address_no_ws{_flat_metadata_canon_sql}
+            FROM {{canonical_addresses_restricted}} AS canon
+        ) AS base
     """
 
     exact_candidates_sql = f"""
@@ -255,53 +298,37 @@ def _exact_matches(
 
     if enable_flat_retraction:
         flat_compatibility_condition = _flat_field_compatibility_sql()
-        messy_no_flat_expression = _remove_flat_keyword_sql("messy.clean_full_address")
-        canon_no_flat_expression = _remove_flat_keyword_sql("canon.clean_full_address")
 
-        messy_flat_keys_sql = f"""
-            SELECT
-                messy.ukam_address_id,
-                messy.postcode,
-                messy.clean_full_address,
-                {messy_no_flat_expression} AS clean_full_address_no_flat,
-                messy.flat_number,
-                messy.flat_letter,
-                messy.flat_positional,
-                messy.has_business_unit,
-                messy.business_unit_id,
-                messy.numeric_tokens
-            FROM {{{messy_input_name}}} AS messy
-        """
-
-        canon_flat_keys_sql = f"""
-            SELECT
-                canon.ukam_address_id AS canonical_ukam_address_id,
-                canon.canonical_unique_id,
-                canon.postcode,
-                canon.clean_full_address,
-                {canon_no_flat_expression} AS clean_full_address_no_flat,
-                canon.flat_number,
-                canon.flat_letter,
-                canon.flat_positional,
-                canon.has_business_unit,
-                canon.business_unit_id,
-                canon.numeric_tokens
-            FROM {{canonical_addresses_restricted}} AS canon
-        """
-
-        unmatched_after_pre_flat_sql = """
-            SELECT
-                messy.*
-            FROM {messy_flat_keys} AS messy
+        # Phase 3 reuses the already-projected messy_keys / canon_keys CTEs —
+        # no second scan of the source relations, no duplicate regex work.
+        # Residual messy rows are the ones that didn't match in phases 1-2.
+        messy_flat_keys_sql = """
+            SELECT messy.*
+            FROM {messy_keys} AS messy
             LEFT JOIN {pre_flat_matches} AS matched
                 ON matched.ukam_address_id = messy.ukam_address_id
             WHERE matched.ukam_address_id IS NULL
         """
 
+        # Canonical is already postcode-restricted to the full messy set by
+        # canonical_addresses_restricted; narrowing further to residual
+        # postcodes shrinks the phase-3 dedupe GROUP BY.
+        residual_postcodes_sql = """
+            SELECT DISTINCT postcode
+            FROM {messy_flat_keys}
+        """
+
+        canon_flat_keys_sql = """
+            SELECT canon.*
+            FROM {canon_keys} AS canon
+            SEMI JOIN {residual_postcodes} AS rp
+                ON rp.postcode = canon.postcode
+        """
+
         canon_flat_unique_sql = """
             SELECT
                 canon.postcode,
-                canon.clean_full_address_no_flat,
+                canon.clean_full_address_no_flat_no_ws,
                 MIN(canon.canonical_ukam_address_id) AS canonical_ukam_address_id,
                 MIN(canon.canonical_unique_id) AS resolved_canonical_id,
                 MIN(canon.flat_number) AS flat_number,
@@ -310,7 +337,8 @@ def _exact_matches(
                 BOOL_OR(COALESCE(canon.has_business_unit, FALSE)) AS has_business_unit,
                 MIN(canon.business_unit_id) AS business_unit_id,
                 BOOL_OR(
-                    canon.clean_full_address_no_flat <> canon.clean_full_address
+                    canon.clean_full_address_no_flat_no_ws
+                        <> canon.clean_full_address_no_ws
                 ) AS canonical_flat_keyword_removed,
                 BOOL_OR(
                     canon.flat_number IS NOT NULL
@@ -321,8 +349,8 @@ def _exact_matches(
                     OR COALESCE(array_length(canon.numeric_tokens), 0) >= 2
                 ) AS canonical_has_unit_evidence
             FROM {canon_flat_keys} AS canon
-            WHERE canon.clean_full_address_no_flat <> ''
-            GROUP BY canon.postcode, canon.clean_full_address_no_flat
+            WHERE canon.clean_full_address_no_flat_no_ws <> ''
+            GROUP BY canon.postcode, canon.clean_full_address_no_flat_no_ws
             HAVING COUNT(DISTINCT canon.canonical_ukam_address_id) = 1
         """
 
@@ -332,13 +360,15 @@ def _exact_matches(
                 canon.canonical_ukam_address_id,
                 canon.resolved_canonical_id,
                 '{exact_flat_retraction_value}'::ENUM {enum_values} AS match_reason
-            FROM {{unmatched_after_pre_flat}} AS messy
+            FROM {{messy_flat_keys}} AS messy
             INNER JOIN {{canon_flat_unique}} AS canon
                 ON messy.postcode = canon.postcode
-                AND messy.clean_full_address_no_flat = canon.clean_full_address_no_flat
-            WHERE messy.clean_full_address_no_flat <> ''
+                AND messy.clean_full_address_no_flat_no_ws
+                    = canon.clean_full_address_no_flat_no_ws
+            WHERE messy.clean_full_address_no_flat_no_ws <> ''
             AND (
-                messy.clean_full_address_no_flat <> messy.clean_full_address
+                messy.clean_full_address_no_flat_no_ws
+                    <> messy.clean_full_address_no_ws
                 OR COALESCE(canon.canonical_flat_keyword_removed, FALSE)
             )
             AND {flat_compatibility_condition}
@@ -351,8 +381,8 @@ def _exact_matches(
         steps.extend(
             [
                 CTEStep("messy_flat_keys", messy_flat_keys_sql),
+                CTEStep("residual_postcodes", residual_postcodes_sql),
                 CTEStep("canon_flat_keys", canon_flat_keys_sql),
-                CTEStep("unmatched_after_pre_flat", unmatched_after_pre_flat_sql),
                 CTEStep("canon_flat_unique", canon_flat_unique_sql),
                 CTEStep("flat_retraction_matches", flat_retraction_matches_sql),
             ]
