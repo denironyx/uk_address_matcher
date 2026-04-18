@@ -92,7 +92,7 @@
 
   { "token": "EXC", "replacement": "EXCLUDING" },
   { "token": "EXCL", "replacement": "EXCLUDING" },
-  
+
   { "token": "LGND", "replacement": "LOWER GROUND"},
   { "token": "UGND", "replacement": "UPPER GROUND"},
 
