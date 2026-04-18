@@ -18,4 +18,5 @@
       members:
         - matches
         - match_metrics
-        - match_reasons
+        - accuracy_analysis
+        - accuracy_data
