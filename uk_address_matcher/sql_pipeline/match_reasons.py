@@ -8,6 +8,7 @@ class MatchReason(Enum):
 
     EXACT = "exact: full match"
     EXACT_NO_WHITESPACE = "exact_no_whitespace: full match after removing whitespace"
+    EXACT_FLAT_RETRACTION = "exact_flat_retraction: match after removing FLAT keyword"
     PEELED_ADDRESS = "peeled_address: match after removing common UK end tokens"
     SPLINK = "splink: probabilistic match"
     UNIQUE_TRIGRAM = "unique_trigram: unique trigram match"
@@ -22,6 +23,8 @@ class MatchReason(Enum):
             return "exact_matches"
         if self is MatchReason.EXACT_NO_WHITESPACE:
             return "exact_no_whitespace"
+        if self is MatchReason.EXACT_FLAT_RETRACTION:
+            return "exact_flat_retraction"
         if self is MatchReason.PEELED_ADDRESS:
             return "peeled_address"
         if self is MatchReason.SPLINK:

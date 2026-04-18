@@ -127,53 +127,7 @@ def test_data(duck_con):
     return df_fuzzy, df_canonical
 
 
-def test_exact_matching_applies_no_whitespace_fallback_by_default(duck_con):
-    df_messy = duck_con.sql(
-        """
-        SELECT *
-        FROM (
-            VALUES
-                (
-                    1,
-                    '12 HIGH ROAD',
-                    '12 HIGH ROAD',
-                    'AA1 1AA',
-                    CAST([] AS VARCHAR[]),
-                    1::BIGINT
-                )
-        ) AS t(
-            unique_id,
-            original_address_concat,
-            clean_full_address,
-            postcode,
-            peeled_tokens_list,
-            ukam_address_id
-        )
-        """
-    )
-
-    df_canonical = duck_con.sql(
-        """
-        SELECT *
-        FROM (
-            VALUES
-                (
-                    1001,
-                    '12HIGHROAD',
-                    '12HIGHROAD',
-                    'AA1 1AA',
-                    CAST([] AS VARCHAR[]),
-                    ARRAY['12']::VARCHAR[],
-                    FALSE,
-                    NULL::VARCHAR,
-                    NULL::VARCHAR,
-                    NULL::VARCHAR,
-                    FALSE,
-                    NULL::VARCHAR,
-                    NULL::VARCHAR,
-                    10::BIGINT
-                )
-        ) AS t(
+ADDRESS_ROW_COLUMNS_SQL = """
             unique_id,
             original_address_concat,
             clean_full_address,
@@ -188,9 +142,121 @@ def test_exact_matching_applies_no_whitespace_fallback_by_default(duck_con):
             business_unit_type,
             business_unit_id,
             ukam_address_id
+"""
+
+NO_WS_MESSY_ROW_SQL = """
+(
+    1,
+    '12 HIGH ROAD',
+    '12 HIGH ROAD',
+    'AA1 1AA',
+    CAST([] AS VARCHAR[]),
+    ARRAY['12', '10']::VARCHAR[],
+    FALSE,
+    NULL::VARCHAR,
+    NULL::VARCHAR,
+    NULL::VARCHAR,
+    FALSE,
+    NULL::VARCHAR,
+    NULL::VARCHAR,
+    1::BIGINT
+)
+"""
+
+NO_WS_CANONICAL_ROW_SQL = """
+(
+    1001,
+    '12HIGHROAD',
+    '12HIGHROAD',
+    'AA1 1AA',
+    CAST([] AS VARCHAR[]),
+    ARRAY['12']::VARCHAR[],
+    FALSE,
+    NULL::VARCHAR,
+    NULL::VARCHAR,
+    NULL::VARCHAR,
+    FALSE,
+    NULL::VARCHAR,
+    NULL::VARCHAR,
+    10::BIGINT
+)
+"""
+
+FLAT_MESSY_ROW_SQL = """
+(
+    1,
+    'FLAT 2 10 HIGH STREET',
+    'FLAT 2 10 HIGH STREET',
+    'AA1 1AA',
+    CAST([] AS VARCHAR[]),
+    ARRAY['2', '10']::VARCHAR[],
+    TRUE,
+    NULL::VARCHAR,
+    NULL::VARCHAR,
+    '2',
+    FALSE,
+    NULL::VARCHAR,
+    NULL::VARCHAR,
+    1::BIGINT
+)
+"""
+
+FLAT_CANONICAL_ROW_SQL = """
+(
+    1002,
+    '2 10 HIGH STREET',
+    '2 10 HIGH STREET',
+    'AA1 1AA',
+    CAST([] AS VARCHAR[]),
+    ARRAY['2', '10']::VARCHAR[],
+    TRUE,
+    NULL::VARCHAR,
+    NULL::VARCHAR,
+    '2',
+    FALSE,
+    NULL::VARCHAR,
+    NULL::VARCHAR,
+    20::BIGINT
+)
+"""
+
+FLAT_CANONICAL_DUPLICATE_ROW_SQL = """
+(
+    1002,
+    '2 10 HIGH STREET',
+    '2 10 HIGH STREET',
+    'AA1 1AA',
+    CAST([] AS VARCHAR[]),
+    ARRAY['2', '10']::VARCHAR[],
+    TRUE,
+    NULL::VARCHAR,
+    NULL::VARCHAR,
+    '2',
+    FALSE,
+    NULL::VARCHAR,
+    NULL::VARCHAR,
+    21::BIGINT
+)
+"""
+
+
+def _address_relation_from_values(duck_con, values_sql: str):
+    return duck_con.sql(
+        f"""
+        SELECT *
+        FROM (
+            VALUES
+                {values_sql}
+        ) AS t(
+            {ADDRESS_ROW_COLUMNS_SQL}
         )
         """
     )
+
+
+def test_exact_matching_applies_no_whitespace_fallback_by_default(duck_con):
+    df_messy = _address_relation_from_values(duck_con, NO_WS_MESSY_ROW_SQL)
+    df_canonical = _address_relation_from_values(duck_con, NO_WS_CANONICAL_ROW_SQL)
 
     results, _ = _run_matching(
         con=duck_con,
@@ -201,6 +267,52 @@ def test_exact_matching_applies_no_whitespace_fallback_by_default(duck_con):
     row = results.fetchdf().iloc[0]
     assert row["resolved_canonical_id"] == 1001
     assert row["match_reason"] == MatchReason.EXACT_NO_WHITESPACE.value
+
+
+def test_exact_matching_applies_flat_retraction_with_heuristics(duck_con):
+    df_messy = _address_relation_from_values(duck_con, FLAT_MESSY_ROW_SQL)
+    df_canonical = _address_relation_from_values(duck_con, FLAT_CANONICAL_ROW_SQL)
+
+    results, _ = _run_matching(
+        con=duck_con,
+        df_messy_clean=df_messy,
+        df_canonical_clean=df_canonical,
+        stages=[ExactMatchStage()],
+    )
+    row = results.fetchdf().iloc[0]
+    assert row["resolved_canonical_id"] == 1002
+    assert row["match_reason"] == MatchReason.EXACT_FLAT_RETRACTION.value
+
+
+def test_exact_matching_skips_flat_retraction_when_disabled(duck_con):
+    df_messy = _address_relation_from_values(duck_con, FLAT_MESSY_ROW_SQL)
+    df_canonical = _address_relation_from_values(duck_con, FLAT_CANONICAL_ROW_SQL)
+
+    results, _ = _run_matching(
+        con=duck_con,
+        df_messy_clean=df_messy,
+        df_canonical_clean=df_canonical,
+        stages=[ExactMatchStage(enable_flat_retraction=False)],
+    )
+    matched = results.fetchdf().dropna(subset=["resolved_canonical_id"])
+    assert matched.empty
+
+
+def test_exact_matching_flat_retraction_requires_unique_canonical_row(duck_con):
+    df_messy = _address_relation_from_values(duck_con, FLAT_MESSY_ROW_SQL)
+    df_canonical = _address_relation_from_values(
+        duck_con,
+        f"{FLAT_CANONICAL_ROW_SQL},\n{FLAT_CANONICAL_DUPLICATE_ROW_SQL}",
+    )
+
+    results, _ = _run_matching(
+        con=duck_con,
+        df_messy_clean=df_messy,
+        df_canonical_clean=df_canonical,
+        stages=[ExactMatchStage()],
+    )
+    matched = results.fetchdf().dropna(subset=["resolved_canonical_id"])
+    assert matched.empty
 
 
 # -----------------------------------------------------------------------------
