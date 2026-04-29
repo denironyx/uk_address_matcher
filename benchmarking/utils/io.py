@@ -125,10 +125,8 @@ def load_duckdb_excel(con: duckdb.DuckDBPyConnection) -> None:
 
 
 def setup_connection() -> duckdb.DuckDBPyConnection:
-    """Initialise DuckDB connection with required extensions for benchmarking."""
-    con = duckdb.connect(database=":memory:")
-    con.execute("INSTALL splink_udfs FROM community; LOAD splink_udfs;")
-    return con
+    """Initialise DuckDB connection for benchmarking."""
+    return duckdb.connect(database=":memory:")
 
 
 __all__ = [
