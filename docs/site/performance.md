@@ -40,33 +40,25 @@ The following script takes 26 seconds to run against 114,544 labelled records.
   <summary>Expand to see Hackney benchmarking script</summary>
 
 ```python
-import pyarrow as pa
 import duckdb
 from uk_address_matcher import AddressMatcher, ExactMatchStage, SplinkStage
-import uk_address_matcher
-
+import pyarrow as pa
+from pathlib import Path
 
 import time
-import logging
 
 
 start_time = time.time()
+
+canoncial_prepared_path = "path_to_output_folder_from_ukam-os-builder_tool"
+
 con = duckdb.connect()
-
-path_to_all_canonical = "path_to_output_from_ukam-os-builder_tool"
-
-sql = f"""
-select *
-from read_parquet('{path_to_all_canonical}')
-where lowertierlocalauthoritygsscode = 'E09000012'
-and substr(classificationcode, 1, 1) = 'R'
-"""
-df_canonical = con.sql(sql)
+hackney_path = "path_to_HACKNEY_CTBANDS_ONSUD_202507.csv"
+hackney_data = con.read_csv(hackney_path)
 
 
-path = "path_to_HACKNEY_CTBANDS_ONSUD_202507.csv"
-raw_labelled_data = con.read_csv(path)
-raw_labelled_data.count("*").show()
+all_uprns_path = str(Path(canoncial_prepared_path) / "ukam_canonical_addresses.parquet")
+all_uprns = con.read_parquet(all_uprns_path).select("unique_id as uprn")
 
 
 sql = """
@@ -74,23 +66,22 @@ select propref as unique_id,
 concat_ws(' ', addr1, addr2, addr3, addr4) as address_concat,
 uprn as ukam_label,
 postcode
-from raw_labelled_data
+from hackney_data
 where uprn is not null
-and uprn in (select unique_id from df_canonical)
-
+and uprn in (select uprn from all_uprns)
 """
 df_messy = con.sql(sql)
-df_messy.count("*").show()
 
 
 matcher = AddressMatcher(
-    canonical_addresses=df_canonical,
+    canonical_addresses=str(canoncial_prepared_path),
+    canonical_address_filter="lowertierlocalauthoritygsscode = 'E09000012' and substr(classificationcode, 1, 1) = 'R'",
     addresses_to_match=df_messy,
     con=con,
     stages=[
         ExactMatchStage(),
         SplinkStage(
-            final_distinguishability_threshold=1,
+            final_distinguishability_threshold=1.0,
         ),
     ],
 )
@@ -100,8 +91,12 @@ result = matcher.match()
 end_time = time.time()
 print(f"Execution time: {end_time - start_time} seconds")
 
-chart = result.accuracy_analysis(output_type="precision_recall", add_metrics=["f1"], match_weight_round_to_nearest=1)
-accuracy_table = result.accuracy_analysis(output_type="table", add_metrics=["f1"], match_weight_round_to_nearest= 1)
+chart = result.accuracy_analysis(
+    output_type="precision_recall", add_metrics=["f1"], match_weight_round_to_nearest=1
+)
+accuracy_table = result.accuracy_analysis(
+    output_type="table", add_metrics=["f1"], match_weight_round_to_nearest=1
+)
 
 df = pa.Table.from_pylist(accuracy_table)
 con.sql("select * from df").show(max_width=100000, max_rows=100000)
