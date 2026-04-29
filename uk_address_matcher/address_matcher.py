@@ -29,17 +29,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger("uk_address_matcher")
 
 
-def _ensure_splink_udfs(con: duckdb.DuckDBPyConnection) -> None:
-    """Installs and loads the splink_udfs community extension if needed."""
-    loaded = con.execute(
-        "SELECT * FROM duckdb_extensions() "
-        "WHERE extension_name = 'splink_udfs' AND loaded"
-    ).fetchone()
-    if loaded is None:
-        con.execute("INSTALL splink_udfs FROM community")
-        con.execute("LOAD splink_udfs")
-
-
 def _default_stages() -> list[MatchingStage]:
     """Return the default stage sequence: exact match then Splink."""
     from uk_address_matcher.linking_model.matching.stages import ExactMatchStage
@@ -158,7 +147,6 @@ class AddressMatcher:
         cleaning_num_chunks: int = 10,
     ):
         self.con = con
-        _ensure_splink_udfs(self.con)
         self.stages = stages if stages is not None else _default_stages()
         self.debug_options = debug_options
         self.canonical_address_filter = canonical_address_filter

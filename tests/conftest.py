@@ -25,7 +25,6 @@ def _test_calculate_chunk_size(total_records: int, num_of_chunks: int) -> int:
 @pytest.fixture
 def duck_con():
     con = duckdb.connect(database=":memory:")
-    con.execute("INSTALL splink_udfs FROM community; LOAD splink_udfs;")
 
     # Patch chunk size calculation to allow small test datasets to be chunked
     with patch(
