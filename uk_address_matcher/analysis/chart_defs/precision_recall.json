@@ -80,13 +80,13 @@
         "field": "precision",
         "type": "quantitative",
         "title": "Precision",
-        "format": ".1%"
+        "format": ".3%"
       },
       {
         "field": "recall",
         "type": "quantitative",
         "title": "Recall",
-        "format": ".1%"
+        "format": ".3%"
       }
     ]
   }
