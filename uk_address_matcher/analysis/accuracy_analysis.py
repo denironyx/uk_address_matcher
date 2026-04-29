@@ -15,8 +15,17 @@ def _load_chart_definition(file_name: str) -> dict[str, Any]:
         return json.load(f)
 
 
+_MAX_PLOTTED_TRUTH_THRESHOLD = 50.0
+
+
 def _visual_chart_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Return records used for chart rendering, excluding sentinel thresholds."""
+    """Return records used for chart rendering, excluding sentinel thresholds.
+
+    Also caps the maximum plotted ``truth_threshold`` at
+    ``_MAX_PLOTTED_TRUTH_THRESHOLD``. Above this point the precision-recall
+    curves typically become very jagged because they are computed from very
+    small numbers of records (very low recall) and are not informative.
+    """
     filtered: list[dict[str, Any]] = []
     for row in records:
         threshold = row.get("truth_threshold")
@@ -25,6 +34,8 @@ def _visual_chart_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]
             continue
         threshold_value = float(threshold)
         if abs(threshold_value) >= 900:
+            continue
+        if threshold_value > _MAX_PLOTTED_TRUTH_THRESHOLD:
             continue
         filtered.append(row)
     return filtered
