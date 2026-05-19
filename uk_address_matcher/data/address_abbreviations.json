@@ -75,6 +75,7 @@
   { "token": "FAC", "replacement": "FACTORY" },
 
   { "token": "FF", "replacement": "FIRST FLOOR" },
+  { "token": "FT", "replacement": "FRONT" },
 
   { "token": "FL", "replacement": "FLOOR" },
   { "token": "FLR", "replacement": "FLOOR" },
@@ -137,6 +138,9 @@
 
   { "token": "LIB", "replacement": "LIBRARY" },
 
+  { "token": "LHS", "replacement": "LEFT HAND SIDE" },
+  { "token": "LT", "replacement": "LEFT" },
+
   { "token": "LN", "replacement": "LANE" },
 
   { "token": "LTD", "replacement": "LIMITED" },
@@ -180,6 +184,9 @@
   { "token": "RDG", "replacement": "RIDGE" },
 
   { "token": "RVR", "replacement": "RIVER" },
+
+  { "token": "RHS", "replacement": "RIGHT HAND SIDE" },
+  { "token": "RT", "replacement": "RIGHT" },
 
   { "token": "SCH", "replacement": "SCHOOL" },
 
