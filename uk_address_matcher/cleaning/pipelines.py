@@ -35,7 +35,10 @@ from uk_address_matcher.cleaning.steps import (
 from uk_address_matcher.cleaning.steps.term_frequencies import (
     _create_histograms_from_token_frequencies,
 )
-from uk_address_matcher.sql_pipeline.helpers import package_resource_read_sql
+from uk_address_matcher.sql_pipeline.helpers import (
+    _duckdb_table_exists,
+    package_resource_read_sql,
+)
 from uk_address_matcher.sql_pipeline.runner import DebugOptions, create_sql_pipeline
 
 _NUMERIC_TOKENS_WORK_NAME = "__ukam__numeric_tokens_work"
@@ -356,6 +359,14 @@ def _register_inverted_index_table(
     """
     if inverted_index is None:
         return None
+
+    existing_alias = getattr(inverted_index, "alias", None)
+    if isinstance(existing_alias, str) and _duckdb_table_exists(con, existing_alias):
+        con.sql("DROP VIEW IF EXISTS __ukam_inverted_index")
+        con.execute(
+            f"CREATE TEMP VIEW __ukam_inverted_index AS SELECT * FROM {existing_alias}"
+        )
+        return "__ukam_inverted_index"
 
     # Materialise to avoid lazy evaluation issues
     con.sql("DROP TABLE IF EXISTS __ukam_inverted_index")

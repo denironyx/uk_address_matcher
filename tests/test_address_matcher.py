@@ -15,6 +15,7 @@ from uk_address_matcher import (
     UniqueTrigramStage,
     prepare_canonical_folder,
 )
+from uk_address_matcher.cleaning.pipelines import _register_inverted_index_table
 from uk_address_matcher.post_linkage.match_result import MatchResult
 
 CANONICAL_RECORDS = [
@@ -267,6 +268,33 @@ def test_match_from_prepared_folder_path_object(con, canonical_data, messy_data)
         )
         result = matcher.match()
         assert result.matches().count("*").fetchone()[0] > 0
+
+
+def test_cleaning_reuses_existing_inverted_index_table(con):
+    con.execute(
+        """
+        CREATE TABLE prepared_inverted_index AS
+        SELECT
+            'SW1A' AS key,
+            ['C1']::VARCHAR[] AS unique_ids,
+            'postcode' AS index_strategy
+        """
+    )
+
+    table_name = _register_inverted_index_table(
+        con,
+        con.table("prepared_inverted_index"),
+    )
+
+    assert table_name == "__ukam_inverted_index"
+    tables = {
+        row[0]: row[1]
+        for row in con.execute(
+            "SELECT table_name, table_type FROM information_schema.tables"
+        ).fetchall()
+    }
+    assert tables["prepared_inverted_index"] == "BASE TABLE"
+    assert tables["__ukam_inverted_index"] == "VIEW"
 
 
 def test_inverted_index_property_returns_registered_relation(
