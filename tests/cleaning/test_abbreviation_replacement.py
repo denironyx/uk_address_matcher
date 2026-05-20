@@ -4,7 +4,9 @@ from typing import Dict, List, Set, Tuple
 
 import pytest
 
+from uk_address_matcher.cleaning.pipelines import QUEUE_CLEAN_FULL_ADDRESS
 from uk_address_matcher.cleaning.steps import (
+    _clean_address_string_first_pass,
     _join_excluding_with_next_token,
     _normalise_abbreviations_and_units,
 )
@@ -26,6 +28,11 @@ def test_abbr_data(duck_con):
             ('MUSEUM GALLERY THEATRE THEA CIVIC CENTRE'),
             ('FLAT 3D 12B BAKER AVE LONDON'),
             ('PENTHOUSE 1A OXFORD CLS LONDON'),
+            ('10 LHS MEWS LONDON'),
+            ('12 RHS COURT ROAD LONDON'),
+            ('FLAT 1ST FLR FT 176 LOWER CLAPTON ROAD LONDON'),
+            ('FLAT 1ST FLR LT 4D UFTON ROAD LONDON'),
+            ('FLAT 1ST FLR RT 10 RECTORY ROAD LONDON'),
         ) AS t(clean_full_address)
     """
     )
@@ -52,6 +59,11 @@ def test_abbreviation_normalisation_sql(duck_con, test_abbr_data):
         "MUSEUM GALLERY THEATRE THEATRE CIVIC CENTRE",
         "FLAT 3D 12B BAKER AVENUE LONDON",
         "PENTHOUSE 1A OXFORD CLOSE LONDON",
+        "10 LEFT HAND SIDE MEWS LONDON",
+        "12 RIGHT HAND SIDE COURT ROAD LONDON",
+        "FLAT FIRST FLOOR FRONT 176 LOWER CLAPTON ROAD LONDON",
+        "FLAT FIRST FLOOR LEFT 4D UFTON ROAD LONDON",
+        "FLAT FIRST FLOOR RIGHT 10 RECTORY ROAD LONDON",
     ]
     for row, expected in zip(rows, expected_addresses):
         assert row[clean_idx] == expected
@@ -90,6 +102,54 @@ def test_excluding_token_is_joined_with_following_token(duck_con):
         "HOUSE EXCLUDINGSTUDIO 17 ASHTEAD ROAD LONDON",
         "SHOP EXCLUDINGGARAGE 1 TEST ROAD LONDON",
     ]
+
+
+def test_first_pass_splits_non_numeric_underscores_only(duck_con):
+    input_rel = duck_con.sql(
+        """
+        SELECT * FROM (VALUES
+            ('EXCL_PT_BSMT 41 LINTHORPE ROAD LONDON'),
+            ('THE DEPOT_ 18 WENLOCK ROAD LONDON'),
+            ('0401_0120 SOME BUILDING LONDON'),
+            ('NO_1 HIGH STREET LONDON')
+        ) AS t(clean_full_address)
+    """
+    )
+
+    pipeline = create_sql_pipeline(
+        con=duck_con,
+        input_rel=input_rel,
+        stage_specs=[_clean_address_string_first_pass],
+    )
+    result_rel = pipeline.run()
+    rows = [row[0] for row in result_rel.fetchall()]
+
+    assert rows == [
+        "EXCL PT BSMT 41 LINTHORPE ROAD LONDON",
+        "THE DEPOT 18 WENLOCK ROAD LONDON",
+        "0401_0120 SOME BUILDING LONDON",
+        "NO_1 HIGH STREET LONDON",
+    ]
+
+
+def test_full_cleaning_queue_preserves_underscore_split_before_expansion(duck_con):
+    input_rel = duck_con.sql(
+        """
+        SELECT * FROM (VALUES
+            ('test-1', 1, 'EXCL_BSMT 41 LINTHORPE ROAD LONDON', NULL)
+        ) AS t(unique_id, ukam_address_id, address_concat, postcode)
+    """
+    )
+
+    pipeline = create_sql_pipeline(
+        con=duck_con,
+        input_rel=input_rel,
+        stage_specs=QUEUE_CLEAN_FULL_ADDRESS,
+    )
+    result_rel = pipeline.run()
+    rows = result_rel.project("clean_full_address").fetchall()
+
+    assert rows == [("EXCLUDINGBASEMENT 41 LINTHORPE ROAD LONDON",)]
 
 
 ## Checks to confirm our abbreviations file doesn't break the following properties:
