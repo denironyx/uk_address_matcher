@@ -9,6 +9,7 @@ from uk_address_matcher.cleaning.steps.regexes import (
     remove_commas_periods,
     remove_multiple_spaces,
     replace_fwd_slash_with_dash,
+    replace_non_numeric_adjacent_underscores,
     separate_letter_num,
     standarise_num_letter,
     trim,
@@ -181,6 +182,7 @@ def _clean_address_string_first_pass() -> str:
         [
             remove_commas_periods,
             remove_apostrophes,
+            replace_non_numeric_adjacent_underscores,
             remove_multiple_spaces,
             replace_fwd_slash_with_dash,
             # standarise_num_dash_num,  # left commented as in original

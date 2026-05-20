@@ -9,6 +9,10 @@ def remove_apostrophes(input: str):
     return f"regexp_replace({input}, e'\\'', '', 'g')"
 
 
+def replace_non_numeric_adjacent_underscores(input: str):
+    return f"regexp_replace({input}, '(^|[^0-9])_([^0-9]|$)', '\\1 \\2', 'g')"
+
+
 def remove_multiple_spaces(input: str):
     return f"regexp_replace({input}, '\\s+', ' ', 'g')"
 
