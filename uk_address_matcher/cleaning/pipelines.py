@@ -364,8 +364,7 @@ def _register_inverted_index_table(
     if isinstance(existing_alias, str) and _duckdb_table_exists(con, existing_alias):
         con.sql("DROP VIEW IF EXISTS __ukam_inverted_index")
         con.execute(
-            "CREATE TEMP VIEW __ukam_inverted_index AS "
-            f"SELECT * FROM {existing_alias}"
+            f"CREATE TEMP VIEW __ukam_inverted_index AS SELECT * FROM {existing_alias}"
         )
         return "__ukam_inverted_index"
 
