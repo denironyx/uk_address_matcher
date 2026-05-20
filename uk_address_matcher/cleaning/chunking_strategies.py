@@ -624,8 +624,8 @@ def prepare_data_for_matching(
     con.execute(f"DROP TABLE IF EXISTS {cleaned_table_name}")
 
     # Clean up inverted index table if it was registered
-    if inv_idx_table_name is not None:
-        con.execute(f"DROP TABLE IF EXISTS {inv_idx_table_name}")
+    if inv_idx_table_name == "__ukam_inverted_index":
+        _drop_table_and_registered_aliases(con, inv_idx_table_name)
 
     return con.table(processed_table)
 
