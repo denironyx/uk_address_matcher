@@ -69,6 +69,43 @@ def test_abbreviation_normalisation_sql(duck_con, test_abbr_data):
         assert row[clean_idx] == expected
 
 
+def test_rc_and_hmp_abbreviation_expansion(duck_con):
+    """RC -> ROMAN CATHOLIC and HMP -> HIS MAJESTYS PRISON (issue #365).
+
+    Both are single-token keys whose replacement expands to multiple words. The
+    surrounding tokens (CHURCH, PRESBYTERY, ARMLEY, ...) must be left untouched, and the
+    expansion must fire wherever the token appears, not only at the start of the string.
+    """
+    input_rel = duck_con.sql(
+        """
+        SELECT * FROM (VALUES
+            ('RC CHURCH 5 EXAMPLE ROAD LONDON'),
+            ('ST MARYS RC PRIMARY SCHOOL CHURCH LANE'),
+            ('FLAT 2 RC PRESBYTERY 9 CHAPEL STREET'),
+            ('HMP LEEDS ARMLEY'),
+            ('HMP WORMWOOD SCRUBS 160 DU CANE ROAD LONDON')
+        ) AS t(clean_full_address)
+    """
+    )
+
+    pipeline = create_sql_pipeline(
+        con=duck_con,
+        input_rel=input_rel,
+        stage_specs=[_normalise_abbreviations_and_units],
+    )
+    result_rel = pipeline.run()
+    clean_idx = result_rel.columns.index("clean_full_address")
+    actual = [row[clean_idx] for row in result_rel.fetchall()]
+
+    assert actual == [
+        "ROMAN CATHOLIC CHURCH 5 EXAMPLE ROAD LONDON",
+        "ST MARYS ROMAN CATHOLIC PRIMARY SCHOOL CHURCH LANE",
+        "FLAT 2 ROMAN CATHOLIC PRESBYTERY 9 CHAPEL STREET",
+        "HIS MAJESTYS PRISON LEEDS ARMLEY",
+        "HIS MAJESTYS PRISON WORMWOOD SCRUBS 160 DU CANE ROAD LONDON",
+    ]
+
+
 def test_excluding_token_is_joined_with_following_token(duck_con):
     input_rel = duck_con.sql(
         """
