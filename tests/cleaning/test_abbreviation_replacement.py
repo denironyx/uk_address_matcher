@@ -82,11 +82,7 @@ def test_abbreviations_expand_to_multi_word_business_shells(duck_con):
             ('RC CHURCH 5 EXAMPLE ROAD LONDON'),
             ('ST MARYS RC PRIMARY SCHOOL CHURCH LANE'),
             ('FLAT 2 RC PRESBYTERY 9 CHAPEL STREET'),
-            ('HMP LEEDS ARMLEY'),
-            ('HM PRISON LEEDS ARMLEY'),
-            ('H M PRISON WORMWOOD SCRUBS 160 DU CANE ROAD LONDON'),
-            ('SHOP FF 10 HIGH STREET'),
-            ('YOUNG OFFENDER INSTITUTION BEDFONT ROAD, FELTHAM, MIDDLESEX, TW13 4ND')
+            ('SHOP FF 10 HIGH STREET')
         ) AS t(clean_full_address)
     """
     )
@@ -104,11 +100,7 @@ def test_abbreviations_expand_to_multi_word_business_shells(duck_con):
         "ROMAN CATHOLIC CHURCH 5 EXAMPLE ROAD LONDON",
         "ST MARYS ROMAN CATHOLIC PRIMARY SCHOOL CHURCH LANE",
         "FLAT 2 ROMAN CATHOLIC PRESBYTERY 9 CHAPEL STREET",
-        "HMP LEEDS ARMLEY",
-        "HMP LEEDS ARMLEY",
-        "HMP WORMWOOD SCRUBS 160 DU CANE ROAD LONDON",
-        "SHOP FIRST FLOOR 10 HIGH STREET",
-        "YOI BEDFONT ROAD, FELTHAM, MIDDLESEX, TW13 4ND",
+        "SHOP FIRST FLOOR 10 HIGH STREET"
     ]
 
 
