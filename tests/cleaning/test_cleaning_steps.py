@@ -256,7 +256,7 @@ def test_supplied_postcode_does_not_strip_postcode_like_floor_tokens():
             "SE1 2AB",
             "FLAT A THIRD FLOOR EXAMPLE HOUSE LONDON",
         ),
-        ("d", "SW1A 2AA", "10 DOWNING STREET SW1A 2AA"),
+        ("d", "SW1A 2AA", "10 DOWNING STREET"),
         ("e", "SW1A 2AA", "10 DOWNING STREET"),
     ]
 

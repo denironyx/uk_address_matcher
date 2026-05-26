@@ -56,8 +56,9 @@ def _extract_postcode_from_address() -> str:
     uk_postcode_regex = r"\b(?:GIR ?0AA|[A-Z][A-HJ-Y]?\d[A-Z\d]? ?\d[A-Z]{2})\b"
 
     # Extract postcode from address only when one has not been supplied.
-    # The broad UK postcode regex can otherwise strip valid address fragments
-    # such as "D1 2ND" before floor normalisation runs.
+    # When a postcode is supplied, strip postcode-like suffixes only. Running
+    # the broad regex over the whole address can remove valid fragments such as
+    # "D1 2ND" before floor normalisation runs.
     return f"""
     WITH prepared AS (
         SELECT
@@ -73,7 +74,12 @@ def _extract_postcode_from_address() -> str:
         ),
         TRIM(
             CASE
-                WHEN __existing_postcode IS NOT NULL THEN address_concat
+                WHEN __existing_postcode IS NOT NULL THEN regexp_replace(
+                    address_concat,
+                    '\\s+{uk_postcode_regex}$',
+                    '',
+                    'gi'
+                )
                 ELSE regexp_replace(
                     address_concat,
                     '{uk_postcode_regex}',
