@@ -189,6 +189,8 @@
   { "token": "RHS", "replacement": "RIGHT HAND SIDE" },
   { "token": "RT", "replacement": "RIGHT" },
 
+  {"token": "RC",  "replacement": "ROMAN CATHOLIC"},
+
   { "token": "SCH", "replacement": "SCHOOL" },
 
   { "token": "SEC", "replacement": "SECTION" },

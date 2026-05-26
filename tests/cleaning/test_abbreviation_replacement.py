@@ -69,6 +69,41 @@ def test_abbreviation_normalisation_sql(duck_con, test_abbr_data):
         assert row[clean_idx] == expected
 
 
+def test_abbreviations_expand_to_multi_word_business_shells(duck_con):
+    """Abbreviations can expand inside business/unit shells.
+
+    The replacement may add multiple words, but surrounding tokens such as CHURCH,
+    PRESBYTERY, ARMLEY, SHOP, and street names must be preserved. The expansion
+    should also fire wherever the token appears, not only at the start of the string.
+    """
+    input_rel = duck_con.sql(
+        """
+        SELECT * FROM (VALUES
+            ('RC CHURCH 5 EXAMPLE ROAD LONDON'),
+            ('ST MARYS RC PRIMARY SCHOOL CHURCH LANE'),
+            ('FLAT 2 RC PRESBYTERY 9 CHAPEL STREET'),
+            ('SHOP FF 10 HIGH STREET')
+        ) AS t(clean_full_address)
+    """
+    )
+
+    pipeline = create_sql_pipeline(
+        con=duck_con,
+        input_rel=input_rel,
+        stage_specs=[_normalise_abbreviations_and_units],
+    )
+    result_rel = pipeline.run()
+    clean_idx = result_rel.columns.index("clean_full_address")
+    actual = [row[clean_idx] for row in result_rel.fetchall()]
+
+    assert actual == [
+        "ROMAN CATHOLIC CHURCH 5 EXAMPLE ROAD LONDON",
+        "ST MARYS ROMAN CATHOLIC PRIMARY SCHOOL CHURCH LANE",
+        "FLAT 2 ROMAN CATHOLIC PRESBYTERY 9 CHAPEL STREET",
+        "SHOP FIRST FLOOR 10 HIGH STREET",
+    ]
+
+
 def test_excluding_token_is_joined_with_following_token(duck_con):
     input_rel = duck_con.sql(
         """
