@@ -100,7 +100,7 @@ def test_abbreviations_expand_to_multi_word_business_shells(duck_con):
         "ROMAN CATHOLIC CHURCH 5 EXAMPLE ROAD LONDON",
         "ST MARYS ROMAN CATHOLIC PRIMARY SCHOOL CHURCH LANE",
         "FLAT 2 ROMAN CATHOLIC PRESBYTERY 9 CHAPEL STREET",
-        "SHOP FIRST FLOOR 10 HIGH STREET"
+        "SHOP FIRST FLOOR 10 HIGH STREET",
     ]
 
 
