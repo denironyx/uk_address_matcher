@@ -132,7 +132,7 @@
 
   { "token": "HTL", "replacement": "HOTEL" },
 
-  {"token": "HMP", "replacement": "HIS MAJESTYS PRISON"},
+  {"token": "HM PRISON", "replacement": "HMP"},
 
   { "token": "INC", "replacement": "INCORPORATED" },
 

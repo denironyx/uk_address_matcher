@@ -69,12 +69,12 @@ def test_abbreviation_normalisation_sql(duck_con, test_abbr_data):
         assert row[clean_idx] == expected
 
 
-def test_rc_and_hmp_abbreviation_expansion(duck_con):
-    """RC -> ROMAN CATHOLIC and HMP -> HIS MAJESTYS PRISON (issue #365).
+def test_single_token_abbreviations_expand_to_multi_word_business_shells(duck_con):
+    """Single token abbreviations can expand inside business/unit shells.
 
-    Both are single-token keys whose replacement expands to multiple words. The
-    surrounding tokens (CHURCH, PRESBYTERY, ARMLEY, ...) must be left untouched, and the
-    expansion must fire wherever the token appears, not only at the start of the string.
+    The replacement may add multiple words, but surrounding tokens such as CHURCH,
+    PRESBYTERY, ARMLEY, SHOP, and street names must be preserved. The expansion
+    should also fire wherever the token appears, not only at the start of the string.
     """
     input_rel = duck_con.sql(
         """
@@ -82,8 +82,9 @@ def test_rc_and_hmp_abbreviation_expansion(duck_con):
             ('RC CHURCH 5 EXAMPLE ROAD LONDON'),
             ('ST MARYS RC PRIMARY SCHOOL CHURCH LANE'),
             ('FLAT 2 RC PRESBYTERY 9 CHAPEL STREET'),
-            ('HMP LEEDS ARMLEY'),
-            ('HMP WORMWOOD SCRUBS 160 DU CANE ROAD LONDON')
+            ('HM PRISON LEEDS ARMLEY'),
+            ('HM PRISON WORMWOOD SCRUBS 160 DU CANE ROAD LONDON'),
+            ('SHOP FF 10 HIGH STREET')
         ) AS t(clean_full_address)
     """
     )
@@ -101,8 +102,9 @@ def test_rc_and_hmp_abbreviation_expansion(duck_con):
         "ROMAN CATHOLIC CHURCH 5 EXAMPLE ROAD LONDON",
         "ST MARYS ROMAN CATHOLIC PRIMARY SCHOOL CHURCH LANE",
         "FLAT 2 ROMAN CATHOLIC PRESBYTERY 9 CHAPEL STREET",
-        "HIS MAJESTYS PRISON LEEDS ARMLEY",
-        "HIS MAJESTYS PRISON WORMWOOD SCRUBS 160 DU CANE ROAD LONDON",
+        "HMP LEEDS ARMLEY",
+        "HMP WORMWOOD SCRUBS 160 DU CANE ROAD LONDON",
+        "SHOP FIRST FLOOR 10 HIGH STREET",
     ]
 
 
