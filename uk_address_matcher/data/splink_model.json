@@ -14,73 +14,45 @@
     "unique_id_column_name": "ukam_address_id",
     "source_dataset_column_name": "source_dataset",
     "blocking_rules_to_generate_predictions": [
-        {
-            "blocking_rule": "l.numeric_token_1 = r.numeric_token_1 and list_extract(l.unusual_tokens_arr, 1) = list_extract(r.unusual_tokens_arr, 1) and list_extract(l.unusual_tokens_arr, 2) = list_extract(r.unusual_tokens_arr, 2) and split_part(l.postcode, ' ', 1) = split_part(r.postcode, ' ', 1)",
-            "sql_dialect": "duckdb"
-        },
-        {
-            "blocking_rule": "l.numeric_token_1 = r.numeric_token_2 and list_extract(l.unusual_tokens_arr, 1) = list_extract(r.unusual_tokens_arr, 1) and split_part(l.postcode, ' ', 1) = split_part(r.postcode, ' ', 1)",
-            "sql_dialect": "duckdb"
-        },
-        {
-            "blocking_rule": "l.numeric_token_1 = r.numeric_token_2 and list_extract(l.unusual_tokens_arr, 1) = list_extract(r.unusual_tokens_arr, 1) and split_part(l.postcode, ' ', 2) = split_part(r.postcode, ' ', 2)",
-            "sql_dialect": "duckdb"
-        },
-        {
-            "blocking_rule": "l.numeric_token_1 = r.numeric_token_1 and list_extract(l.unusual_tokens_arr, 1) = list_extract(r.unusual_tokens_arr, 2) and list_extract(l.unusual_tokens_arr, 2) = list_extract(r.unusual_tokens_arr, 1) and split_part(l.postcode, ' ', 1) = split_part(r.postcode, ' ', 1)",
-            "sql_dialect": "duckdb"
-        },
-        {
-            "blocking_rule": "l.numeric_token_1 = r.numeric_token_1 and list_extract(l.unusual_tokens_arr, 1) = list_extract(r.unusual_tokens_arr, 2) and split_part(l.postcode, ' ', 2) = split_part(r.postcode, ' ', 2)",
-            "sql_dialect": "duckdb"
-        },
-        {
-            "blocking_rule": "l.numeric_token_1 = r.numeric_token_1 and l.postcode = r.postcode",
-            "sql_dialect": "duckdb"
-        },
-        {
-            "blocking_rule": "l.numeric_token_1 = r.numeric_token_2 and l.postcode = r.postcode",
-            "sql_dialect": "duckdb"
-        },
-        {
-            "blocking_rule": "list_extract(l.unusual_tokens_arr, 1) = list_extract(r.unusual_tokens_arr, 2) and l.postcode = r.postcode",
-            "sql_dialect": "duckdb"
-        },
-        {
-            "blocking_rule": "l.numeric_token_2 = r.numeric_token_2 and list_extract(l.unusual_tokens_arr, 1) = list_extract(r.unusual_tokens_arr, 1) and split_part(l.postcode, ' ', 1) = split_part(r.postcode, ' ', 1)",
-            "sql_dialect": "duckdb"
-        },
-        {
-            "blocking_rule": "l.numeric_token_1 = r.numeric_token_1 and list_extract(l.unusual_tokens_arr, 1) = list_extract(r.unusual_tokens_arr, 1) and split_part(l.postcode, ' ', 2) = split_part(r.postcode, ' ', 2)",
-            "sql_dialect": "duckdb"
-        },
-        {
-            "blocking_rule": "l.numeric_token_2 = r.numeric_token_2 and list_extract(l.unusual_tokens_arr, 1) = list_extract(r.unusual_tokens_arr, 1) and split_part(l.postcode, ' ', 2) = split_part(r.postcode, ' ', 2)",
-            "sql_dialect": "duckdb"
-        },
-        {
-            "blocking_rule": "l.numeric_token_2 = r.numeric_token_2 and l.postcode = r.postcode",
-            "sql_dialect": "duckdb"
-        },
-        {
-            "blocking_rule": "l.numeric_token_1 = r.numeric_token_1 and l.numeric_token_2 = r.numeric_token_2 and split_part(l.postcode, ' ', 1) = split_part(r.postcode, ' ', 1)",
-            "sql_dialect": "duckdb"
-        },
-        {
-            "blocking_rule": "l.numeric_token_1 = r.numeric_token_1 and l.numeric_token_2 = r.numeric_token_2 and split_part(l.postcode, ' ', 2) = split_part(r.postcode, ' ', 2)",
-            "sql_dialect": "duckdb"
-        },
-        {
-            "blocking_rule": "list_extract(l.extremely_unusual_tokens_arr, 1) = list_extract(r.extremely_unusual_tokens_arr, 1) and split_part(l.postcode, ' ', 1) = split_part(r.postcode, ' ', 1)",
-            "sql_dialect": "duckdb"
-        },
-        {
-            "blocking_rule": "l.exploding_unique_ids = r.exploding_unique_ids",
-            "sql_dialect": "duckdb",
-            "arrays_to_explode": [
-                "exploding_unique_ids"
-            ]
-        }
+            {
+                "blocking_rule": "l.postcode = r.postcode and ((l.numeric_token_1 = r.numeric_token_1) or (l.numeric_token_2 = r.numeric_token_2))",
+                "sql_dialect": "duckdb"
+            },
+            {
+                "blocking_rule": "l.postcode = r.postcode and ((l.numeric_token_2 = r.numeric_token_1) or (l.numeric_token_1 = r.numeric_token_2))",
+                "sql_dialect": "duckdb"
+            },
+            {
+                "blocking_rule": "l.numeric_token_1 = r.numeric_token_1 and list_extract(l.unusual_tokens_arr, 1) = list_extract(r.unusual_tokens_arr, 1) and list_extract(l.unusual_tokens_arr, 2) = list_extract(r.unusual_tokens_arr, 2) and split_part(l.postcode, ' ', 1) = split_part(r.postcode, ' ', 1)",
+                "sql_dialect": "duckdb"
+            },
+            {
+                "blocking_rule": "l.numeric_token_1 = r.numeric_token_1 and list_extract(l.unusual_tokens_arr, 1) = list_extract(r.unusual_tokens_arr, 2) and split_part(l.postcode, ' ', 2) = split_part(r.postcode, ' ', 2)",
+                "sql_dialect": "duckdb"
+            },
+            {
+                "blocking_rule": "l.numeric_token_1 = r.numeric_token_1 and l.postcode = r.postcode",
+                "sql_dialect": "duckdb"
+            },
+            {
+                "blocking_rule": "list_extract(l.unusual_tokens_arr, 1) = list_extract(r.unusual_tokens_arr, 2) and l.postcode = r.postcode",
+                "sql_dialect": "duckdb"
+            },
+            {
+                "blocking_rule": "l.numeric_token_2 = r.numeric_token_2 and list_extract(l.unusual_tokens_arr, 1) = list_extract(r.unusual_tokens_arr, 1) and split_part(l.postcode, ' ', 1) = split_part(r.postcode, ' ', 1)",
+                "sql_dialect": "duckdb"
+            },
+            {
+                "blocking_rule": "list_extract(l.extremely_unusual_tokens_arr, 1) = list_extract(r.extremely_unusual_tokens_arr, 1) and split_part(l.postcode, ' ', 1) = split_part(r.postcode, ' ', 1)",
+                "sql_dialect": "duckdb"
+            },
+            {
+                "blocking_rule": "l.exploding_unique_ids = r.exploding_unique_ids",
+                "sql_dialect": "duckdb",
+                "arrays_to_explode": [
+                    "exploding_unique_ids"
+                ]
+            }
     ],
     "comparisons": [
         {

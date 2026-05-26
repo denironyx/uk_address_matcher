@@ -11,6 +11,8 @@ def test_example_matching():
 
     # Set flag to limit the number of records for testing
     env["TEST_LIMIT"] = "1"
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
     timeout_seconds = int(env.get("EXAMPLE_SCRIPT_TIMEOUT", "30"))
 
     result = subprocess.run(
@@ -18,6 +20,7 @@ def test_example_matching():
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=timeout_seconds,
     )
 

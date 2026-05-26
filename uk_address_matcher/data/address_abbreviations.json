@@ -1,5 +1,6 @@
 [
   { "token": "&", "replacement": "AND" },
+  { "token": "@", "replacement": "AT" },
 
   { "token": "APT", "replacement": "APARTMENT" },
   { "token": "APTS", "replacement": "APARTMENTS" },
