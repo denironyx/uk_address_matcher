@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import re
+from importlib import resources
 from typing import Final
 
 from uk_address_matcher.cleaning.steps.regexes import (
@@ -16,6 +19,39 @@ from uk_address_matcher.cleaning.steps.regexes import (
 )
 from uk_address_matcher.sql_pipeline.helpers import package_resource_read_sql
 from uk_address_matcher.sql_pipeline.steps import CTEStep, pipeline_stage
+
+
+def _sql_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _normalise_abbreviation_phrase_expr(address_expr: str) -> str:
+    with resources.files("uk_address_matcher.data").joinpath(
+        "address_abbreviations.json"
+    ).open("r", encoding="utf-8") as f:
+        rows = json.load(f)
+
+    phrase_rows = [
+        (row["token"].strip().upper(), row["replacement"].strip())
+        for row in rows
+        if " " in row["token"].strip()
+    ]
+    phrase_rows.sort(key=lambda row: (-len(row[0]), row[0]))
+
+    expr = address_expr
+    for token, replacement in phrase_rows:
+        token_pattern = r"\s+".join(re.escape(part) for part in token.split())
+        pattern = rf"(^|\s){token_pattern}(\s|$)"
+        replacement_pattern = rf"\1{replacement}\2"
+        expr = (
+            "regexp_replace("
+            f"{expr}, "
+            f"{_sql_literal(pattern)}, "
+            f"{_sql_literal(replacement_pattern)}, "
+            "'g'"
+            ")"
+        )
+    return expr
 
 
 @pipeline_stage(
@@ -362,19 +398,23 @@ def _normalise_abbreviations_and_units() -> list[CTEStep]:
     FROM {abbr_lookup}
     """
 
-    # 3) Vectorised transform over token list, then join back to a string
-    cleaned_sql = """
+    phrase_normalised_address = _normalise_abbreviation_phrase_expr(
+        "COALESCE(address.clean_full_address, '')"
+    )
+
+    # 3) Apply phrase replacements, then vectorise over token list and join to a string
+    cleaned_sql = f"""
     SELECT
       address.* EXCLUDE (clean_full_address),
       array_to_string(
         list_transform(
-        string_split(COALESCE(address.clean_full_address, ''), ' '),
+        string_split({phrase_normalised_address}, ' '),
         x -> COALESCE(map_extract(m.abbr_map, x)[1], x)
         ),
         ' '
       ) AS clean_full_address
-    FROM {input} address
-    CROSS JOIN {abbr_map} m
+    FROM {{input}} address
+    CROSS JOIN {{abbr_map}} m
     """
 
     steps = [

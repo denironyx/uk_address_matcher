@@ -133,6 +133,8 @@
   { "token": "HTL", "replacement": "HOTEL" },
 
   {"token": "HM PRISON", "replacement": "HMP"},
+  {"token": "H M PRISON", "replacement": "HMP"},
+
 
   { "token": "INC", "replacement": "INCORPORATED" },
 
@@ -240,5 +242,7 @@
 
   { "token": "WKS", "replacement": "WORKS" },
 
-  { "token": "WY", "replacement": "WAY" }
+  { "token": "WY", "replacement": "WAY" },
+
+  { "token": "YOUNG OFFENDER INSTITUTION", "replacement": "YOI" }
 ]
