@@ -34,6 +34,12 @@ There are two primary ways to filter your input data:
 
 For Ordnance Survey data, see [Working with Ordnance Survey data](ordnance_survey.md#filtering-before-canonical-preparation) for guidance on filtering by `classificationcode`, excluding parent shells, and deciding whether a rule belongs in canonical preparation or only at match time.
 
+In practice, the biggest wins usually come from classification first. A simple
+residential filter already removes most clearly non-residential oddities such as
+`ADVERTISING` and `TELEPHONE BOX`, while smaller residential ancillary groups
+such as `RG`, `RB`, and `RC` are where garage, parking, and shared-space rows
+tend to survive.
+
 #### How to filter
 
 The mechanism for filtering depends on whether you are [pre-processing your canonical dataset or processing it on the fly](https://moj-analytical-services.github.io/uk_address_matcher/get_started/#choose-whether-to-pre-process-your-canonical-dataset).
@@ -92,9 +98,9 @@ prepare_canonical_folder(
 )
 ```
 
-For concrete recipe-style filters, including residential-only, parent-shell
-exclusion, and `CAR PARK SPACE`-style heuristics, see [Working with Ordnance
-Survey data](ordnance_survey.md#filtering-recipes).
+For concrete recipe-style filters, including a household-style subset that
+excludes `RG`, `PP`, `RB`, `RC`, and common parking prefixes, see [Working with
+Ordnance Survey data](ordnance_survey.md#quick-filtering-recipes).
 
 However, if different users will need different filters, you can also apply a filter _after_ pre-processing the whole dataset.  This will result in a small degradation in accuracy because indices and term frequencies will be computed globally, making them less discriminative.
 

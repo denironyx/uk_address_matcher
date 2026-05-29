@@ -63,6 +63,7 @@ You should now have the following values:
     - `OS_PROJECT_API_KEY`
     - `OS_PROJECT_API_SECRET`
 
+---
 
 ## Step 2: Create a folder for your project and install tooling
 
@@ -74,6 +75,8 @@ mkdir address_project && cd address_project
 uv init --bare
 uv add uk_address_matcher
 ```
+
+---
 
 ## Step 3: Build the canonical dataset
 
@@ -96,6 +99,8 @@ uvx --from ukam-os-builder ukam-os-build
 By default the output lands in `data/output/`. Unless you set `num_chunks=1`,
 the output is a folder of Parquet files representing a single table. DuckDB
 reads them as one table via `con.read_parquet('data/output/*.parquet')`.
+
+---
 
 ## Step 4: Pre-process for matching (national-scale only)
 
@@ -148,19 +153,15 @@ By contrast, `canonical_address_filter=` on `AddressMatcher` is most useful when
 different users need different subsets from the same prepared folder, or when
 you are running exploratory experiments.
 
-### Do not treat policy exclusions as text cleaning
+!!! note "Do not treat policy exclusions as text cleaning"
+        Be careful not to mix up two different concerns:
 
-Be careful not to mix up two different concerns:
+        - text cleaning, such as normalising abbreviations or whitespace
+        - candidate-pool policy, such as deciding that `RG` garages, `PP` parent
+            shells, or `CAR PARK SPACE` records should not be eligible matches
 
-- text cleaning, such as normalising abbreviations or whitespace
-- candidate-pool policy, such as deciding that `RG` garages or `P` parent shells
-  should not be eligible matches
-
-If a record should not participate in matching, prefer filtering the canonical
-rows rather than stripping words from `clean_full_address`.
-
-For example, excluding records that start with `CAR PARK SPACE` is usually a
-candidate-pool decision, not a string-normalisation rule.
+        If a record should not participate in matching, prefer filtering the
+        canonical rows rather than stripping words from `clean_full_address`.
 
 ### AddressBase classification codes
 
@@ -173,58 +174,46 @@ primary, secondary, tertiary, and quaternary levels.
 - Practical AddressBase summary:
   [Ideal Postcodes classification guide](https://docs.ideal-postcodes.co.uk/docs/data/classification-codes/)
 
-The main top-level groups are:
+??? info "Top-level groups"
+    - `C`: Commercial. Usually exclude for residential-only matching.
+    - `L`: Land. Usually exclude unless your messy data contains land parcels or parks.
+    - `M`: Military. Usually exclude unless you expect military addresses.
+    - `O`: Other, Ordnance Survey only. Usually exclude.
+    - `P`: Parent shell. Often exclude from candidate pools.
+    - `R`: Residential. Usually include for residential matching.
+    - `U`: Unclassified. Review carefully before including.
+    - `X`: Dual use. Review carefully, may be useful in mixed datasets.
+    - `Z`: Object of interest. Usually exclude from postal-style matching.
 
-| Code prefix | Meaning | Typical matching implication |
-|---|---|---|
-| `C` | Commercial | Usually exclude for residential-only matching |
-| `L` | Land | Usually exclude unless your messy data contains land parcels or parks |
-| `M` | Military | Usually exclude unless you expect military addresses |
-| `O` | Other, Ordnance Survey only | Usually exclude |
-| `P` | Parent shell | Often exclude from candidate pools |
-| `R` | Residential | Usually include for residential matching |
-| `U` | Unclassified | Review carefully before including |
-| `X` | Dual use | Review carefully, may be useful in mixed datasets |
-| `Z` | Object of interest | Usually exclude from postal-style matching |
+??? info "Residential secondary groups"
+    - `RD`: Dwelling. Usually include.
+    - `RG`: Garage. Often exclude for household or council-tax matching.
+    - `RH`: House in multiple occupation. Often include, depending on the source data.
+    - `RI`: Residential institution. Include only if your messy data covers care homes, halls, prisons, and similar settings.
 
-The most important residential secondary groups are:
+??? info "Commercial secondary groups"
+    - `CA`: Agricultural.
+    - `CB`: Ancillary building.
+    - `CC`: Community services.
+    - `CE`: Education.
+    - `CH`: Hotel, motel, boarding, guest house.
+    - `CI`: Industrial.
+    - `CL`: Leisure.
+    - `CM`: Medical.
+    - `CN`: Animal centre.
+    - `CO`: Office.
+    - `CR`: Retail.
+    - `CT`: Transport.
+    - `CU`: Utility.
+    - `CX`: Emergency or rescue service.
 
-| Code | Meaning | Typical matching implication |
-|---|---|---|
-| `RD` | Dwelling | Usually include |
-| `RG` | Garage | Often exclude for household or council-tax matching |
-| `RH` | House in multiple occupation | Often include, depending on the source data |
-| `RI` | Residential institution | Include only if your messy data covers care homes, halls, prisons, and similar settings |
-
-Common commercial secondary groups include:
-
-| Code | Meaning |
-|---|---|
-| `CA` | Agricultural |
-| `CB` | Ancillary building |
-| `CC` | Community services |
-| `CE` | Education |
-| `CH` | Hotel, motel, boarding, guest house |
-| `CI` | Industrial |
-| `CL` | Leisure |
-| `CM` | Medical |
-| `CN` | Animal centre |
-| `CO` | Office |
-| `CR` | Retail |
-| `CT` | Transport |
-| `CU` | Utility |
-| `CX` | Emergency or rescue service |
-
-Other commonly relevant non-residential groups are:
-
-| Code | Meaning |
-|---|---|
-| `LD` | Land, development |
-| `LP` | Land, park |
-| `PP` | Parent shell, property shell |
-| `OR` | Royal Mail infrastructure |
-| `UC` | Awaiting classification |
-| `UP` | Pending internal investigation |
+??? info "Other commonly relevant non-residential groups"
+    - `LD`: Land, development.
+    - `LP`: Land, park.
+    - `PP`: Parent shell, property shell.
+    - `OR`: Royal Mail infrastructure.
+    - `UC`: Awaiting classification.
+    - `UP`: Pending internal investigation.
 
 Ordnance Survey also defines deeper levels. For example:
 
@@ -237,91 +226,104 @@ OS page above rather than copying the entire code set into local documentation.
 
 ### Recommended filtering approach
 
-For most projects, use this order of preference:
+Use this rule of thumb:
 
-1. Filter the raw canonical data before `prepare_canonical_folder()` if the rule
-    is stable and should apply to all users.
-2. Use `canonical_address_filter=` only when different users need different
-    subsets from the same prepared folder.
-3. Avoid implementing record-level policy by stripping address prefixes during
-    cleaning unless you are certain the prefix is lexical noise rather than a
-    meaningful subtype.
+| Situation | Best place to apply the rule | Why |
+|---|---|---|
+| A stable organisation-wide exclusion | Before `prepare_canonical_folder()` | The prepared data, term frequencies, and index all reflect the reduced candidate pool |
+| Different users need different subsets | `canonical_address_filter=` at match time | You can reuse one prepared folder while still narrowing eligibility |
 
-### Filtering recipes
+!!! tip "Best default for most residential OS workflows"
+    Start by keeping only residential rows, excluding known garage and parent
+    shell classes, and then excluding the smaller ancillary residential groups
+    that often contain parking and shared-facility rows.
 
-Treat the following as starting-point recipes rather than universal rules.
-Prefer classification-based exclusions where the source supports them, and use
-text-pattern exclusions as a fallback heuristic that you validate on your own
-data.
+### Quick filtering recipes
 
-Residential only:
+!!! warning "Residential Ordnance Survey data often contains non-household rows"
+    Some residential records in Ordnance Survey point to car park spaces,
+    garages, bins, communal stores, and similar ancillary objects rather than
+    homes. For household-style matching, you will usually want to omit these
+    before linkage begins.
 
-```python
-df_canonical = df_canonical.filter("substr(classificationcode, 1, 1) = 'R'")
-```
+The recipes below show a practical way to do that quickly.
 
-Residential only, excluding garages and parent shells:
+=== "Residential only"
 
-```python
-from uk_address_matcher import prepare_canonical_folder
+    ```python
+    df_canonical = df_canonical.filter("substr(classificationcode, 1, 1) = 'R'")
+    ```
 
-prepare_canonical_folder(
-    df_canonical.filter(
+=== "Residential household subset"
+
+    ```python
+    from uk_address_matcher import prepare_canonical_folder
+
+    residential_household_filter = (
         "substr(classificationcode, 1, 1) = 'R' "
         "AND substr(classificationcode, 1, 2) <> 'RG' "
-        "AND substr(classificationcode, 1, 2) <> 'PP'"
-    ),
-    output_folder="./ukam_prepared_canonical",
-    con=con,
-    overwrite=True,
-)
-```
-
-Residential only, excluding ancillary residential records with a local prefix
-heuristic:
-
-```python
-from uk_address_matcher import prepare_canonical_folder
-
-prepare_canonical_folder(
-    df_canonical.filter(
-        "substr(classificationcode, 1, 1) = 'R' "
+        "AND substr(classificationcode, 1, 2) <> 'PP' "
+        "AND substr(classificationcode, 1, 2) <> 'RB' "
+        "AND substr(classificationcode, 1, 2) <> 'RC' "
         "AND clean_full_address NOT LIKE 'CAR PARK SPACE%' "
-        "AND clean_full_address NOT LIKE 'GARAGE %'"
-    ),
-    output_folder="./ukam_prepared_canonical",
-    con=con,
-    overwrite=True,
-)
-```
+        "AND clean_full_address NOT LIKE 'CAR PARK %' "
+        "AND clean_full_address NOT LIKE 'PARKING SPACE%' "
+        "AND clean_full_address NOT LIKE 'GARAGE %' "
+        "AND clean_full_address NOT LIKE 'GARAGES %'"
+    )
 
-Parent shells only:
+    prepare_canonical_folder(
+        df_canonical.filter(residential_household_filter),
+        output_folder="./ukam_prepared_canonical",
+        con=con,
+        overwrite=True,
+    )
+    ```
 
-```python
-df_parent_shells = df_canonical.filter("substr(classificationcode, 1, 2) = 'PP'")
-```
+    This is the clearest starting recipe for a household-style subset. It keeps
+    ordinary residential rows while excluding:
+
+    - `RG` garages
+    - `PP` parent shells
+    - `RB` ancillary/shared residential rows such as bins, stores, and communal spaces
+    - `RC` parking and hardstanding-style residential rows
+    - parking-style prefixes that still leak through as address text
+
+=== "Prefix exclusions only"
+
+    ```python
+    prefix_filter = (
+        "clean_full_address NOT LIKE 'CAR PARK SPACE%' "
+        "AND clean_full_address NOT LIKE 'CAR PARK %' "
+        "AND clean_full_address NOT LIKE 'PARKING SPACE%' "
+        "AND clean_full_address NOT LIKE 'GARAGE %' "
+        "AND clean_full_address NOT LIKE 'GARAGES %'"
+    )
+
+    df_canonical = df_canonical.filter(prefix_filter)
+    ```
+
+    Use this only when you need a quick local heuristic. It is less robust than
+    excluding the relevant classification groups first.
+
+=== "Parent shells only"
+
+    ```python
+    df_parent_shells = df_canonical.filter("substr(classificationcode, 1, 2) = 'PP'")
+    ```
 
 If you need different subsets for different users, keep the broader prepared
 folder and apply the restriction later with `canonical_address_filter=`.
 
-### Benchmark local heuristics before standardising them
-
-Text-pattern exclusions such as `CAR PARK SPACE%` are often useful, but they are
-not as stable as top-level classification filters. Before adopting one as an
-organisation-wide policy:
-
-1. Benchmark it against the same-stage baseline for your target dataset.
-2. Read the overlay precision-recall chart, not just the headline metrics.
-3. Check whether gains are broad or only come from a narrow recall band.
-4. Promote it into standard documentation or helper code only if it helps
-   consistently across more than one representative dataset.
-
-This keeps the core API generic while still letting you build up a catalogue of
-tested filtering recipes over time.
+---
 
 ## Step 5: Match
 
 Create a script called `match.py` with the following content.
+
+If you pass `canonical_address_filter=`, the value should be a DuckDB SQL
+predicate over the canonical rows. In other words, write the part that would go
+after `WHERE`, not a full `SELECT` statement.
 
 === "Local / regional"
 
@@ -345,6 +347,49 @@ Create a script called `match.py` with the following content.
     result.matches().show(max_width=10000)
 
     ```
+
+
+
+=== "Match with common exclusions"
+
+    ```python
+    import duckdb
+    from uk_address_matcher import AddressMatcher
+
+    con = duckdb.connect()
+    df_messy = con.read_parquet("messy_addresses.parquet")
+
+    common_exclusions = (
+        # Keep residential rows only.
+        "substr(classificationcode, 1, 1) = 'R' "
+        # Remove garages and parent shells.
+        "AND substr(classificationcode, 1, 2) <> 'RG' "
+        "AND substr(classificationcode, 1, 2) <> 'PP' "
+        # Remove ancillary/shared residential rows and parking-style residential rows.
+        "AND substr(classificationcode, 1, 2) <> 'RB' "
+        "AND substr(classificationcode, 1, 2) <> 'RC' "
+        # Remove parking and garage-style address text that can still leak through.
+        "AND clean_full_address NOT LIKE 'CAR PARK SPACE%' "
+        "AND clean_full_address NOT LIKE 'CAR PARK %' "
+        "AND clean_full_address NOT LIKE 'PARKING SPACE%' "
+        "AND clean_full_address NOT LIKE 'GARAGE %' "
+        "AND clean_full_address NOT LIKE 'GARAGES %'"
+    )
+
+    matcher = AddressMatcher(
+        canonical_addresses="./ukam_prepared_canonical",
+        addresses_to_match=df_messy,
+        canonical_address_filter=common_exclusions,
+        con=con,
+    )
+
+    result = matcher.match()
+    result.matches().show(max_width=10000)
+    ```
+
+    This is useful when you want to trial a household-style subset quickly
+    without rebuilding the prepared folder first. If the exclusions become
+    standard policy, move them earlier into the Step 4 preparation query.
 
 
 
