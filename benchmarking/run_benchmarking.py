@@ -5,6 +5,7 @@ import logging
 from benchmarking.constants import (
     APPLY_CANONICAL_FILTER,
     BENCHMARK_RESULTS_ROOT,
+    CANONICAL_FILTER_SQL,
     CLEANING_NUM_CHUNKS,
     SPLINK_BASELINE_WEIGHT,
     SPLINK_COMPARISON_WEIGHTS,
@@ -16,7 +17,6 @@ from benchmarking.insights.reporting import (
 from benchmarking.insights.types import BenchmarkOutputOptions
 from benchmarking.runner import print_available_datasets, run_selected_datasets
 from benchmarking.settings import (
-    CANONICAL_FILTER_SQL,
     CANONICAL_PATH,
     SAMPLE_MODE,
 )
@@ -29,16 +29,17 @@ logger = logging.getLogger(__name__)
 
 # SELECTED_DATASETS: str | list[str] = "all"
 SELECTED_DATASETS: str | list[str] = "hackney"
+# SELECTED_DATASETS: str | list[str] = "aberdeenshire"
 # SELECTED_DATASETS: str | list[str] = "lambeth_llpg"
 STAGES = [
-    ExactMatchStage(),
+    ExactMatchStage(True),
     PeeledAddressStage(),
     SplinkStage(final_match_weight_threshold=SPLINK_BASELINE_WEIGHT),
 ]
 # Set to a persisted run hash to force a specific baseline, or use "latest"
 # to compare against the latest other persisted run for the same dataset.
 # Run IDs are preferred; internal dedupe hashes are still accepted for older runs.
-COMPARISON_BASELINE_RUN_ID: str | None = "latest"
+COMPARISON_BASELINE_RUN_ID: str | None = "bc216071cb56fb21"
 
 
 # Defaults: print benchmark summaries and persistence output.
@@ -49,6 +50,7 @@ OUTPUT_OPTIONS = BenchmarkOutputOptions(
     show_similarity_score_checks=False,
     show_successful_matches=False,
     show_unmatched_records=False,
+    show_splink_comparisons=False,
 )
 
 print(f"Applying canonical filter: {APPLY_CANONICAL_FILTER}")
