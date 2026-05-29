@@ -45,10 +45,13 @@ Run a benchmark experiment for `uk_address_matcher` using this workflow:
 
 8. **Use the overlay precision-recall chart as the primary chart**
    - Prefer the chart produced via the comparison flow that uses `uk_address_matcher/analysis/overlay_precision_recall_charts.py`.
+   - Read the persisted overlay Vega-Lite spec at `charts/precision_recall_overlay_<baseline>_vs_<current>.vl.json` when it exists.
+   - Base the final conclusion on that overlay spec first, not only on headline metric deltas.
    - Interpret it explicitly:
      - where the comparison is better or worse,
      - whether the gain is broad or localised,
      - whether false positives rise materially.
+   - If the overlay spec and the headline summary disagree, say so explicitly and treat the overlay as the primary evidence.
 
 9. **If the user wants explanation, split the effect cleanly**
    - Separate model-change effect from threshold-change effect.
