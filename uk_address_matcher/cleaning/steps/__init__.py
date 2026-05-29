@@ -40,6 +40,7 @@ from uk_address_matcher.cleaning.steps.token_parsing import (
     _parse_out_business_unit,
     _parse_out_flat_position_and_letter,
     _parse_out_numbers,
+    _parse_out_sub_premise_location,
     _separate_distinguishing_start_tokens_from_with_respect_to_adjacent_records,
 )
 from uk_address_matcher.cleaning.steps.tokenisation import (
@@ -50,6 +51,7 @@ from uk_address_matcher.cleaning.steps.tokenisation import (
 __all__ = [
     # token_parsing
     "_parse_out_flat_position_and_letter",
+    "_parse_out_sub_premise_location",
     "_parse_out_business_unit",
     "_parse_out_numbers",
     "_clean_address_string_second_pass",
