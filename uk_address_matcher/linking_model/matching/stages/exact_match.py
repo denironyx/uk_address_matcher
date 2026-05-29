@@ -37,6 +37,11 @@ def _flat_field_compatibility_sql() -> str:
            OR canon.flat_positional IS NULL
            OR messy.flat_positional = canon.flat_positional
        )
+       AND (
+           messy.sub_premise_location IS NULL
+           OR canon.sub_premise_location IS NULL
+           OR messy.sub_premise_location = canon.sub_premise_location
+       )
     """
 
 
@@ -158,6 +163,7 @@ def _exact_matches(
         ",\n                messy.flat_number,"
         "\n                messy.flat_letter,"
         "\n                messy.flat_positional,"
+        "\n                messy.sub_premise_location,"
         "\n                messy.has_business_unit,"
         "\n                messy.business_unit_id,"
         "\n                messy.numeric_tokens"
@@ -168,6 +174,7 @@ def _exact_matches(
         ",\n                canon.flat_number,"
         "\n                canon.flat_letter,"
         "\n                canon.flat_positional,"
+        "\n                canon.sub_premise_location,"
         "\n                canon.has_business_unit,"
         "\n                canon.business_unit_id,"
         "\n                canon.numeric_tokens"
@@ -179,6 +186,7 @@ def _exact_matches(
             base.flat_number,
             base.flat_letter,
             base.flat_positional,
+            base.sub_premise_location,
             base.has_business_unit,
             base.business_unit_id,
             base.numeric_tokens"""
@@ -341,6 +349,7 @@ def _exact_matches(
                 MIN(canon.flat_number) AS flat_number,
                 MIN(canon.flat_letter) AS flat_letter,
                 MIN(canon.flat_positional) AS flat_positional,
+                MIN(canon.sub_premise_location) AS sub_premise_location,
                 BOOL_OR(COALESCE(canon.has_business_unit, FALSE)) AS has_business_unit,
                 MIN(canon.business_unit_id) AS business_unit_id,
                 BOOL_OR(
