@@ -33,6 +33,8 @@ SPLINK_COMPARISON_WEIGHTS: list[float] | None = None
 TOP_K_PRECISION_AT_METRICS: list[int] = [1, 3, 5]
 
 # Set this to one of the recipe constants above to enable a benchmark filter.
-CANONICAL_FILTER_SQL: str | None = None
+CANONICAL_FILTER_SQL: str | None = (
+    RESIDENTIAL_WITHOUT_ANCILLARY_PREFIXES_CANONICAL_FILTER_SQL
+)
 APPLY_CANONICAL_FILTER = CANONICAL_FILTER_SQL is not None
 CLEANING_NUM_CHUNKS = 1
