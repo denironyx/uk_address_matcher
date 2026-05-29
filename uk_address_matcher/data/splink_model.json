@@ -223,6 +223,43 @@
             "comparison_description": "Combined flat identity comparison"
         },
         {
+            "output_column_name": "sub_premise_location",
+            "comparison_levels": [
+                {
+                    "sql_condition": "\"sub_premise_location_l\" IS NULL AND \"sub_premise_location_r\" IS NULL",
+                    "label_for_charts": "Both null (no sub-premise location info)",
+                    "fix_m_probability": false,
+                    "fix_u_probability": false,
+                    "is_null_level": true
+                },
+                {
+                    "sql_condition": "sub_premise_location_l = sub_premise_location_r",
+                    "label_for_charts": "Exact match on sub-premise location",
+                    "m_probability": 8.0,
+                    "u_probability": 1,
+                    "fix_m_probability": true,
+                    "fix_u_probability": true
+                },
+                {
+                    "sql_condition": "(sub_premise_location_l IS NULL AND sub_premise_location_r IS NOT NULL) OR (sub_premise_location_l IS NOT NULL AND sub_premise_location_r IS NULL)",
+                    "label_for_charts": "One-sided sub-premise location info",
+                    "m_probability": 1,
+                    "u_probability": 1,
+                    "fix_m_probability": true,
+                    "fix_u_probability": true
+                },
+                {
+                    "sql_condition": "ELSE",
+                    "label_for_charts": "Sub-premise location differs",
+                    "m_probability": 0.125,
+                    "u_probability": 1,
+                    "fix_m_probability": true,
+                    "fix_u_probability": true
+                }
+            ],
+            "comparison_description": "Sub-premise location comparison"
+        },
+        {
             "output_column_name": "numeric_token_1",
             "comparison_levels": [
                 {
