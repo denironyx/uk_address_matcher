@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Optional
 
 from uk_address_matcher.linking_model.matching.stages.base_stage import MatchingStage
-from uk_address_matcher.linking_model.splink_model import BlockingRuleProfile
 
 if TYPE_CHECKING:
     import duckdb
@@ -56,8 +55,6 @@ class SplinkStage(MatchingStage):
             blocking rule when generating Splink candidate pairs.
         include_outside_postcode_block: Whether to include broader blocking
             rules that can generate candidate pairs across postcode boundaries.
-        blocking_rule_profile: Blocking rule preset. Use ``"light"`` to
-            disable a small set of low-value rules that mainly add runtime.
         additional_columns_to_retain: Extra columns to keep in the Splink
             predictions and downstream inspection output.
         settings: Optional custom Splink settings object. Leave as ``None`` to
@@ -81,7 +78,6 @@ class SplinkStage(MatchingStage):
     # Blocking configuration
     include_full_postcode_block: bool = False
     include_outside_postcode_block: bool = True
-    blocking_rule_profile: BlockingRuleProfile = "default"
 
     # Additional columns to retain through Splink
     additional_columns_to_retain: Optional[list[str]] = field(default=None)
@@ -131,7 +127,6 @@ class SplinkStage(MatchingStage):
             con=con,
             include_full_postcode_block=self.include_full_postcode_block,
             include_outside_postcode_block=self.include_outside_postcode_block,
-            blocking_rule_profile=self.blocking_rule_profile,
             additional_columns_to_retain=self.additional_columns_to_retain,
             retain_intermediate_calculation_columns=(
                 self.retain_intermediate_calculation_columns
