@@ -194,15 +194,6 @@ def _parse_out_flat_position_and_letter():
         r"^\s*(GROUND|FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|"
         r"SEVENTH|EIGHTH|NINTH|TENTH|TOP)\s+\d"
     )
-    # Side marker (R/L or RIGHT/LEFT) sitting immediately after an expanded
-    # floor position. Compact forms like GFR, GR-R, 1F-L, 10L-L are rewritten
-    # to "{NAME} FLOOR {RIGHT|LEFT}" by the abbreviation normalisation stage
-    # before the parser runs, so we only recognise the expanded form here.
-    expanded_floor_side = (
-        r"\b(?:GROUND|FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|SEVENTH|"
-        r"EIGHTH|NINTH|TENTH)\s+FLOOR\s+(?:([LR])|(LEFT|RIGHT))\b"
-    )
-
     # Core token patterns (RE2-compatible; avoid lookbehind)
     num_letter_anywhere = r"\b(\d{1,4})([A-Za-z])\b"  # e.g., 15B (anywhere)
     leading_num_letter = (
@@ -227,7 +218,7 @@ def _parse_out_flat_position_and_letter():
     SELECT
         i.*,
 
-        -- 1) Positional/floor signal
+        -- 1) Positional/floor signal from the address string itself.
         CASE
             WHEN NULLIF(
                 regexp_extract(i.clean_full_address, '{floor_positions}', 1),
@@ -284,18 +275,6 @@ def _parse_out_flat_position_and_letter():
                 regexp_extract(i.clean_full_address, '{block_letter}', 1),
                 ''
             ),
-            NULLIF(
-                regexp_extract(i.clean_full_address, '{expanded_floor_side}', 1),
-                ''
-            ),
-            CASE NULLIF(
-                regexp_extract(i.clean_full_address, '{expanded_floor_side}', 2),
-                ''
-            )
-                WHEN 'LEFT' THEN 'L'
-                WHEN 'RIGHT' THEN 'R'
-                ELSE NULL
-            END,
             NULLIF(
                 regexp_extract(i.clean_full_address, '{leading_num_letter}', 2),
                 ''
@@ -391,6 +370,103 @@ def _parse_out_flat_position_and_letter():
         CTEStep("final", final_sql),
     ]
     return steps
+
+
+@pipeline_stage(
+    name="parse_out_sub_premise_location",
+    description=(
+        "Extract sub-premise side/location descriptors from the first half of the address"
+    ),
+    tags=["token_extraction", "flat_parsing"],
+)
+def _parse_out_sub_premise_location():
+    """Extract sub-premise side/location labels such as LEFT and FRONT.
+
+    This stage keeps sub-premise location evidence separate from
+    `flat_identity` so it can be compared independently downstream. The signal
+    is intentionally broader than flats alone: maisonettes and other
+    sub-premise occupancies can carry the same FRONT/REAR/LEFT/RIGHT cues.
+    Only the first half of the cleaned address is scanned to reduce false
+    positives from place names such as commercial centres later in the string.
+    """
+
+    tokens_sql = r"""
+    SELECT
+        regexp_split_to_array(
+            i.clean_full_address, '\s+'
+        ) AS sub_premise_location_tokens,
+        i.*
+    FROM {input} i
+    """
+
+    prefix_sql = r"""
+    SELECT
+        i.*,
+        array_to_string(
+            list_slice(
+                sub_premise_location_tokens,
+                1,
+                LEAST(
+                    len(sub_premise_location_tokens),
+                    GREATEST(
+                        6,
+                        CAST(
+                            CEIL(len(sub_premise_location_tokens) / 2.0)
+                            AS BIGINT
+                        )
+                    )
+                )
+            ),
+            ' '
+        ) AS sub_premise_location_prefix
+    FROM {tokenised} i
+    """
+
+    final_sql = r"""
+    SELECT
+        * EXCLUDE (
+            sub_premise_location_tokens,
+            sub_premise_location_prefix
+        ),
+        CASE
+            WHEN NOT (
+                flat_positional IS NOT NULL
+                OR flat_letter IS NOT NULL
+                OR flat_number IS NOT NULL
+                OR regexp_matches(clean_full_address, '\b(FLAT|MAISONETTE)\b')
+            ) THEN NULL
+            WHEN regexp_matches(
+                sub_premise_location_prefix, '\bRIGHT HAND SIDE\b'
+            )
+                OR regexp_matches(
+                    sub_premise_location_prefix, '\bRIGHT SIDE\b'
+                )
+                OR regexp_matches(sub_premise_location_prefix, '\bRIGHT\b')
+                THEN 'RIGHT'
+            WHEN regexp_matches(
+                sub_premise_location_prefix, '\bLEFT HAND SIDE\b'
+            )
+                OR regexp_matches(sub_premise_location_prefix, '\bLEFT SIDE\b')
+                OR regexp_matches(sub_premise_location_prefix, '\bLEFT\b')
+                THEN 'LEFT'
+            WHEN regexp_matches(sub_premise_location_prefix, '\bCENTRE\b')
+                OR regexp_matches(sub_premise_location_prefix, '\bCENTER\b')
+                THEN 'CENTRE'
+            WHEN regexp_matches(sub_premise_location_prefix, '\bFRONT\b')
+                THEN 'FRONT'
+            WHEN regexp_matches(sub_premise_location_prefix, '\bREAR OF\b')
+                OR regexp_matches(sub_premise_location_prefix, '\bREAR\b')
+                THEN 'REAR'
+            ELSE NULL
+        END AS sub_premise_location
+    FROM {with_prefix}
+    """
+
+    return [
+        CTEStep("tokenised", tokens_sql),
+        CTEStep("with_prefix", prefix_sql),
+        CTEStep("final", final_sql),
+    ]
 
 
 @pipeline_stage(
