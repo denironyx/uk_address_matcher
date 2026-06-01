@@ -432,7 +432,7 @@ def test_flat_number_letter_one_sided_penalty_not_fuzzy_equivalence():
 
 
 def test_same_letter_number_one_sided_scores_between_fuzzy_and_mismatch():
-    """2A vs FLAT 2A should beat a letter mismatch without outranking fuzzy equivalence."""
+    """2A vs FLAT 2A should beat a letter mismatch"""
     con = duckdb.connect()
 
     messy_values = ", ".join(
