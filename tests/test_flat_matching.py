@@ -370,12 +370,12 @@ def test_flat_number_letter_one_sided_penalty_not_fuzzy_equivalence():
     )
     one_sided_weight = match_weights.get(("m_one_sided_2b", "c_flat_2_reference"))
 
-    assert (
-        fuzzy_reference_weight is not None
-    ), "m_fuzzy_reference -> c_flat_2_reference: no prediction found"
-    assert (
-        one_sided_weight is not None
-    ), "m_one_sided_2b -> c_flat_2_reference: no prediction found"
+    assert fuzzy_reference_weight is not None, (
+        "m_fuzzy_reference -> c_flat_2_reference: no prediction found"
+    )
+    assert one_sided_weight is not None, (
+        "m_one_sided_2b -> c_flat_2_reference: no prediction found"
+    )
 
     one_sided_row = results_df[
         (results_df["unique_id_l"] == "m_one_sided_2b")

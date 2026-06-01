@@ -2,8 +2,8 @@ import duckdb
 
 from uk_address_matcher.cleaning.steps import (
     _parse_out_business_unit,
-    _parse_out_sub_premise_location,
     _parse_out_flat_position_and_letter,
+    _parse_out_sub_premise_location,
     _remove_duplicate_end_tokens,
 )
 from uk_address_matcher.sql_pipeline.runner import DebugOptions, DuckDBPipeline
@@ -261,9 +261,9 @@ def test_remove_duplicate_end_tokens():
     rows = result.fetchall()
 
     for (address, expected), row in zip(test_cases, rows):
-        assert (
-            row[0] == expected
-        ), f"Address '{address}' expected '{expected}' but got '{row[0]}'"
+        assert row[0] == expected, (
+            f"Address '{address}' expected '{expected}' but got '{row[0]}'"
+        )
 
 
 def test_parse_out_business_unit():
@@ -328,9 +328,9 @@ def test_parse_out_business_unit():
             f"Address '{address}' expected type '{expected_type}' "
             f"but got '{row[type_idx]}'"
         )
-        assert (
-            row[id_idx] == expected_id
-        ), f"Address '{address}' expected id '{expected_id}' but got '{row[id_idx]}'"
+        assert row[id_idx] == expected_id, (
+            f"Address '{address}' expected id '{expected_id}' but got '{row[id_idx]}'"
+        )
         assert row[indicator_idx] == expected_indicator, (
             f"Address '{address}' expected has_business_unit={expected_indicator} "
             f"but got {row[indicator_idx]}"
