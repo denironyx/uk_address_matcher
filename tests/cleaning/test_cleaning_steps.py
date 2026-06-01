@@ -3,6 +3,7 @@ import duckdb
 from uk_address_matcher.cleaning.steps import (
     _parse_out_business_unit,
     _parse_out_flat_position_and_letter,
+    _parse_out_sub_premise_location,
     _remove_duplicate_end_tokens,
 )
 from uk_address_matcher.sql_pipeline.runner import DebugOptions, DuckDBPipeline
@@ -17,6 +18,11 @@ def _run_single_stage(stage_factory, input_relation, connection):
 def test_parse_out_flat_positional():
     connection = duckdb.connect()
 
+    def _sql_literal(value):
+        if value is None:
+            return "NULL"
+        return "'" + str(value).replace("'", "''") + "'"
+
     # Format of test cases:
     # (input_address, flat_positional, flat_letter, flat_number)
     # Note: When a number+letter pattern exists (e.g., 11A, 15B),
@@ -26,7 +32,12 @@ def test_parse_out_flat_positional():
         ("11A SPITFIRE COURT BIRMINGHAM", None, "A", None),
         ("FLAT A 11 SPITFIRE COURT BIRMINGHAM", None, "A", None),
         ("BASEMENT FLAT A 11 SPITFIRE COURT BIRMINGHAM", "BASEMENT", "A", None),
-        ("BASEMENT FLAT 11 243 SPITFIRE COURT BIRMINGHAM", "BASEMENT", None, "11"),
+        (
+            "BASEMENT FLAT 11 243 SPITFIRE COURT BIRMINGHAM",
+            "BASEMENT",
+            None,
+            "11",
+        ),
         ("GARDEN FLAT 11 243 SPITFIRE COURT BIRMINGHAM", "GARDEN", None, "11"),
         ("TOP FLOOR FLAT 12A HIGH STREET", "TOP FLOOR", "A", "12"),
         ("SECOND FLOOR FLAT 12 A HIGH STREET", "SECOND FLOOR", "A", "12"),
@@ -63,7 +74,12 @@ def test_parse_out_flat_positional():
             "B",
             None,
         ),  # digit+letter: letter is flat determinant, not the number
-        ("BASEMENT 15B LONDON ROAD", "BASEMENT", "B", None),  # floor + digit+letter
+        (
+            "BASEMENT 15B LONDON ROAD",
+            "BASEMENT",
+            "B",
+            None,
+        ),  # floor + digit+letter
         (
             "FLAT A MY HOUSE 120-122 SOME ROAD",
             None,
@@ -118,7 +134,10 @@ def test_parse_out_flat_positional():
 
     input_relation = connection.sql(
         "SELECT * FROM (VALUES "
-        + ",".join(f"('{address}', '{address}')" for address, _, _, _ in test_cases)
+        + ",".join(
+            "(" + ", ".join([_sql_literal(address), _sql_literal(address)]) + ")"
+            for address, _, _, _ in test_cases
+        )
         + ") AS t(clean_full_address, original_address_concat)"
     )
 
@@ -132,9 +151,12 @@ def test_parse_out_flat_positional():
     number_idx = columns.index("flat_number")
     indicator_idx = columns.index("has_flat_indicator")
 
-    for (address, expected_pos, expected_letter, expected_number), row in zip(
-        test_cases, rows
-    ):
+    for (
+        address,
+        expected_pos,
+        expected_letter,
+        expected_number,
+    ), row in zip(test_cases, rows):
         assert row[positional_idx] == expected_pos, (
             f"Address '{address}' expected positional '{expected_pos}' "
             f"but got '{row[positional_idx]}'"
@@ -159,6 +181,44 @@ def test_parse_out_flat_positional():
         assert row[indicator_idx] == expected_indicator, (
             f"Address '{address}' expected has_flat_indicator '{expected_indicator}' "
             f"but got '{row[indicator_idx]}'"
+        )
+
+
+def test_parse_out_sub_premise_location():
+    connection = duckdb.connect()
+
+    test_cases = [
+        ("GROUND FLOOR RIGHT FLAT 4 UFTON ROAD LONDON", "RIGHT"),
+        ("GROUND FLOOR LEFT FLAT 4 UFTON ROAD LONDON", "LEFT"),
+        ("FLAT SECOND FLOOR CENTRE 5 MORESBY ROAD LONDON", "CENTRE"),
+        ("FLAT FIRST FLOOR FRONT 176 LOWER CLAPTON ROAD LONDON", "FRONT"),
+        ("FLAT FIRST FLOOR REAR 176 LOWER CLAPTON ROAD LONDON", "REAR"),
+        (
+            "MAISONETTE BASEMENT AND GROUND FLOOR RIGHT 46 LANSDOWNE DRIVE LONDON",
+            "RIGHT",
+        ),
+        ("COMMERCIAL CENTRE 40 MARTELL ROAD", None),
+        ("GROUND FLOOR FLAT 4 UFTON ROAD LONDON", None),
+    ]
+
+    input_relation = connection.sql(
+        "SELECT * FROM (VALUES "
+        + ",".join(f"('{address}', '{address}')" for address, _expected in test_cases)
+        + ") AS t(clean_full_address, original_address_concat)"
+    )
+
+    pipeline = DuckDBPipeline(connection, input_relation)
+    pipeline.add_step(_parse_out_flat_position_and_letter())
+    pipeline.add_step(_parse_out_sub_premise_location())
+    result = pipeline.run(DebugOptions(pretty_print_sql=False))
+
+    location_idx = result.columns.index("sub_premise_location")
+    rows = result.fetchall()
+
+    for (address, expected_location), row in zip(test_cases, rows):
+        assert row[location_idx] == expected_location, (
+            f"Address '{address}' expected location '{expected_location}' "
+            f"but got '{row[location_idx]}'"
         )
 
 
