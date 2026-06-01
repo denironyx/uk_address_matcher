@@ -1,6 +1,8 @@
 ---
 applyTo:
-  - "**"
+  - "**/*.py"
+  - "**/*.sql"
+  - "tests/**/*"
 ---
 
 # Testing expectations

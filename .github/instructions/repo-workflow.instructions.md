@@ -1,6 +1,15 @@
 ---
 applyTo:
-  - "**"
+  - "**/*.py"
+  - "**/*.sql"
+  - ".github/**/*.md"
+  - "docs/developer/**/*.md"
+  - "docs/findings/**/*.md"
+  - "CHANGELOG.md"
+  - "pyproject.toml"
+  - "shell/**/*.sh"
+  - ".github/workflows/**/*.yml"
+  - ".github/workflows/**/*.yaml"
 ---
 
 # Repository workflow and change hygiene
