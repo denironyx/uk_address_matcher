@@ -32,6 +32,14 @@ There are two primary ways to filter your input data:
 - **Geographically**.  If your input data comes from a known geographical area such as a local authority, use an extract of Ordnance Survey data for that area only.
 - **By classification or other metadata**.  Ordnance Survey data contains rich metadata about each address, such as its [classification](https://docs.os.uk/osngd/code-lists/code-lists-overview/addressclassificationcodevalue).  For example, if you know your messy data is residential only, filter out non-residential addresses from the canonical dataset.
 
+For Ordnance Survey data, see [Working with Ordnance Survey data](ordnance_survey.md#filtering-before-canonical-preparation) for guidance on filtering by `classificationcode`, excluding parent shells, and deciding whether a rule belongs in canonical preparation or only at match time.
+
+In practice, the biggest wins usually come from classification first. A simple
+residential filter already removes most clearly non-residential oddities such as
+`ADVERTISING` and `TELEPHONE BOX`, while smaller residential ancillary groups
+such as `RG`, `RB`, and `RC` are where garage, parking, and shared-space rows
+tend to survive.
+
 #### How to filter
 
 The mechanism for filtering depends on whether you are [pre-processing your canonical dataset or processing it on the fly](https://moj-analytical-services.github.io/uk_address_matcher/get_started/#choose-whether-to-pre-process-your-canonical-dataset).
@@ -43,7 +51,7 @@ If you are processing data on-the-fly, then you can simply filter your data befo
 
 ```python
 import duckdb
-from uk_address_matcher import AddressMatcher, prepare_canonical_folder
+from uk_address_matcher import AddressMatcher
 
 con = duckdb.connect()
 
@@ -54,7 +62,7 @@ df_canonical = df_canonical.filter("substr(classificationcode, 1, 1) = 'R'")
 df_messy = con.read_csv("path/to/messy.csv")
 
 matcher = AddressMatcher(
-    canonical_addresses=output_folder,
+    canonical_addresses=df_canonical,
     addresses_to_match=df_messy,
     con=con,
 )
@@ -64,25 +72,35 @@ result = matcher.match()
 
 #### Filtering a pre-prepared datasets
 
-If your are pre-processing your canonical dataset, consider whether users of the preprocessed file will always want a filter applied.  If so, apply this filter using prior to passing the data to the `prepare_canonical_folder` folder.
+If you are pre-processing your canonical dataset, first decide whether the rule is a stable policy or only an ad hoc subset.
+
+Use this rule of thumb:
+
+- If all users should inherit the exclusion, apply it before `prepare_canonical_folder()`.
+- If different users need different subsets, keep a broader prepared folder and use `canonical_address_filter=` later.
+- If the rule is about which records should be eligible to match, do not implement it by stripping text during cleaning.
+
+If users of the preprocessed file will always want a filter applied, apply this filter before passing the data to `prepare_canonical_folder()`.
 
 ```python
 import duckdb
-import os
 import tempfile
-from uk_address_matcher import AddressMatcher, prepare_canonical_folder
+from uk_address_matcher import prepare_canonical_folder
 
 con = duckdb.connect()
 df_canonical = con.read_csv("path/to/canonical.csv")
 df_canonical = df_canonical.filter("substr(classificationcode, 1, 1) = 'R'")
 
-output_folder = tempfile.mkdtemp()
 prepare_canonical_folder(
     df_canonical,
-    output_folder=output_folder,
-    con=con
+    output_folder=tempfile.mkdtemp(),
+    con=con,
 )
 ```
+
+For concrete recipe-style filters, including a household-style subset that
+excludes `RG`, `PP`, `RB`, `RC`, and common parking prefixes, see [Working with
+Ordnance Survey data](ordnance_survey.md#quick-filtering-recipes).
 
 However, if different users will need different filters, you can also apply a filter _after_ pre-processing the whole dataset.  This will result in a small degradation in accuracy because indices and term frequencies will be computed globally, making them less discriminative.
 
@@ -105,6 +123,23 @@ matcher = AddressMatcher(
 )
 result = matcher.match()
 ```
+
+### Candidate-pool policy versus cleaning
+
+Be careful with rules that look like cleaning rules but are really eligibility rules.
+
+For example, if your organisation never wants to match to records such as car
+park spaces, garages, or parent shells, that is usually best implemented as a
+canonical filter, not as a string-cleaning step that edits address text.
+
+As a general rule:
+
+- use cleaning to normalise text
+- use filtering to decide which canonical records may participate in matching
+
+If you are considering a new heuristic exclusion such as `CAR PARK SPACE%`,
+benchmark it first on a representative dataset and inspect the overlay
+precision-recall chart before treating it as standard policy.
 
 
 
