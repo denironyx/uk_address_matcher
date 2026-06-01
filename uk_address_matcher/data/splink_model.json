@@ -188,6 +188,14 @@
                     "fix_u_probability": true
                 },
                 {
+                    "sql_condition": "flat_letter_l IS NOT NULL\n    AND flat_letter_l = flat_letter_r\n    AND (\n        (flat_number_l IS NULL AND flat_number_r IS NOT NULL)\n        OR (flat_number_l IS NOT NULL AND flat_number_r IS NULL)\n    )\n    AND flat_positional_l IS NULL\n    AND flat_positional_r IS NULL",
+                    "label_for_charts": "Same letter, number one-sided",
+                    "m_probability": 4.0,
+                    "u_probability": 1,
+                    "fix_m_probability": true,
+                    "fix_u_probability": true
+                },
+                {
                     "sql_condition": "flat_positional_l IS NOT NULL\n    AND flat_positional_r IS NOT NULL\n    AND flat_positional_l != flat_positional_r",
                     "label_for_charts": "Both positional but different floors",
                     "m_probability": 0.00390625,
