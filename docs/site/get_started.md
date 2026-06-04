@@ -33,36 +33,24 @@ If you're linking to a small canonical dataset (of say, less than 500,000 rows),
 
 If you're linking to a large canonical dataset (for example, national-scale NGD), then we recommend a one-time pre-processing step. It computes reusable datasets (indices and feature tables) once, so subsequent matching runs are fast.
 
+The examples below use the fictional London datasets from `ukam_datasets`, which are included for runnable examples.
+
 
 
 === "Local / regional (processing on-the-fly)"
 
     ```python exec="true" source="tabbed-left" tabs="Source code|Output"
     import duckdb
-    import pyarrow as pa
-    from uk_address_matcher import AddressMatcher
+    from uk_address_matcher import AddressMatcher, ukam_datasets
 
     con = duckdb.connect()
 
-    # Usually data would be loaded from files.
-    # It's hard coded here so this example can be easily run
-    messy = pa.Table.from_pylist([
-        {"unique_id": "m_1", "address_concat": "Flat A Example Court, 10 Demo Road, Townton", "postcode": "AB1 2BC"},
-    ])
-    messy_df = con.from_arrow(messy)
-
-    canonical = pa.Table.from_pylist([
-        {"unique_id": "c_1", "address_concat": "9 Demo Road, Townton", "postcode": "AB1 2BC"},
-        {"unique_id": "c_2", "address_concat": "Flat A, 10 Demo Road, Townton", "postcode": "AB1 2BC"},
-        {"unique_id": "c_3", "address_concat": "Flat B, 10 Demo Road, Townton", "postcode": "AB1 2BC"},
-        {"unique_id": "c_4", "address_concat": "Flat C, 10 Demo Road, Townton", "postcode": "AB1 2BC"},
-        {"unique_id": "c_5", "address_concat": "Basement Flat, 10 Demo Road, Townton", "postcode": "AB1 2BC"},
-    ])
-    canonical_df = con.from_arrow(canonical)
+    df_messy = ukam_datasets.as_relation("fictional_london_messy", con=con)
+    df_canonical = ukam_datasets.as_relation("fictional_london_canonical", con=con)
 
     matcher = AddressMatcher(
-        canonical_addresses=canonical_df,
-        addresses_to_match=messy_df,
+        canonical_addresses=df_canonical,
+        addresses_to_match=df_messy,
         con=con,
     )
     result = matcher.match()
@@ -77,11 +65,15 @@ If you're linking to a large canonical dataset (for example, national-scale NGD)
     import duckdb
     import os
     import tempfile
-    from uk_address_matcher import AddressMatcher, prepare_canonical_folder
+    from uk_address_matcher import (
+        AddressMatcher,
+        prepare_canonical_folder,
+        ukam_datasets,
+    )
 
     con = duckdb.connect()
-    df_canonical = con.read_csv("example_data/canonical_example.csv")
-    df_messy = con.read_csv("example_data/messy_example.csv")
+    df_messy = ukam_datasets.as_relation("fictional_london_messy", con=con)
+    df_canonical = ukam_datasets.as_relation("fictional_london_canonical", con=con)
 
     # One-time preparation
     output_folder = tempfile.mkdtemp()
