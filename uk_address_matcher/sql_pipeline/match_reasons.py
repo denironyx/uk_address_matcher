@@ -10,7 +10,10 @@ class MatchReason(Enum):
     EXACT_NO_WHITESPACE = "exact_no_whitespace: full match after removing whitespace"
     EXACT_FLAT_RETRACTION = "exact_flat_retraction: match after removing FLAT keyword"
     PEELED_ADDRESS = "peeled_address: match after removing common UK end tokens"
-    PEELED_ADDRESS_STRIPPED = "peeled_address_stripped: match after peeling and removing whitespace and punctuation"
+    PEELED_ADDRESS_STRIPPED = (
+        "peeled_address_stripped: match after peeling and removing whitespace "
+        "and punctuation"
+    )
     SPLINK = "splink: probabilistic match"
     UNIQUE_TRIGRAM = "unique_trigram: unique trigram match"
 

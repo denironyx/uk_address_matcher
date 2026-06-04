@@ -43,9 +43,16 @@ def _duckdb_peel(con: duckdb.DuckDBPyConnection, address: str) -> str:
 def _duckdb_compact_peeled(con: duckdb.DuckDBPyConnection, address: str) -> str:
     pattern_sql = _build_suffix_peel_regex_sql_literal()
     escaped_address = address.replace("'", "''")
+    peeled_sql = (
+        "trim(regexp_replace("
+        f"regexp_replace(upper(trim('{escaped_address}')), '\\s+', ' ', 'g'), "
+        f"'{pattern_sql}', ''"
+        "))"
+    )
+    compact_sql = _compacted_address_sql(peeled_sql)
     row = con.sql(
         f"""
-        SELECT {_compacted_address_sql("trim(regexp_replace(regexp_replace(upper(trim('" + escaped_address + "')), '\\s+', ' ', 'g'), '" + pattern_sql + "', ''))")} AS compact_peeled
+        SELECT {compact_sql} AS compact_peeled
         """
     ).fetchone()
     return row[0]

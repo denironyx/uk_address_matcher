@@ -81,7 +81,10 @@ def test_deterministic_reasons_map_to_pos_inf():
     for reason in [
         "exact: full match",
         "peeled_address: match after removing common uk end tokens",
-        "peeled_address_stripped: match after peeling and removing whitespace and punctuation",
+        (
+            "peeled_address_stripped: match after peeling and removing "
+            "whitespace and punctuation"
+        ),
         "unique_trigram: unique trigram match",
     ]:
         rows = _run_threshold_metrics(
