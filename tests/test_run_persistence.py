@@ -13,7 +13,12 @@ from benchmarking.insights.run_persistence import (
     generate_benchmark_run_id,
     persist_benchmark_run,
 )
-from benchmarking.runner import BenchmarkRunResult, run_selected_datasets
+from benchmarking.runner import (
+    BenchmarkRunResult,
+    run_selected_datasets,
+    run_single_dataset,
+)
+from uk_address_matcher.post_linkage.match_result.result import MatchResult
 
 
 @dataclass(frozen=True)
@@ -433,3 +438,97 @@ def test_run_selected_datasets_prints_persistence_summary_when_enabled(
 
     assert [result.dataset_key for result in results] == ["hackney", "lambeth_llpg"]
     assert captured_results == [results]
+
+
+def test_run_single_dataset_supports_deterministic_only_match_results(
+    monkeypatch,
+) -> None:
+    con = duckdb.connect(database=":memory:")
+    messy = con.sql(
+        """
+        SELECT *
+        FROM (
+            VALUES
+                ('src-1', '1 MAIN ROAD', 1),
+                ('src-2', '2 MAIN ROAD', 2)
+        ) AS t(unique_id, clean_full_address, ukam_address_id)
+        """
+    )
+    canonical = con.sql(
+        """
+        SELECT *
+        FROM (
+            VALUES
+                ('canon-1', '1 MAIN ROAD', 101)
+        ) AS t(unique_id, clean_full_address, ukam_address_id)
+        """
+    )
+
+    class FakeAddressMatcher:
+        def __init__(self, *args, **kwargs):
+            self.con = kwargs["con"]
+
+        def match(self) -> MatchResult:
+            relation = self.con.sql(
+                """
+                SELECT *
+                FROM (
+                    VALUES
+                        (1, 'src-1', 'canon-1', 'canon-1', 101, 'exact: full match'),
+                        (2, 'src-2', NULL, NULL, NULL, NULL)
+                ) AS t(
+                    ukam_address_id,
+                    unique_id,
+                    ukam_label,
+                    resolved_canonical_id,
+                    canonical_ukam_address_id,
+                    match_reason
+                )
+                """
+            )
+            return MatchResult(
+                _relation=relation,
+                con=self.con,
+                _canonical_relation=canonical,
+                _stage_diagnostics=[
+                    {
+                        "stage": "exact_match",
+                        "unmatched_before": 2,
+                        "matched_this_stage": 1,
+                        "remaining_after": 1,
+                        "matched_pct_of_unmatched": 0.5,
+                        "matched_pct_of_input": 0.5,
+                        "elapsed_seconds": 0.01,
+                    }
+                ],
+            )
+
+    monkeypatch.setattr(
+        "benchmarking.runner.get_dataset_definition",
+        lambda dataset_key: {"label": dataset_key.title()},
+    )
+    monkeypatch.setattr(
+        "benchmarking.runner.load_dataset",
+        lambda con, dataset_key, sample_mode: messy,
+    )
+    monkeypatch.setattr("benchmarking.runner.AddressMatcher", FakeAddressMatcher)
+    monkeypatch.setattr(
+        "benchmarking.runner.fetch_overall_summary",
+        lambda con, accuracy_rel, total_input_rows: (2, 1, 1, 1.0, 1.0),
+    )
+
+    result = run_single_dataset(
+        con=con,
+        dataset_key="rhondda",
+        canonical_path="ignored",
+        stages=[DummyStage()],
+        persist_results=False,
+    )
+
+    assert result.precision_recall_curve_records is not None
+    thresholds = {
+        float(row["truth_threshold"]) for row in result.precision_recall_curve_records
+    }
+    assert -999.0 in thresholds
+    assert 999.0 in thresholds
+    assert result.splink_available is False

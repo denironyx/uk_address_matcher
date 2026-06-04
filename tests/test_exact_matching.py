@@ -816,3 +816,107 @@ def test_peeled_address_multi_word_token_handling(duck_con):
     assert results_df.iloc[0]["resolved_canonical_id"] == 1000, (
         "Multi-word token 'TUNBRIDGE WELLS' should be correctly counted as 2 words"
     )
+
+
+def test_peeled_address_stripped_matching_is_opt_in(duck_con):
+    df_fuzzy = duck_con.sql("""
+        SELECT *, NULL::VARCHAR AS sub_premise_location
+        FROM (
+            VALUES
+                (
+                    1,
+                    '10 TEST-LANE HACKNEY LONDON',
+                    '10 TEST-LANE HACKNEY LONDON',
+                    'E8 1AA',
+                    ARRAY['HACKNEY', 'LONDON'],
+                    ARRAY['10']::VARCHAR[],
+                    FALSE,
+                    NULL::VARCHAR,
+                    NULL::VARCHAR,
+                    NULL::VARCHAR,
+                    FALSE,
+                    NULL::VARCHAR,
+                    NULL::VARCHAR,
+                    1::BIGINT
+                )
+        ) AS t(
+            unique_id,
+            original_address_concat,
+            clean_full_address,
+            postcode,
+            peeled_tokens_list,
+            numeric_tokens,
+            has_flat_indicator,
+            flat_positional,
+            flat_letter,
+            flat_number,
+            has_business_unit,
+            business_unit_type,
+            business_unit_id,
+            ukam_address_id
+        )
+        """)
+
+    df_canonical = duck_con.sql("""
+        SELECT *, NULL::VARCHAR AS sub_premise_location
+        FROM (
+            VALUES
+                (
+                    1000,
+                    '10 TEST LANE',
+                    '10 TEST LANE',
+                    'E8 1AA',
+                    CAST([] AS VARCHAR[]),
+                    ARRAY['10']::VARCHAR[],
+                    FALSE,
+                    NULL::VARCHAR,
+                    NULL::VARCHAR,
+                    NULL::VARCHAR,
+                    FALSE,
+                    NULL::VARCHAR,
+                    NULL::VARCHAR,
+                    100::BIGINT
+                )
+        ) AS t(
+            unique_id,
+            original_address_concat,
+            clean_full_address,
+            postcode,
+            peeled_tokens_list,
+            numeric_tokens,
+            has_flat_indicator,
+            flat_positional,
+            flat_letter,
+            flat_number,
+            has_business_unit,
+            business_unit_type,
+            business_unit_id,
+            ukam_address_id
+        )
+        """)
+
+    default_results, _ = _run_matching(
+        con=duck_con,
+        df_messy_clean=df_fuzzy,
+        df_canonical_clean=df_canonical,
+        stages=[ExactMatchStage(), PeeledAddressStage()],
+    )
+    stripped_results, _ = _run_matching(
+        con=duck_con,
+        df_messy_clean=df_fuzzy,
+        df_canonical_clean=df_canonical,
+        stages=[
+            ExactMatchStage(),
+            PeeledAddressStage(enable_whitespace_punctuation_stripping=True),
+        ],
+    )
+
+    default_row = default_results.select("resolved_canonical_id").fetchone()[0]
+    stripped_row = stripped_results.fetchdf().iloc[0]
+
+    assert default_row is None
+    assert stripped_row["resolved_canonical_id"] == 1000
+    assert stripped_row["match_reason"] == (
+        "peeled_address_stripped: match after peeling and removing whitespace "
+        "and punctuation"
+    )

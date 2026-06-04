@@ -81,6 +81,10 @@ def test_deterministic_reasons_map_to_pos_inf():
     for reason in [
         "exact: full match",
         "peeled_address: match after removing common uk end tokens",
+        (
+            "peeled_address_stripped: match after peeling and removing "
+            "whitespace and punctuation"
+        ),
         "unique_trigram: unique trigram match",
     ]:
         rows = _run_threshold_metrics(
@@ -113,6 +117,42 @@ def test_splink_match_uses_actual_weight():
         canonical_ids=["1"],
     )
     assert 5.0 in rows
+
+
+def test_accuracy_data_supports_relations_without_match_weight():
+    con = duckdb.connect()
+    con.register(
+        "m",
+        pa.Table.from_pylist(
+            [
+                {
+                    "unique_id": "a",
+                    "resolved_canonical_id": "1",
+                    "ukam_label": "1",
+                    "match_reason": "exact: full match",
+                },
+                {
+                    "unique_id": "b",
+                    "resolved_canonical_id": None,
+                    "ukam_label": None,
+                    "match_reason": None,
+                },
+            ]
+        ),
+    )
+    con.register("c", pa.Table.from_pylist([{"unique_id": "1"}]))
+
+    result = MatchResult(
+        _relation=con.table("m"),
+        con=con,
+        _canonical_relation=con.table("c"),
+    )
+
+    rows = result.accuracy_data()
+    thresholds = {float(row["truth_threshold"]) for row in rows}
+
+    assert _POS_INF in thresholds
+    assert _NEG_INF in thresholds
 
 
 def test_tp_fp_fn_tn_basic():

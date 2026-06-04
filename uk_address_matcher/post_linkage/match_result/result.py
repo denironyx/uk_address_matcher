@@ -338,7 +338,19 @@ class MatchResult:
         )
         threshold_sql = _build_threshold_metrics_sql(rounding_expr)
 
-        self.con.register("__ukam_threshold_matches__", self._relation)
+        threshold_relation = self._relation
+        if "match_weight" not in threshold_relation.columns:
+            relation_sql = threshold_relation.sql_query()
+            threshold_relation = self.con.sql(
+                f"""
+                SELECT
+                    threshold_source.*,
+                    NULL::DOUBLE AS match_weight
+                FROM ({relation_sql}) AS threshold_source
+                """
+            )
+
+        self.con.register("__ukam_threshold_matches__", threshold_relation)
         self.con.register("__ukam_threshold_canonical__", self._canonical_relation)
         try:
             rel = self.con.sql(threshold_sql)
