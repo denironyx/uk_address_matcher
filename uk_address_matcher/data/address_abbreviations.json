@@ -2,8 +2,12 @@
   { "token": "&", "replacement": "AND" },
   { "token": "@", "replacement": "AT" },
 
+  { "token": "ADJ", "replacement": "ADJACENT" },
+
   { "token": "APT", "replacement": "APARTMENT" },
   { "token": "APTS", "replacement": "APARTMENTS" },
+
+  { "token": "ANNEX", "replacement": "ANNEXE" },
 
   { "token": "DUPX", "replacement": "DUPLEX" },
 
@@ -59,6 +63,8 @@
   { "token": "CORR", "replacement": "CORRIDOR" },
 
   { "token": "COTT", "replacement": "COTTAGE" },
+  { "token": "COT", "replacement": "COTTAGE" },
+  { "token": "COTTS", "replacement": "COTTAGES" },
 
   { "token": "CR", "replacement": "CRESCENT" },
   { "token": "CRES", "replacement": "CRESCENT" },
@@ -75,7 +81,14 @@
 
   { "token": "FAC", "replacement": "FACTORY" },
 
+  { "token": "AFL", "replacement": "ATTIC FLOOR LEFT" },
+  { "token": "AFR", "replacement": "ATTIC FLOOR RIGHT" },
+  { "token": "AFW", "replacement": "ATTIC FLOOR WEST" },
+  { "token": "AF-W", "replacement": "ATTIC FLOOR WEST" },
+
   { "token": "FF", "replacement": "FIRST FLOOR" },
+  { "token": "FHSE", "replacement": "FARM HOUSE" },
+  { "token": "F-HSE", "replacement": "FARM HOUSE" },
   { "token": "FT", "replacement": "FRONT" },
 
   { "token": "FL", "replacement": "FLOOR" },
@@ -100,6 +113,8 @@
 
   { "token": "GRD", "replacement": "GROUND" },
   { "token": "GND", "replacement": "GROUND" },
+  { "token": "GFW", "replacement": "GROUND FLOOR WEST" },
+  { "token": "GF-W", "replacement": "GROUND FLOOR WEST" },
 
   { "token": "FRST", "replacement": "FIRST" },
   { "token": "1ST", "replacement": "FIRST" },
@@ -148,6 +163,8 @@
 
   { "token": "MDW", "replacement": "MEADOW" },
 
+  { "token": "MNS", "replacement": "MAINS" },
+
   { "token": "MT", "replacement": "MOUNT" },
   { "token": "MTN", "replacement": "MOUNTAIN" },
 
@@ -161,6 +178,7 @@
   { "token": "ORCH", "replacement": "ORCHARD" },
 
   { "token": "ORG", "replacement": "ORGANISATION" },
+  { "token": "OPP", "replacement": "OPPOSITE" },
 
   { "token": "PASS", "replacement": "PASSAGE" },
   { "token": "PSGR", "replacement": "PASSAGE" },
@@ -175,7 +193,7 @@
 
   { "token": "PROM", "replacement": "PROMENADE" },
 
-  { "token": "PT", "replacement": "POINT" },
+  { "token": "PT", "replacement": "PART" },
 
   { "token": "RD", "replacement": "ROAD" },
 
