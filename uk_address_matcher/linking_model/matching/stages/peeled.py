@@ -40,6 +40,8 @@ class PeeledAddressStage(MatchingStage):
         matches.
     """
 
+    enable_whitespace_punctuation_stripping: bool = False
+
     def find_matches(
         self,
         con: duckdb.DuckDBPyConnection,
@@ -57,7 +59,11 @@ class PeeledAddressStage(MatchingStage):
             con=con,
             pipeline_stages=[
                 _restrict_canonical_to_messy_postcodes("exact"),
-                _peeled_address_matches,
+                _peeled_address_matches(
+                    enable_whitespace_punctuation_stripping=(
+                        self.enable_whitespace_punctuation_stripping
+                    )
+                ),
             ],
             stage_name=stage_name,
             df_unmatched=df_unmatched,
@@ -71,34 +77,19 @@ class PeeledAddressStage(MatchingStage):
     name="peeled_address_matching",
     description=(
         "Find matches by comparing addresses after peeling common UK end tokens "
-        "(cities, counties, boroughs) and performing exact match on the peeled addresses."
+        "(cities, counties, boroughs), with an optional whitespace/punctuation "
+        "stripping fallback on the peeled shell."
     ),
     tags=["phase_1", "matching"],
     depends_on=["restrict_canonical_to_messy_postcodes"],
 )
-def _peeled_address_matches() -> list[CTEStep]:
-    """Find matches using peeled addresses (after removing common UK end tokens).
-
-    Peeling refers to the iterative removal of common UK locality tokens from
-    the end of addresses. These include cities (LONDON, MANCHESTER), counties
-    (HERTFORDSHIRE, KENT), London boroughs (HACKNEY, LAMBETH), and regions
-    (GREATER LONDON, WEST MIDLANDS).
-
-    Example transformations:
-        - "100 TEST STREET LONDON" -> "100 TEST STREET"
-        - "25 HIGH ROAD HACKNEY LONDON" -> "25 HIGH ROAD"
-        - "10 MAIN AVENUE MANCHESTER GREATER MANCHESTER" -> "10 MAIN AVENUE"
-
-    This stage generates peeled tokens on-the-fly so it no longer relies on
-    upstream cleaning stages to populate `peeled_tokens_list`.
-
-    Matching rules:
-        1. Postcodes must be identical
-        2. Peeled addresses (address_tokens minus peeled words) must be identical
-        3. At least one side must have peeled something (to avoid duplicating
-           exact match results)
-    """
+def _peeled_address_matches(
+    *,
+    enable_whitespace_punctuation_stripping: bool = False,
+) -> list[CTEStep]:
+    """Find matches using peeled addresses and an optional compacted fallback."""
     match_reason_value = MatchReason.PEELED_ADDRESS.value
+    stripped_match_reason_value = MatchReason.PEELED_ADDRESS_STRIPPED.value
     enum_values = str(MatchReason.enum_values())
 
     messy_peeled_sql = _build_regex_peel_sql(
@@ -113,50 +104,136 @@ def _peeled_address_matches() -> list[CTEStep]:
         canonical=True,
     )
 
-    candidates_sql = """
+    peeled_candidates_sql = f"""
         SELECT
-            messy.ukam_address_id AS messy_ukam_address_id,
-            messy.clean_full_address AS messy_clean_full_address,
-            messy.peeled_address AS messy_peeled_address,
-            messy.did_peel AS messy_did_peel,
+            messy.ukam_address_id AS ukam_address_id,
             canon.canonical_ukam_address_id,
-            canon.canonical_unique_id,
-            canon.canonical_clean_full_address,
-            canon.peeled_address AS canonical_peeled_address,
-            canon.did_peel AS canonical_did_peel
-        FROM {messy_peeled} AS messy
-        INNER JOIN {canonical_peeled} AS canon
+            canon.canonical_unique_id AS resolved_canonical_id,
+            '{match_reason_value}'::ENUM {enum_values} AS match_reason,
+            1 AS match_priority
+        FROM {{messy_peeled}} AS messy
+        INNER JOIN {{canonical_peeled}} AS canon
             ON messy.postcode = canon.postcode
             AND messy.peeled_address = canon.peeled_address
-        WHERE
-            messy.did_peel
-            OR canon.did_peel
+        WHERE messy.did_peel OR canon.did_peel
     """
 
-    annotated_sql = f"""
+    ranked_peeled_candidates_sql = """
         SELECT
-            messy_ukam_address_id AS ukam_address_id,
+            candidates.ukam_address_id,
+            candidates.canonical_ukam_address_id,
+            candidates.resolved_canonical_id,
+            candidates.match_reason,
+            ROW_NUMBER() OVER (
+                PARTITION BY candidates.ukam_address_id
+                ORDER BY
+                    candidates.match_priority,
+                    candidates.canonical_ukam_address_id
+            ) AS rn
+        FROM {peeled_address_candidates} AS candidates
+    """
+
+    pre_stripped_matches_sql = """
+        SELECT
+            ukam_address_id,
             canonical_ukam_address_id,
-            canonical_unique_id AS resolved_canonical_id,
-            '{match_reason_value}'::ENUM {enum_values} AS match_reason
-        FROM (
-            SELECT
-                *,
-                ROW_NUMBER() OVER (
-                    PARTITION BY messy_ukam_address_id
-                    ORDER BY canonical_ukam_address_id
-                ) AS rn
-            FROM {{peeled_address_candidates}}
-        )
+            resolved_canonical_id,
+            match_reason
+        FROM {ranked_peeled_candidates}
         WHERE rn = 1
     """
 
-    return [
+    steps = [
         CTEStep("messy_peeled", messy_peeled_sql),
         CTEStep("canonical_peeled", canonical_peeled_sql),
-        CTEStep("peeled_address_candidates", candidates_sql),
-        CTEStep("peeled_address_matches", annotated_sql),
+        CTEStep("peeled_address_candidates", peeled_candidates_sql),
+        CTEStep("ranked_peeled_candidates", ranked_peeled_candidates_sql),
+        CTEStep("pre_stripped_matches", pre_stripped_matches_sql),
     ]
+
+    if enable_whitespace_punctuation_stripping:
+        messy_residual_sql = """
+            SELECT messy.*
+            FROM {messy_peeled} AS messy
+            LEFT JOIN {pre_stripped_matches} AS matched
+                ON matched.ukam_address_id = messy.ukam_address_id
+            WHERE matched.ukam_address_id IS NULL
+        """
+
+        residual_postcodes_sql = """
+            SELECT DISTINCT postcode
+            FROM {messy_residual}
+        """
+
+        canonical_residual_sql = """
+            SELECT canon.*
+            FROM {canonical_peeled} AS canon
+            SEMI JOIN {residual_postcodes} AS rp
+                ON rp.postcode = canon.postcode
+        """
+
+        stripped_messy_sql = f"""
+            SELECT
+                messy.ukam_address_id,
+                messy.postcode,
+                messy.peeled_address,
+                messy.did_peel,
+                {_compacted_address_sql("messy.peeled_address")}
+                    AS compact_peeled_address
+            FROM {{messy_residual}} AS messy
+        """
+
+        stripped_canonical_sql = f"""
+            SELECT
+                canon.canonical_ukam_address_id,
+                canon.canonical_unique_id,
+                canon.postcode,
+                canon.peeled_address,
+                canon.did_peel,
+                {_compacted_address_sql("canon.peeled_address")}
+                    AS compact_peeled_address
+            FROM {{canonical_residual}} AS canon
+        """
+
+        stripped_candidates_sql = f"""
+            SELECT
+                messy.ukam_address_id,
+                canon.canonical_ukam_address_id,
+                canon.canonical_unique_id AS resolved_canonical_id,
+                '{stripped_match_reason_value}'::ENUM {enum_values} AS match_reason
+            FROM {{stripped_messy}} AS messy
+            INNER JOIN {{stripped_canonical}} AS canon
+                ON messy.postcode = canon.postcode
+                AND messy.compact_peeled_address = canon.compact_peeled_address
+            WHERE messy.compact_peeled_address <> ''
+            AND (messy.did_peel OR canon.did_peel)
+            AND (
+                messy.compact_peeled_address <> messy.peeled_address
+                OR canon.compact_peeled_address <> canon.peeled_address
+            )
+        """
+
+        steps.extend(
+            [
+                CTEStep("messy_residual", messy_residual_sql),
+                CTEStep("residual_postcodes", residual_postcodes_sql),
+                CTEStep("canonical_residual", canonical_residual_sql),
+                CTEStep("stripped_messy", stripped_messy_sql),
+                CTEStep("stripped_canonical", stripped_canonical_sql),
+                CTEStep("stripped_candidates", stripped_candidates_sql),
+            ]
+        )
+
+        final_matches_sql = """
+            SELECT * FROM {pre_stripped_matches}
+            UNION ALL
+            SELECT * FROM {stripped_candidates}
+        """
+    else:
+        final_matches_sql = "SELECT * FROM {pre_stripped_matches}"
+
+    steps.append(CTEStep("peeled_address_matches", final_matches_sql))
+    return steps
 
 
 def _normalise_end_token(token: str) -> str:
@@ -197,6 +274,10 @@ def _build_suffix_peel_regex_sql_literal() -> str:
     escaped = "|".join(re.escape(token).replace(r"\ ", " ") for token in tokens)
     pattern = rf"(?:^|\s+)(?:{escaped})(?:\s+(?:{escaped}))*\s*$"
     return pattern.replace("'", "''")
+
+
+def _compacted_address_sql(expression: str) -> str:
+    return rf"regexp_replace({expression}, '[^A-Z0-9]+', '', 'g')"
 
 
 def _build_regex_peel_sql(
