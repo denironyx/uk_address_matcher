@@ -28,9 +28,9 @@
   "mark": {
     "type": "area",
     "fillOpacity": 0.12,
-    "color": "#4C78A8",
+    "color": "#12436D",
     "line": {
-      "color": "#4C78A8"
+      "color": "#12436D"
     },
     "point": {
       "filled": true
