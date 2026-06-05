@@ -364,6 +364,7 @@ def prepare_canonical_folder(
     num_of_chunks: int = 10,
     output_chunk_count: int = 1,
     overwrite: bool = False,
+    show_progress: bool = True,
 ) -> None:
     """Prepare canonical data and persist to a folder for later use.
 
@@ -394,6 +395,8 @@ def prepare_canonical_folder(
         overwrite: Whether to overwrite existing files in the folder. When
             `True`, all known artefacts are removed before writing to ensure
             the folder ends up in a consistent state.
+        show_progress: Whether to show live interactive progress bars for
+            chunked cleaning stages.
 
     Raises:
         FileExistsError: If the output folder already contains prepared files
@@ -410,8 +413,8 @@ def prepare_canonical_folder(
     output_folder_path = None if output_is_remote else Path(output_folder)
     data = _coerce_prepare_input_to_relation(data, con=con)
 
-    logger.debug("Preparing canonical data from '%s'", _describe_prepare_input(data))
-    logger.debug("Writing prepared canonical artefacts to '%s'", output_folder)
+    logger.info("Preparing canonical data from '%s'", _describe_prepare_input(data))
+    logger.info("Writing prepared canonical artefacts to '%s'", output_folder)
 
     _validate_chunk_count(num_of_chunks, name="num_of_chunks")
     _validate_chunk_count(output_chunk_count, name="output_chunk_count")
@@ -442,7 +445,12 @@ def prepare_canonical_folder(
 
     # Derive artefacts / cleaned canonical data for export
     logger.debug("Deriving term frequencies from canonical data")
-    tf_table = derive_term_frequencies_table(data, con=con, num_of_chunks=num_of_chunks)
+    tf_table = derive_term_frequencies_table(
+        data,
+        con=con,
+        num_of_chunks=num_of_chunks,
+        show_progress=show_progress,
+    )
 
     logger.debug("Cleaning canonical addresses")
     df_clean = prepare_data_for_matching(
@@ -450,10 +458,16 @@ def prepare_canonical_folder(
         con=con,
         num_of_chunks=num_of_chunks,
         term_frequency_lookup=tf_table,
+        show_progress=show_progress,
     )
 
     logger.debug("Building inverted index")
-    inverted_index = derive_inverted_index(df_clean, con=con, num_of_chunks=num_of_chunks)
+    inverted_index = derive_inverted_index(
+        df_clean,
+        con=con,
+        num_of_chunks=num_of_chunks,
+        show_progress=show_progress,
+    )
 
     # Write parquet files
     tf_path = (
@@ -518,7 +532,7 @@ def prepare_canonical_folder(
                 chunk_query.write_parquet(str(chunk_path))
                 chunk_count = chunk_query.count("*").fetchone()[0]
                 canonical_paths.append(chunk_path)
-                logger.info(
+                logger.debug(
                     "Wrote canonical output chunk %d/%d to '%s' (%d rows) - took %s",
                     chunk_index + 1,
                     output_chunk_count,
@@ -543,7 +557,7 @@ def prepare_canonical_folder(
     )
 
     if output_chunk_count > 1:
-        logger.info(
+        logger.debug(
             "Wrote %d canonical output chunks to '%s'",
             output_chunk_count,
             chunk_output_location,
@@ -584,6 +598,8 @@ def prepare_canonical_folder(
             artefact_columns=artefact_columns,
             row_counts=manifest_row_counts,
         )
+
+    logger.info("Prepared canonical artefacts written to '%s'", output_folder)
 
 
 def _write_manifest_local(
