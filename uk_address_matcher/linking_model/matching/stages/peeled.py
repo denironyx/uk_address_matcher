@@ -40,7 +40,7 @@ class PeeledAddressStage(MatchingStage):
         matches.
     """
 
-    enable_whitespace_punctuation_stripping: bool = False
+    enable_whitespace_punctuation_stripping: bool = True
 
     def find_matches(
         self,
@@ -85,9 +85,29 @@ class PeeledAddressStage(MatchingStage):
 )
 def _peeled_address_matches(
     *,
-    enable_whitespace_punctuation_stripping: bool = False,
+    enable_whitespace_punctuation_stripping: bool = True,
 ) -> list[CTEStep]:
-    """Find matches using peeled addresses and an optional compacted fallback."""
+    """Find matches using peeled addresses (after removing common UK end tokens).
+
+    Peeling refers to the iterative removal of common UK locality tokens from
+    the end of addresses. These include cities (LONDON, MANCHESTER), counties
+    (HERTFORDSHIRE, KENT), London boroughs (HACKNEY, LAMBETH), and regions
+    (GREATER LONDON, WEST MIDLANDS).
+
+    Example transformations:
+        - "100 TEST STREET LONDON" -> "100 TEST STREET"
+        - "25 HIGH ROAD HACKNEY LONDON" -> "25 HIGH ROAD"
+        - "10 MAIN AVENUE MANCHESTER GREATER MANCHESTER" -> "10 MAIN AVENUE"
+
+    This stage generates peeled tokens on-the-fly so it no longer relies on
+    upstream cleaning stages to populate `peeled_tokens_list`.
+
+    Matching rules:
+        1. Postcodes must be identical
+        2. Peeled addresses (address_tokens minus peeled words) must be identical
+        3. At least one side must have peeled something (to avoid duplicating
+           exact match results)
+    """
     match_reason_value = MatchReason.PEELED_ADDRESS.value
     stripped_match_reason_value = MatchReason.PEELED_ADDRESS_STRIPPED.value
     enum_values = str(MatchReason.enum_values())
