@@ -81,6 +81,14 @@ def _format_elapsed(elapsed_seconds: float) -> str:
     return f"{minutes}m {seconds:02d}s"
 
 
+def _format_progress_bar(progress_fraction: float, *, width: int = 24) -> str:
+    clamped_progress = min(max(progress_fraction, 0.0), 1.0)
+    filled_width = int(round(clamped_progress * width))
+    filled = "▮" * filled_width
+    empty = "▯" * (width - filled_width)
+    return f"▕{filled}{empty}▏"
+
+
 def _log_progress(
     total_records: int,
     processed_records: int,
@@ -91,16 +99,19 @@ def _log_progress(
     chunk_elapsed_seconds: float | None = None,
 ) -> None:
     percentage_complete = processed_records / total_records if total_records > 0 else 1.0
+    percent_label = f"{percentage_complete:.0%}"
+    progress_bar = _format_progress_bar(percentage_complete)
+    chunk_label = ""
+    if chunk_index is not None and total_chunks is not None:
+        chunk_label = f"chunk {chunk_index + 1}/{total_chunks} "
 
     message = (
         f"{stage_type}"
-        f"{processed_records:,.0f} records ({percentage_complete:.0%} complete)"
+        f"{chunk_label}{percent_label} {progress_bar} "
+        f"({processed_records:,.0f}/{total_records:,.0f} records)"
     )
     if chunk_elapsed_seconds is not None:
-        chunk_suffix = ""
-        if chunk_index is not None and total_chunks is not None:
-            chunk_suffix = f"chunk {chunk_index + 1}/{total_chunks} "
-        message += f" - {chunk_suffix}took {_format_elapsed(chunk_elapsed_seconds)}"
+        message += f" ({_format_elapsed(chunk_elapsed_seconds)} elapsed)"
 
     logger.info(message)
 
