@@ -818,7 +818,7 @@ def test_peeled_address_multi_word_token_handling(duck_con):
     )
 
 
-def test_peeled_address_stripped_matching_is_opt_in(duck_con):
+def test_peeled_address_stripped_matching_is_enabled_by_default(duck_con):
     df_fuzzy = duck_con.sql("""
         SELECT *, NULL::VARCHAR AS sub_premise_location
         FROM (
@@ -901,22 +901,22 @@ def test_peeled_address_stripped_matching_is_opt_in(duck_con):
         df_canonical_clean=df_canonical,
         stages=[ExactMatchStage(), PeeledAddressStage()],
     )
-    stripped_results, _ = _run_matching(
+    disabled_results, _ = _run_matching(
         con=duck_con,
         df_messy_clean=df_fuzzy,
         df_canonical_clean=df_canonical,
         stages=[
             ExactMatchStage(),
-            PeeledAddressStage(enable_whitespace_punctuation_stripping=True),
+            PeeledAddressStage(enable_whitespace_punctuation_stripping=False),
         ],
     )
 
-    default_row = default_results.select("resolved_canonical_id").fetchone()[0]
-    stripped_row = stripped_results.fetchdf().iloc[0]
+    default_row = default_results.fetchdf().iloc[0]
+    disabled_row = disabled_results.select("resolved_canonical_id").fetchone()[0]
 
-    assert default_row is None
-    assert stripped_row["resolved_canonical_id"] == 1000
-    assert stripped_row["match_reason"] == (
+    assert default_row["resolved_canonical_id"] == 1000
+    assert default_row["match_reason"] == (
         "peeled_address_stripped: match after peeling and removing whitespace "
         "and punctuation"
     )
+    assert disabled_row is None
