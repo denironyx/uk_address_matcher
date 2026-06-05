@@ -22,6 +22,7 @@ from uk_address_matcher.cleaning.steps.inverted_index import (
     _build_inverted_index_from_keys,
     _derive_keys_for_strategy,
 )
+from uk_address_matcher.helpers.progress import _ProgressBar
 from uk_address_matcher.sql_pipeline.helpers import (
     _drop_table_and_registered_aliases,
     _uid,
@@ -81,28 +82,61 @@ def _format_elapsed(elapsed_seconds: float) -> str:
     return f"{minutes}m {seconds:02d}s"
 
 
+def _format_elapsed_brief(elapsed_seconds: float) -> str:
+    total_seconds = int(round(max(0.0, elapsed_seconds)))
+    if total_seconds < 60:
+        return f"{total_seconds}s"
+    return _format_elapsed(elapsed_seconds)
+
+
+def _log_stage_start(stage_label: str, total_records: int, total_chunks: int) -> None:
+    logger.info(
+        "%s: %s records across %s chunk%s",
+        stage_label,
+        f"{total_records:,}",
+        total_chunks,
+        "" if total_chunks == 1 else "s",
+    )
+
+
+def _log_stage_complete(
+    stage_label: str,
+    total_records: int,
+    elapsed_seconds: float,
+) -> None:
+    logger.info(
+        "%s completed: %s records in %s",
+        stage_label,
+        f"{total_records:,}",
+        _format_elapsed_brief(elapsed_seconds),
+    )
+
+
 def _log_progress(
     total_records: int,
     processed_records: int,
-    stage_type: str,
+    stage_label: str,
     *,
     chunk_index: int | None = None,
     total_chunks: int | None = None,
     chunk_elapsed_seconds: float | None = None,
 ) -> None:
-    percentage_complete = processed_records / total_records if total_records > 0 else 1.0
+    chunk_position = "?/?"
+    if chunk_index is not None and total_chunks is not None:
+        chunk_position = f"{chunk_index + 1}/{total_chunks}"
 
-    message = (
-        f"{stage_type}"
-        f"{processed_records:,.0f} records ({percentage_complete:.0%} complete)"
-    )
+    elapsed_suffix = ""
     if chunk_elapsed_seconds is not None:
-        chunk_suffix = ""
-        if chunk_index is not None and total_chunks is not None:
-            chunk_suffix = f"chunk {chunk_index + 1}/{total_chunks} "
-        message += f" - {chunk_suffix}took {_format_elapsed(chunk_elapsed_seconds)}"
+        elapsed_suffix = f", elapsed={_format_elapsed_brief(chunk_elapsed_seconds)}"
 
-    logger.info(message)
+    logger.debug(
+        "%s: chunk %s, %s/%s records%s",
+        stage_label,
+        chunk_position,
+        f"{processed_records:,}",
+        f"{total_records:,}",
+        elapsed_suffix,
+    )
 
 
 def _calculate_chunk_size(total_records: int, num_of_chunks: int) -> int:
@@ -124,6 +158,7 @@ def clean_data_pre_term_frequencies(
     num_of_chunks: int = 10,
     *,
     debug_options: Optional[DebugOptions] = None,
+    show_progress: bool = True,
 ) -> DuckDBPyRelation:
     """Clean address data with foundational steps only (no term frequencies).
 
@@ -153,51 +188,70 @@ def clean_data_pre_term_frequencies(
     total_chunks = (total_rows + chunk_size - 1) // chunk_size
     next_ukam_address_id_offset = 0
     processed_records = 0
+    stage_label = "Cleaning and preprocessing"
+    progress = _ProgressBar(
+        label=stage_label,
+        total=total_rows,
+        total_units=total_chunks,
+        enabled=show_progress,
+    )
 
     con.execute(f"DROP TABLE IF EXISTS __ukam_chunked_addresses_{uid}")
 
-    for chunk_index in range(total_chunks):
-        chunk_started_at = time.perf_counter()
-        chunk_query = con.sql(f"""
-        SELECT *
-            FROM {input_name}
-            WHERE (abs(hash(address_concat)) % {total_chunks}) = {chunk_index}
-        """)
-        chunk_table = f"__ukam_chunk_input_{uid}_{chunk_index}"
-        chunk = _materialise_relation_with_ukam_address_id(
-            con,
-            chunk_query,
-            chunk_table,
-            id_offset=next_ukam_address_id_offset,
-        )
-        chunk_row_count = chunk.count("*").fetchone()[0]
+    stage_started_at = time.perf_counter()
+    _log_stage_start(stage_label, total_rows, total_chunks)
 
-        # Process the chunk without address ID,
-        # applying debug options only on first iteration.
-        processed_chunk = _clean_data_pre_term_frequencies(
-            chunk,
-            con,
-            debug_options=debug_options if chunk_index == 0 else None,
-        )
+    try:
+        for chunk_index in range(total_chunks):
+            chunk_started_at = time.perf_counter()
+            chunk_query = con.sql(f"""
+            SELECT *
+                FROM {input_name}
+                WHERE (abs(hash(address_concat)) % {total_chunks}) = {chunk_index}
+            """)
+            chunk_table = f"__ukam_chunk_input_{uid}_{chunk_index}"
+            chunk = _materialise_relation_with_ukam_address_id(
+                con,
+                chunk_query,
+                chunk_table,
+                id_offset=next_ukam_address_id_offset,
+            )
+            chunk_row_count = chunk.count("*").fetchone()[0]
 
-        if chunk_index == 0:
-            processed_chunk.create(f"__ukam_chunked_addresses_{uid}")
-        else:
-            processed_chunk.insert_into(f"__ukam_chunked_addresses_{uid}")
+            # Process the chunk without address ID,
+            # applying debug options only on first iteration.
+            processed_chunk = _clean_data_pre_term_frequencies(
+                chunk,
+                con,
+                debug_options=debug_options if chunk_index == 0 else None,
+            )
 
-        processed_records += chunk_row_count
-        next_ukam_address_id_offset += chunk_row_count
+            if chunk_index == 0:
+                processed_chunk.create(f"__ukam_chunked_addresses_{uid}")
+            else:
+                processed_chunk.insert_into(f"__ukam_chunked_addresses_{uid}")
 
-        _log_progress(
-            total_rows,
-            processed_records,
-            stage_type="Cleaned and preprocessed: ",
-            chunk_index=chunk_index,
-            total_chunks=total_chunks,
-            chunk_elapsed_seconds=time.perf_counter() - chunk_started_at,
-        )
+            processed_records += chunk_row_count
+            next_ukam_address_id_offset += chunk_row_count
+            progress.update(
+                processed_records,
+                completed_units=chunk_index + 1,
+            )
 
-        _drop_table_and_registered_aliases(con, chunk_table)
+            _log_progress(
+                total_rows,
+                processed_records,
+                stage_label=stage_label,
+                chunk_index=chunk_index,
+                total_chunks=total_chunks,
+                chunk_elapsed_seconds=time.perf_counter() - chunk_started_at,
+            )
+
+            _drop_table_and_registered_aliases(con, chunk_table)
+    finally:
+        progress.close()
+
+    _log_stage_complete(stage_label, total_rows, time.perf_counter() - stage_started_at)
 
     _drop_table_and_registered_aliases(con, input_name)
     _drop_tables_with_prefix(con, f"__ukam_chunk_input_{uid}_")
@@ -211,6 +265,7 @@ def derive_term_frequencies_table(
     num_of_chunks: int = 10,
     *,
     debug_options: Optional["DebugOptions"] = None,
+    show_progress: bool = True,
 ) -> DuckDBPyRelation:
     """Derive a term frequency lookup table from address data.
 
@@ -256,54 +311,75 @@ def derive_term_frequencies_table(
     total_chunks = (total_rows + chunk_size - 1) // chunk_size
     next_ukam_address_id_offset = 0
     processed_records = 0
+    stage_label = "Cleaning for TF derivation"
+    progress = _ProgressBar(
+        label=stage_label,
+        total=total_rows,
+        total_units=total_chunks,
+        enabled=show_progress,
+    )
 
     cleaned_table = f"__ukam_tf_derive_cleaned_{uid}"
     con.execute(f"DROP TABLE IF EXISTS {cleaned_table}")
 
     # Process in chunks using minimal pipeline (clean + tokenise only)
-    for chunk_index in range(total_chunks):
-        chunk_started_at = time.perf_counter()
-        chunk_query = con.sql(f"""
-            SELECT *
-            FROM {input_name}
-            WHERE (abs(hash(address_concat)) % {total_chunks}) = {chunk_index}
-        """)
-        chunk_table = f"__ukam_tf_chunk_input_{uid}_{chunk_index}"
-        chunk = _materialise_relation_with_ukam_address_id(
-            con,
-            chunk_query,
-            chunk_table,
-            id_offset=next_ukam_address_id_offset,
-        )
-        chunk_row_count = chunk.count("*").fetchone()[0]
+    stage_started_at = time.perf_counter()
+    _log_stage_start(stage_label, total_rows, total_chunks)
 
-        pipeline = create_sql_pipeline(
-            con,
-            input_rel=chunk,
-            stage_specs=QUEUE_FOR_TF_DERIVATION,
-            pipeline_name="Clean for TF derivation",
-            pipeline_description=("Clean and tokenise for term frequency computation"),
-        )
-        processed_chunk = pipeline.run(debug_options if chunk_index == 0 else None)
+    try:
+        for chunk_index in range(total_chunks):
+            chunk_started_at = time.perf_counter()
+            chunk_query = con.sql(f"""
+                SELECT *
+                FROM {input_name}
+                WHERE (abs(hash(address_concat)) % {total_chunks}) = {chunk_index}
+            """)
+            chunk_table = f"__ukam_tf_chunk_input_{uid}_{chunk_index}"
+            chunk = _materialise_relation_with_ukam_address_id(
+                con,
+                chunk_query,
+                chunk_table,
+                id_offset=next_ukam_address_id_offset,
+            )
+            chunk_row_count = chunk.count("*").fetchone()[0]
 
-        if chunk_index == 0:
-            processed_chunk.create(cleaned_table)
-        else:
-            processed_chunk.insert_into(cleaned_table)
+            pipeline = create_sql_pipeline(
+                con,
+                input_rel=chunk,
+                stage_specs=QUEUE_FOR_TF_DERIVATION,
+                pipeline_name="Clean for TF derivation",
+                pipeline_description=(
+                    "Clean and tokenise for term frequency computation"
+                ),
+            )
+            processed_chunk = pipeline.run(debug_options if chunk_index == 0 else None)
 
-        processed_records += chunk_row_count
-        next_ukam_address_id_offset += chunk_row_count
+            if chunk_index == 0:
+                processed_chunk.create(cleaned_table)
+            else:
+                processed_chunk.insert_into(cleaned_table)
 
-        _log_progress(
-            total_rows,
-            processed_records,
-            stage_type="Cleaned for TF derivation: ",
-            chunk_index=chunk_index,
-            total_chunks=total_chunks,
-            chunk_elapsed_seconds=time.perf_counter() - chunk_started_at,
-        )
+            processed_records += chunk_row_count
+            next_ukam_address_id_offset += chunk_row_count
+            progress.update(
+                processed_records,
+                completed_units=chunk_index + 1,
+            )
 
-        _drop_table_and_registered_aliases(con, chunk_table)
+            _log_progress(
+                total_rows,
+                processed_records,
+                stage_label=stage_label,
+                chunk_index=chunk_index,
+                total_chunks=total_chunks,
+                chunk_elapsed_seconds=time.perf_counter() - chunk_started_at,
+            )
+
+            _drop_table_and_registered_aliases(con, chunk_table)
+    finally:
+        progress.close()
+
+    _log_stage_complete(stage_label, total_rows, time.perf_counter() - stage_started_at)
 
     # Compute token frequencies from clean_full_address tokens
     tf_sql = f"""
@@ -339,6 +415,7 @@ def derive_inverted_index(
     strategies: list[IndexingStrategy] | None = None,
     *,
     debug_options: Optional["DebugOptions"] = None,
+    show_progress: bool = True,
 ) -> DuckDBPyRelation:
     """Derive an inverted index from already-cleaned canonical data.
 
@@ -393,7 +470,10 @@ def derive_inverted_index(
     total_rows = cleaned_address_table.count("*").fetchone()[0]
 
     for strategy in strategies:
+        stage_label = f"Building inverted index ({strategy.name})"
         if num_of_chunks == 1:
+            stage_started_at = time.perf_counter()
+            _log_stage_start(stage_label, total_rows, 1)
             # Single-pass for this strategy
             pipeline = create_sql_pipeline(
                 con,
@@ -414,48 +494,86 @@ def derive_inverted_index(
                 first_insert = False
             else:
                 chunk_result.insert_into(result_table)
+            _log_progress(
+                total_rows,
+                total_rows,
+                stage_label=stage_label,
+                chunk_index=0,
+                total_chunks=1,
+                chunk_elapsed_seconds=time.perf_counter() - stage_started_at,
+            )
+            _log_stage_complete(
+                stage_label,
+                total_rows,
+                time.perf_counter() - stage_started_at,
+            )
         else:
             # Chunked path for this strategy
-            for chunk_index in range(num_of_chunks):
-                chunk_started_at = time.perf_counter()
+            stage_started_at = time.perf_counter()
+            progress = _ProgressBar(
+                label=stage_label,
+                total=total_rows,
+                total_units=num_of_chunks,
+                enabled=show_progress,
+            )
+            _log_stage_start(stage_label, total_rows, num_of_chunks)
+            try:
+                for chunk_index in range(num_of_chunks):
+                    chunk_started_at = time.perf_counter()
 
-                pipeline = create_sql_pipeline(
-                    con,
-                    input_rel=cleaned_address_table,
-                    stage_specs=[
-                        _derive_keys_for_strategy(
-                            strategy,
-                            num_of_chunks=num_of_chunks,
-                            chunk_index=chunk_index,
+                    pipeline = create_sql_pipeline(
+                        con,
+                        input_rel=cleaned_address_table,
+                        stage_specs=[
+                            _derive_keys_for_strategy(
+                                strategy,
+                                num_of_chunks=num_of_chunks,
+                                chunk_index=chunk_index,
+                            ),
+                            _build_inverted_index_from_keys(
+                                strategy,
+                                max_unique_ids_per_key,
+                            ),
+                        ],
+                        pipeline_name=f"Build inverted index ({strategy.name})",
+                        pipeline_description=(
+                            f"Derive {strategy.name} keys and aggregate into inverted "
+                            f"index (chunk {chunk_index + 1}/{num_of_chunks})"
                         ),
-                        _build_inverted_index_from_keys(strategy, max_unique_ids_per_key),
-                    ],
-                    pipeline_name=f"Build inverted index ({strategy.name})",
-                    pipeline_description=(
-                        f"Derive {strategy.name} keys and aggregate into inverted "
-                        f"index (chunk {chunk_index + 1}/{num_of_chunks})"
-                    ),
-                )
-                chunk_result = pipeline.run(debug_options if first_insert else None)
+                    )
+                    chunk_result = pipeline.run(debug_options if first_insert else None)
 
-                if first_insert:
-                    chunk_result.create(result_table)
-                    first_insert = False
-                else:
-                    chunk_result.insert_into(result_table)
+                    if first_insert:
+                        chunk_result.create(result_table)
+                        first_insert = False
+                    else:
+                        chunk_result.insert_into(result_table)
 
-                _log_progress(
-                    total_rows,
-                    min(
+                    processed_records = min(
                         (chunk_index + 1)
                         * ((total_rows + num_of_chunks - 1) // num_of_chunks),
                         total_rows,
-                    ),
-                    stage_type=(f"Built inverted index ({strategy.name}): "),
-                    chunk_index=chunk_index,
-                    total_chunks=num_of_chunks,
-                    chunk_elapsed_seconds=(time.perf_counter() - chunk_started_at),
-                )
+                    )
+                    progress.update(
+                        processed_records,
+                        completed_units=chunk_index + 1,
+                    )
+                    _log_progress(
+                        total_rows,
+                        processed_records,
+                        stage_label=stage_label,
+                        chunk_index=chunk_index,
+                        total_chunks=num_of_chunks,
+                        chunk_elapsed_seconds=(time.perf_counter() - chunk_started_at),
+                    )
+            finally:
+                progress.close()
+
+            _log_stage_complete(
+                stage_label,
+                total_rows,
+                time.perf_counter() - stage_started_at,
+            )
 
     return con.table(result_table)
 
@@ -475,6 +593,7 @@ def prepare_data_for_matching(
     *,
     dataset_role: Literal["messy", "canonical"] | None = None,
     debug_options: Optional[DebugOptions] = None,
+    show_progress: bool = True,
 ) -> DuckDBPyRelation:
     """Prepare address data for matching.
 
@@ -534,7 +653,11 @@ def prepare_data_for_matching(
 
     # Clean data in chunks (without term frequencies)
     cleaned_address_table = clean_data_pre_term_frequencies(
-        address_table, con, num_of_chunks=num_of_chunks, debug_options=debug_options
+        address_table,
+        con,
+        num_of_chunks=num_of_chunks,
+        debug_options=debug_options,
+        show_progress=show_progress,
     )
 
     total_rows = cleaned_address_table.count("*").fetchone()[0]
@@ -552,6 +675,13 @@ def prepare_data_for_matching(
 
     chunk_size = _calculate_chunk_size(total_rows, num_of_chunks)
     total_chunks = (total_rows + chunk_size - 1) // chunk_size
+    stage_label = "Applying term frequencies"
+    progress = _ProgressBar(
+        label=stage_label,
+        total=total_rows,
+        total_units=total_chunks,
+        enabled=show_progress,
+    )
 
     # Get the underlying table name for direct access
     cleaned_table_name = cleaned_address_table.alias
@@ -566,50 +696,66 @@ def prepare_data_for_matching(
         raise ValueError("dataset_role must be one of: 'messy', 'canonical', or None.")
 
     # Apply term frequencies and trigram blocking to cleaned chunks
-    for chunk_index in range(total_chunks):
-        chunk_started_at = time.perf_counter()
-        chunk_query = con.sql(f"""
-        SELECT *
-            FROM {cleaned_table_name}
-            WHERE (abs(hash(original_address_concat)) % {total_chunks}) = {chunk_index}
-        """)
-        chunk_table = f"__ukam_post_tf_chunk_input_{uid}_{chunk_index}"
-        chunk = _materialise_relation(con, chunk_query, chunk_table)
+    stage_started_at = time.perf_counter()
+    _log_stage_start(stage_label, total_rows, total_chunks)
+    try:
+        for chunk_index in range(total_chunks):
+            chunk_started_at = time.perf_counter()
+            chunk_query = con.sql(f"""
+            SELECT *
+                FROM {cleaned_table_name}
+                WHERE
+                    (abs(hash(original_address_concat)) % {total_chunks})
+                    = {chunk_index}
+            """)
+            chunk_table = f"__ukam_post_tf_chunk_input_{uid}_{chunk_index}"
+            chunk = _materialise_relation(con, chunk_query, chunk_table)
 
-        # Process chunk: apply term frequencies + inverted index blocking in one pass
-        processed_chunk = _clean_data_using_precomputed_rel_tok_freq(
-            chunk,
-            con=con,
-            pre_cleaned_addresses=True,
-            derive_distinguishing_wrt_adjacent_records=(
-                derive_distinguishing_wrt_adjacent_records
-            ),
-            additional_stages=inverted_index_stages,
-            debug_options=debug_options if chunk_index == 0 else None,
-        )
+            # Process chunk: apply term frequencies + inverted index blocking in one pass
+            processed_chunk = _clean_data_using_precomputed_rel_tok_freq(
+                chunk,
+                con=con,
+                pre_cleaned_addresses=True,
+                derive_distinguishing_wrt_adjacent_records=(
+                    derive_distinguishing_wrt_adjacent_records
+                ),
+                additional_stages=inverted_index_stages,
+                debug_options=debug_options if chunk_index == 0 else None,
+            )
 
-        if chunk_index == 0:
-            con.execute(f"DROP TABLE IF EXISTS {processed_table}")
-            processed_chunk.create(processed_table)
-        else:
-            processed_chunk.insert_into(processed_table)
+            if chunk_index == 0:
+                con.execute(f"DROP TABLE IF EXISTS {processed_table}")
+                processed_chunk.create(processed_table)
+            else:
+                processed_chunk.insert_into(processed_table)
 
-        # Delete processed rows from the intermediate cleaned table to free memory
-        con.execute(f"""
-            DELETE FROM {cleaned_table_name}
-            WHERE (abs(hash(original_address_concat)) % {total_chunks}) = {chunk_index}
-        """)
+            # Delete processed rows from the intermediate cleaned table to free memory
+            con.execute(f"""
+                DELETE FROM {cleaned_table_name}
+                WHERE
+                    (abs(hash(original_address_concat)) % {total_chunks})
+                    = {chunk_index}
+            """)
 
-        _log_progress(
-            total_rows,
-            min((chunk_index + 1) * chunk_size, total_rows),
-            stage_type="Applied term frequencies: ",
-            chunk_index=chunk_index,
-            total_chunks=total_chunks,
-            chunk_elapsed_seconds=time.perf_counter() - chunk_started_at,
-        )
+            processed_records = min((chunk_index + 1) * chunk_size, total_rows)
+            progress.update(
+                processed_records,
+                completed_units=chunk_index + 1,
+            )
+            _log_progress(
+                total_rows,
+                processed_records,
+                stage_label=stage_label,
+                chunk_index=chunk_index,
+                total_chunks=total_chunks,
+                chunk_elapsed_seconds=time.perf_counter() - chunk_started_at,
+            )
 
-        _drop_table_and_registered_aliases(con, chunk_table)
+            _drop_table_and_registered_aliases(con, chunk_table)
+    finally:
+        progress.close()
+
+    _log_stage_complete(stage_label, total_rows, time.perf_counter() - stage_started_at)
 
     # Verify the intermediate table is now empty (all chunks processed)
     remaining_rows = con.sql(f"SELECT COUNT(*) FROM {cleaned_table_name}").fetchone()[0]

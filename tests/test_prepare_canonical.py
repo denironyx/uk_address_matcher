@@ -1,4 +1,6 @@
+import io
 import json
+import logging
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -8,8 +10,12 @@ import pyarrow
 import pytest
 
 from uk_address_matcher import prepare_canonical_folder
+from uk_address_matcher.cleaning import chunking_strategies
+from uk_address_matcher.helpers import progress as progress_helpers
+from uk_address_matcher.helpers.progress import _ProgressBar
 from uk_address_matcher.prepare_canonical import (
     MAX_CHUNK_COUNT,
+    _coerce_prepare_input_to_relation,
     _PreparedCanonical,
     load_prepared_canonical_data,
 )
@@ -31,6 +37,42 @@ CANONICAL_RECORDS = [
         "postcode": "B1 1AA",
     },
 ]
+
+
+class _FakeStream(io.StringIO):
+    def __init__(self, *, isatty_value: bool) -> None:
+        super().__init__()
+        self._isatty_value = isatty_value
+
+    def isatty(self) -> bool:
+        return self._isatty_value
+
+
+class _AsciiStream(_FakeStream):
+    @property
+    def encoding(self) -> str:
+        return "ascii"
+
+
+class _BrokenWriteStream(_FakeStream):
+    def write(self, s: str) -> int:
+        raise UnicodeEncodeError("ascii", s, 0, 1, "cannot encode")
+
+
+def _write_raw_canonical_csv(path: Path, records: list[dict[str, str]]) -> None:
+    rows = ["unique_id,address_concat,postcode"]
+    for record in records:
+        rows.append(
+            f"{record['unique_id']},{record['address_concat']},{record['postcode']}"
+        )
+    path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+
+def _fake_relation(*, columns: list[str], row_count: int) -> MagicMock:
+    relation = MagicMock()
+    relation.columns = columns
+    relation.count.return_value.fetchone.return_value = (row_count,)
+    return relation
 
 
 @pytest.fixture
@@ -59,6 +101,157 @@ def test_prepare_creates_expected_files(prepared_folder):
     assert (prepared_folder / "ukam_manifest.json").exists()
 
 
+def test_progress_bar_disabled_writes_nothing():
+    stream = _FakeStream(isatty_value=True)
+    progress = _ProgressBar(label="Testing", total=10, enabled=False, stream=stream)
+
+    progress.update(5)
+    progress.close()
+
+    assert stream.getvalue() == ""
+
+
+def test_progress_bar_enabled_writes_carriage_return_and_newline():
+    stream = _FakeStream(isatty_value=True)
+    progress = _ProgressBar(
+        label="Testing",
+        total=10,
+        total_units=4,
+        enabled=True,
+        stream=stream,
+    )
+
+    progress.update(5, completed_units=2)
+    progress.close()
+
+    output = stream.getvalue()
+    assert "\rTesting:  50% ▕" in output
+    assert "▮" * 12 in output
+    assert "▯" * 12 in output
+    assert "5/10 records" in output
+    assert output.endswith("\n")
+
+
+def test_progress_bar_caps_progress_at_total():
+    stream = _FakeStream(isatty_value=True)
+    progress = _ProgressBar(
+        label="Testing",
+        total=10,
+        total_units=4,
+        enabled=True,
+        stream=stream,
+    )
+
+    progress.update(25, completed_units=8)
+
+    assert "10/10 records" in stream.getvalue()
+    assert f"▕{'▮' * 24}▏" in stream.getvalue()
+
+
+def test_progress_bar_defaults_to_enabled():
+    stream = _FakeStream(isatty_value=False)
+    progress = _ProgressBar(label="Testing", total=10, stream=stream)
+
+    progress.update(5)
+
+    assert stream.getvalue()
+
+
+def test_progress_bar_disables_itself_when_stream_cannot_render():
+    stream = _BrokenWriteStream(isatty_value=True)
+    progress = _ProgressBar(
+        label="Testing",
+        total=10,
+        total_units=4,
+        enabled=True,
+        stream=stream,
+    )
+
+    progress.update(5, completed_units=2)
+    progress.close()
+
+    assert progress.enabled is False
+
+
+def test_progress_bar_ascii_fallback_uses_plain_glyphs():
+    stream = _AsciiStream(isatty_value=True)
+    progress = _ProgressBar(
+        label="Testing",
+        total=10,
+        total_units=4,
+        enabled=True,
+        stream=stream,
+    )
+
+    progress.update(5, completed_units=2)
+    progress.close()
+
+    output = stream.getvalue()
+    assert "[" in output and "]" in output
+    assert "#" in output and "-" in output
+    assert "▕" not in output and "▮" not in output
+
+
+def test_progress_bar_close_without_render_writes_nothing():
+    stream = _FakeStream(isatty_value=True)
+    progress = _ProgressBar(label="Testing", total=10, enabled=True, stream=stream)
+
+    progress.close()
+
+    assert stream.getvalue() == ""
+
+
+def test_progress_bar_clears_leftover_characters_on_shorter_render():
+    stream = _FakeStream(isatty_value=True)
+    progress = _ProgressBar(
+        label="Testing",
+        total=10,
+        total_units=4,
+        enabled=True,
+        stream=stream,
+    )
+
+    progress.update(10, completed_units=4)
+    progress.update(1, completed_units=1)
+
+    output = stream.getvalue()
+    assert "\rTesting: 100%" in output
+    assert "\rTesting:  10%" in output
+    assert output.endswith(" " * 2) or "  " in output.split("\r")[-1]
+
+
+def test_prepare_accepts_local_csv_path_input(con, tmp_path):
+    input_csv = tmp_path / "canonical.csv"
+    _write_raw_canonical_csv(input_csv, CANONICAL_RECORDS)
+
+    prepare_canonical_folder(input_csv, output_folder=tmp_path / "prepared", con=con)
+
+    assert (tmp_path / "prepared" / "ukam_canonical_addresses.parquet").exists()
+    assert (tmp_path / "prepared" / "ukam_term_frequencies.parquet").exists()
+    assert (tmp_path / "prepared" / "ukam_inverted_index.parquet").exists()
+    assert (tmp_path / "prepared" / "ukam_manifest.json").exists()
+
+
+def test_prepare_accepts_list_of_local_csv_paths(con, tmp_path):
+    first_csv = tmp_path / "canonical_part_1.csv"
+    second_csv = tmp_path / "canonical_part_2.csv"
+    _write_raw_canonical_csv(first_csv, CANONICAL_RECORDS[:2])
+    _write_raw_canonical_csv(second_csv, CANONICAL_RECORDS[2:])
+
+    prepare_canonical_folder(
+        [first_csv, second_csv],
+        output_folder=tmp_path / "prepared",
+        con=con,
+        output_chunk_count=2,
+    )
+
+    chunk_files = sorted(
+        (tmp_path / "prepared" / "ukam_canonical_addresses_chunks").glob("*.parquet")
+    )
+    assert len(chunk_files) == 2
+    assert (tmp_path / "prepared" / "ukam_manifest.json").exists()
+
+
 def test_prepare_can_create_chunked_canonical_output(con, canonical_data, tmp_path):
     prepare_canonical_folder(
         canonical_data,
@@ -77,6 +270,221 @@ def test_prepare_can_create_chunked_canonical_output(con, canonical_data, tmp_pa
     assert chunk_files[1].name == "canonical_addresses_chunk_00002_of_00003.parquet"
     assert chunk_files[2].name == "canonical_addresses_chunk_00003_of_00003.parquet"
     assert not (tmp_path / "ukam_canonical_addresses.parquet").exists()
+
+
+def test_prepare_show_progress_false_suppresses_live_output(
+    con, canonical_data, tmp_path, monkeypatch
+):
+    stream = _FakeStream(isatty_value=True)
+    monkeypatch.setattr(progress_helpers.sys, "stderr", stream)
+
+    prepare_canonical_folder(
+        canonical_data,
+        output_folder=tmp_path / "prepared",
+        con=con,
+        overwrite=True,
+        show_progress=False,
+    )
+
+    assert stream.getvalue() == ""
+
+
+def test_prepare_default_show_progress_enables_live_output(
+    con, canonical_data, tmp_path, monkeypatch
+):
+    enabled_values: list[bool] = []
+
+    class _RecordingProgressBar:
+        def __init__(
+            self,
+            *,
+            label: str,
+            total: int,
+            total_units: int | None = None,
+            enabled: bool = True,
+            stream: object | None = None,
+        ) -> None:
+            del label, total, total_units, stream
+            enabled_values.append(enabled)
+
+        def update(
+            self,
+            current: int,
+            *,
+            completed_units: int | None = None,
+        ) -> None:
+            del current, completed_units
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(chunking_strategies, "_ProgressBar", _RecordingProgressBar)
+
+    prepare_canonical_folder(
+        canonical_data,
+        output_folder=tmp_path / "prepared",
+        con=con,
+        overwrite=True,
+    )
+
+    assert enabled_values
+    assert all(value is True for value in enabled_values)
+
+
+def test_prepare_show_progress_true_emits_live_output(
+    con, canonical_data, tmp_path, monkeypatch
+):
+    enabled_values: list[bool] = []
+
+    class _RecordingProgressBar:
+        def __init__(
+            self,
+            *,
+            label: str,
+            total: int,
+            total_units: int | None = None,
+            enabled: bool = True,
+            stream: object | None = None,
+        ) -> None:
+            del label, total, total_units, stream
+            enabled_values.append(enabled)
+
+        def update(
+            self,
+            current: int,
+            *,
+            completed_units: int | None = None,
+        ) -> None:
+            del current, completed_units
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(chunking_strategies, "_ProgressBar", _RecordingProgressBar)
+
+    prepare_canonical_folder(
+        canonical_data,
+        output_folder=tmp_path / "prepared",
+        con=con,
+        overwrite=True,
+        show_progress=True,
+    )
+
+    assert enabled_values
+    assert all(value is True for value in enabled_values)
+
+
+def test_prepare_logs_sparse_info_and_debug_progress(
+    con, canonical_data, tmp_path, caplog
+):
+    with caplog.at_level(logging.DEBUG, logger="uk_address_matcher"):
+        prepare_canonical_folder(
+            canonical_data,
+            output_folder=tmp_path / "prepared",
+            con=con,
+            overwrite=True,
+            show_progress=False,
+        )
+
+    info_messages = [
+        record.getMessage() for record in caplog.records if record.levelno == logging.INFO
+    ]
+    debug_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno == logging.DEBUG
+    ]
+
+    assert any(
+        message.startswith("Cleaning for TF derivation:") and "records across" in message
+        for message in info_messages
+    )
+    assert any(
+        message.startswith("Cleaning for TF derivation completed:")
+        for message in info_messages
+    )
+    assert any(
+        message.startswith("Applying term frequencies:") and "records across" in message
+        for message in info_messages
+    )
+    assert any(
+        message.startswith("Applying term frequencies completed:")
+        for message in info_messages
+    )
+    assert any(
+        message.startswith("Cleaning for TF derivation:") and "chunk 1/1" in message
+        for message in debug_messages
+    )
+    progress_glyphs = ("█", "░", "▕", "▏", "▮", "▯")
+    assert all(
+        all(glyph not in message for glyph in progress_glyphs)
+        for message in info_messages
+    )
+    assert all(
+        all(glyph not in message for glyph in progress_glyphs)
+        for message in debug_messages
+    )
+
+
+@pytest.mark.parametrize(
+    ("input_value", "reader_name", "expected_argument"),
+    [
+        (
+            "s3://bucket/input/os_fake.csv",
+            "read_csv",
+            "s3://bucket/input/os_fake.csv",
+        ),
+        (
+            "gs://bucket/input/data.parquet?version=1",
+            "read_parquet",
+            "gs://bucket/input/data.parquet?version=1",
+        ),
+        (
+            [
+                "abfs://container/input/part-1.csv",
+                "abfs://container/input/part-2.csv",
+            ],
+            "read_csv",
+            [
+                "abfs://container/input/part-1.csv",
+                "abfs://container/input/part-2.csv",
+            ],
+        ),
+    ],
+)
+def test_coerce_prepare_input_reads_cloud_paths_with_duckdb(
+    input_value, reader_name, expected_argument
+):
+    con = MagicMock()
+    relation = _fake_relation(
+        columns=["unique_id", "address_concat", "postcode"],
+        row_count=3,
+    )
+    getattr(con, reader_name).return_value = relation
+
+    result = _coerce_prepare_input_to_relation(input_value, con=con)
+
+    assert result is relation
+    getattr(con, reader_name).assert_called_once_with(expected_argument)
+
+
+def test_coerce_prepare_input_projects_original_address_concat():
+    con = MagicMock()
+    original_relation = MagicMock()
+    projected_relation = _fake_relation(
+        columns=["unique_id", "original_address_concat", "address_concat"],
+        row_count=3,
+    )
+    original_relation.columns = ["unique_id", "original_address_concat"]
+    original_relation.project.return_value = projected_relation
+    con.read_csv.return_value = original_relation
+
+    result = _coerce_prepare_input_to_relation("s3://bucket/input/raw.csv", con=con)
+
+    assert result is projected_relation
+    original_relation.project.assert_called_once_with(
+        "*, original_address_concat AS address_concat"
+    )
 
 
 @pytest.mark.parametrize("invalid_chunk_count", [0, -1, -10])
@@ -153,6 +561,128 @@ def test_prepare_overwrite_true_succeeds(con, canonical_data):
         prepare_canonical_folder(
             canonical_data, output_folder=tmp, con=con, overwrite=True
         )
+
+
+def test_prepare_remote_csv_input_writes_remote_output(monkeypatch):
+    from uk_address_matcher.cleaning import chunking_strategies
+
+    con = MagicMock()
+    raw_relation = _fake_relation(
+        columns=["unique_id", "address_concat", "postcode"],
+        row_count=3,
+    )
+    con.read_csv.return_value = raw_relation
+    con.read_parquet.side_effect = FileNotFoundError("missing")
+
+    tf_relation = _fake_relation(columns=["token", "count"], row_count=4)
+    inverted_relation = _fake_relation(columns=["token", "address_id"], row_count=5)
+    clean_relation = _fake_relation(
+        columns=["unique_id", "address_concat", "postcode"],
+        row_count=3,
+    )
+
+    monkeypatch.setattr(
+        chunking_strategies,
+        "derive_term_frequencies_table",
+        lambda data, con, num_of_chunks, show_progress=True: tf_relation,
+    )
+    monkeypatch.setattr(
+        chunking_strategies,
+        "prepare_data_for_matching",
+        lambda data, con, num_of_chunks, term_frequency_lookup, show_progress=True: (
+            clean_relation
+        ),
+    )
+    monkeypatch.setattr(
+        chunking_strategies,
+        "derive_inverted_index",
+        lambda df_clean, con, num_of_chunks, show_progress=True: inverted_relation,
+    )
+
+    prepare_canonical_folder(
+        "s3://bucket/input/canonical.csv",
+        "s3://bucket/output/prepared",
+        con=con,
+    )
+
+    con.read_csv.assert_called_once_with("s3://bucket/input/canonical.csv")
+    tf_relation.write_parquet.assert_called_once_with(
+        "s3://bucket/output/prepared/ukam_term_frequencies.parquet"
+    )
+    inverted_relation.write_parquet.assert_called_once_with(
+        "s3://bucket/output/prepared/ukam_inverted_index.parquet"
+    )
+    clean_relation.write_parquet.assert_called_once_with(
+        "s3://bucket/output/prepared/ukam_canonical_addresses.parquet"
+    )
+    assert any(
+        "ukam_manifest.json" in call.args[0]
+        for call in con.execute.call_args_list
+        if call.args
+    )
+
+
+def test_prepare_remote_output_writes_chunked_paths(monkeypatch):
+    from uk_address_matcher.cleaning import chunking_strategies
+
+    con = MagicMock()
+    raw_relation = _fake_relation(
+        columns=["unique_id", "address_concat", "postcode"],
+        row_count=3,
+    )
+    con.read_csv.return_value = raw_relation
+    con.read_parquet.side_effect = FileNotFoundError("missing")
+
+    tf_relation = _fake_relation(columns=["token", "count"], row_count=4)
+    inverted_relation = _fake_relation(columns=["token", "address_id"], row_count=5)
+    clean_relation = _fake_relation(
+        columns=["unique_id", "address_concat", "postcode"],
+        row_count=3,
+    )
+
+    chunk_queries = []
+    for row_count in (2, 1):
+        chunk_query = _fake_relation(
+            columns=["unique_id", "address_concat", "postcode"],
+            row_count=row_count,
+        )
+        chunk_queries.append(chunk_query)
+    con.sql.side_effect = chunk_queries
+
+    monkeypatch.setattr(
+        chunking_strategies,
+        "derive_term_frequencies_table",
+        lambda data, con, num_of_chunks, show_progress=True: tf_relation,
+    )
+    monkeypatch.setattr(
+        chunking_strategies,
+        "prepare_data_for_matching",
+        lambda data, con, num_of_chunks, term_frequency_lookup, show_progress=True: (
+            clean_relation
+        ),
+    )
+    monkeypatch.setattr(
+        chunking_strategies,
+        "derive_inverted_index",
+        lambda df_clean, con, num_of_chunks, show_progress=True: inverted_relation,
+    )
+
+    prepare_canonical_folder(
+        "s3://bucket/input/canonical.csv",
+        "s3://bucket/output/prepared",
+        con=con,
+        output_chunk_count=2,
+    )
+
+    clean_relation.create.assert_called_once()
+    chunk_queries[0].write_parquet.assert_called_once_with(
+        "s3://bucket/output/prepared/ukam_canonical_addresses_chunks/"
+        "canonical_addresses_chunk_00001_of_00002.parquet"
+    )
+    chunk_queries[1].write_parquet.assert_called_once_with(
+        "s3://bucket/output/prepared/ukam_canonical_addresses_chunks/"
+        "canonical_addresses_chunk_00002_of_00002.parquet"
+    )
 
 
 def test_overwrite_clears_stale_files(con, canonical_data):

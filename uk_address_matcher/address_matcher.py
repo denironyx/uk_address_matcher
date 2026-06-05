@@ -9,6 +9,9 @@ from uk_address_matcher.cleaning.chunking_strategies import (
     derive_term_frequencies_table,
     prepare_data_for_matching,
 )
+from uk_address_matcher.helpers.canonical_inputs import (
+    normalise_and_validate_raw_canonical,
+)
 from uk_address_matcher.linking_model.address_record import AddressRecord
 from uk_address_matcher.linking_model.matching.runner import _run_matching
 from uk_address_matcher.linking_model.matching.stages.base_stage import MatchingStage
@@ -35,24 +38,6 @@ def _default_stages() -> list[MatchingStage]:
     from uk_address_matcher.linking_model.matching.stages.splink import SplinkStage
 
     return [ExactMatchStage(), SplinkStage()]
-
-
-def _normalise_and_validate_raw_canonical(
-    rel: duckdb.DuckDBPyRelation,
-) -> duckdb.DuckDBPyRelation:
-    """Normalise and validate required columns for raw canonical input."""
-    if "address_concat" not in rel.columns and "original_address_concat" in rel.columns:
-        rel = rel.project("*, original_address_concat AS address_concat")
-
-    required = {"unique_id", "address_concat"}
-    missing = sorted(required.difference(rel.columns))
-    if missing:
-        raise ValueError(
-            "canonical_addresses relation is missing required columns: "
-            f"{missing}. Expected at least ['address_concat', 'unique_id']."
-        )
-
-    return rel
 
 
 class AddressMatcher:
@@ -234,7 +219,7 @@ class AddressMatcher:
             self._register_inverted_index(prepared.inverted_index)
 
         else:
-            canonical_for_preparation = _normalise_and_validate_raw_canonical(
+            canonical_for_preparation = normalise_and_validate_raw_canonical(
                 self._raw_canonical
             )
             # Data is either raw or only pre-cleaned.  In both cases we need
