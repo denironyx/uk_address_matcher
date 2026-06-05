@@ -53,6 +53,24 @@ _MANAGED_FILES = [
     f"{MANIFEST_FILENAME}.tmp",
 ]
 
+# Parquet write tuning for the prepared artefacts.
+# ZSTD with a moderate-high level is paid once at preparation time and does not
+# affect match-time runtime (zstd decompression speed is independent of the
+# compression level), while meaningfully reducing on-disk and in-memory size.
+PARQUET_COMPRESSION = "ZSTD"
+PARQUET_COMPRESSION_LEVEL = 9
+
+# Sorting canonical rows by these columns dramatically improves compression: rows
+# sharing a postcode share large substrings across the address/token columns,
+# which ZSTD and dictionary/run-length encoding exploit. Row order is irrelevant
+# to matching, so this is a free win.
+CANONICAL_SORT_COLUMNS = ("postcode", "clean_full_address")
+
+# Columns that are trivially recomputable at load time and therefore not persisted,
+# to reduce file size. They are restored in ``load_prepared_canonical_data``.
+# For canonical data ``exploding_unique_ids`` is always ``[unique_id]``.
+RECOMPUTABLE_DROP_COLUMNS = ("exploding_unique_ids",)
+
 
 @dataclass(frozen=True)
 class _PreparedCanonical:
@@ -80,6 +98,35 @@ class _PreparedFolderLayout:
 def _escape_sql_string(value: str) -> str:
     """Escape a Python string for embedding in a DuckDB SQL string literal."""
     return value.replace("'", "''")
+
+
+def _write_parquet_artefact(
+    con: duckdb.DuckDBPyConnection,
+    relation: duckdb.DuckDBPyRelation,
+    path: str | Path,
+    *,
+    sort_columns: tuple[str, ...] = (),
+    drop_columns: tuple[str, ...] = (),
+) -> None:
+    """Write a relation to a Parquet file using ZSTD compression.
+
+    Optionally sorts rows by ``sort_columns`` (to maximise compression locality)
+    and excludes ``drop_columns`` that are recomputed at load time. Works for
+    both local paths and remote object-store URIs.
+    """
+    columns = relation.columns
+    existing_drops = [c for c in drop_columns if c in columns]
+    drop_clause = f" EXCLUDE ({', '.join(existing_drops)})" if existing_drops else ""
+    sort_cols = [c for c in sort_columns if c in columns]
+    order_clause = (" ORDER BY " + ", ".join(sort_cols)) if sort_cols else ""
+    escaped_path = _escape_sql_string(str(path))
+    con.execute(
+        f"COPY (SELECT *{drop_clause} "
+        f"FROM ({relation.sql_query()}) AS _ukam_src{order_clause}) "
+        f"TO '{escaped_path}' "
+        f"(FORMAT PARQUET, COMPRESSION {PARQUET_COMPRESSION}, "
+        f"COMPRESSION_LEVEL {PARQUET_COMPRESSION_LEVEL})"
+    )
 
 
 def _describe_prepare_input(data: PrepareCanonicalInput) -> str:
@@ -170,6 +217,21 @@ def _rollback_if_needed(con: duckdb.DuckDBPyConnection) -> None:
         pass
 
 
+def _rehydrate_canonical_addresses(
+    addresses: duckdb.DuckDBPyRelation,
+) -> duckdb.DuckDBPyRelation:
+    """Restore recomputable columns not persisted in the canonical parquet.
+
+    ``exploding_unique_ids`` is always ``[unique_id]`` for canonical data, so it
+    is omitted at write time and reconstructed here to keep the in-memory schema
+    identical to a freshly-prepared relation.
+    """
+    columns = addresses.columns
+    if "exploding_unique_ids" not in columns and "unique_id" in columns:
+        addresses = addresses.select("*, list_value(unique_id) AS exploding_unique_ids")
+    return addresses
+
+
 def _load_prepared_canonical_data_remote(
     folder_uri: str,
     con: duckdb.DuckDBPyConnection,
@@ -246,6 +308,8 @@ def _load_prepared_canonical_data_remote(
             f"{PREPARED_ADDRESSES_FILENAME}/*.parquet. "
             f"Underlying error: {last_error}"
         ) from last_error
+
+    addresses = _rehydrate_canonical_addresses(addresses)
 
     if canonical_address_filter is not None:
         addresses = addresses.filter(canonical_address_filter)
@@ -481,8 +545,8 @@ def prepare_canonical_folder(
         else output_folder_path / PREPARED_INVERTED_INDEX_FILENAME
     )
 
-    tf_table.write_parquet(str(tf_path))
-    inverted_index.write_parquet(str(idx_path))
+    _write_parquet_artefact(con, tf_table, tf_path)
+    _write_parquet_artefact(con, inverted_index, idx_path)
 
     canonical_paths: list[str | Path]
     chunk_output_location: str | Path | None = None
@@ -492,7 +556,13 @@ def prepare_canonical_folder(
             if output_is_remote
             else output_folder_path / PREPARED_ADDRESSES_FILENAME
         )
-        df_clean.write_parquet(str(addr_path))
+        _write_parquet_artefact(
+            con,
+            df_clean,
+            addr_path,
+            sort_columns=CANONICAL_SORT_COLUMNS,
+            drop_columns=RECOMPUTABLE_DROP_COLUMNS,
+        )
         canonical_paths = [addr_path]
     else:
         chunk_dir = (
@@ -529,7 +599,13 @@ def prepare_canonical_folder(
                     else Path(chunk_dir)
                     / _chunk_file_name(chunk_index, output_chunk_count)
                 )
-                chunk_query.write_parquet(str(chunk_path))
+                _write_parquet_artefact(
+                    con,
+                    chunk_query,
+                    chunk_path,
+                    sort_columns=CANONICAL_SORT_COLUMNS,
+                    drop_columns=RECOMPUTABLE_DROP_COLUMNS,
+                )
                 chunk_count = chunk_query.count("*").fetchone()[0]
                 canonical_paths.append(chunk_path)
                 logger.debug(
@@ -573,7 +649,9 @@ def prepare_canonical_folder(
             if output_is_remote
             else str(Path(canonical_path).relative_to(output_folder_path))
         )
-        artefact_columns[relative_name] = df_clean.columns
+        artefact_columns[relative_name] = [
+            c for c in df_clean.columns if c not in RECOMPUTABLE_DROP_COLUMNS
+        ]
 
     manifest_row_counts = {
         "canonical_addresses": addr_count,
@@ -835,6 +913,8 @@ def load_prepared_canonical_data(
     inverted_index = con.read_parquet(
         str(layout.folder / PREPARED_INVERTED_INDEX_FILENAME)
     )
+
+    addresses = _rehydrate_canonical_addresses(addresses)
 
     if canonical_address_filter is not None:
         addresses = addresses.filter(canonical_address_filter)
