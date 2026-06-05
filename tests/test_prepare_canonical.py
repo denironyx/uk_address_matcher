@@ -606,15 +606,23 @@ def test_prepare_remote_csv_input_writes_remote_output(monkeypatch):
     )
 
     con.read_csv.assert_called_once_with("s3://bucket/input/canonical.csv")
-    tf_relation.write_parquet.assert_called_once_with(
-        "s3://bucket/output/prepared/ukam_term_frequencies.parquet"
-    )
-    inverted_relation.write_parquet.assert_called_once_with(
-        "s3://bucket/output/prepared/ukam_inverted_index.parquet"
-    )
-    clean_relation.write_parquet.assert_called_once_with(
-        "s3://bucket/output/prepared/ukam_canonical_addresses.parquet"
-    )
+
+    copy_sql = [
+        call.args[0]
+        for call in con.execute.call_args_list
+        if call.args and "COPY" in call.args[0]
+    ]
+
+    def _written(path: str) -> bool:
+        return any(f"TO '{path}'" in sql for sql in copy_sql)
+
+    parquet_copies = [sql for sql in copy_sql if "FORMAT PARQUET" in sql]
+    assert parquet_copies
+    assert all("COMPRESSION ZSTD" in sql for sql in parquet_copies)
+
+    assert _written("s3://bucket/output/prepared/ukam_term_frequencies.parquet")
+    assert _written("s3://bucket/output/prepared/ukam_inverted_index.parquet")
+    assert _written("s3://bucket/output/prepared/ukam_canonical_addresses.parquet")
     assert any(
         "ukam_manifest.json" in call.args[0]
         for call in con.execute.call_args_list
@@ -675,11 +683,21 @@ def test_prepare_remote_output_writes_chunked_paths(monkeypatch):
     )
 
     clean_relation.create.assert_called_once()
-    chunk_queries[0].write_parquet.assert_called_once_with(
+
+    copy_sql = [
+        call.args[0]
+        for call in con.execute.call_args_list
+        if call.args and "COPY" in call.args[0]
+    ]
+
+    def _written(path: str) -> bool:
+        return any(f"TO '{path}'" in sql for sql in copy_sql)
+
+    assert _written(
         "s3://bucket/output/prepared/ukam_canonical_addresses_chunks/"
         "canonical_addresses_chunk_00001_of_00002.parquet"
     )
-    chunk_queries[1].write_parquet.assert_called_once_with(
+    assert _written(
         "s3://bucket/output/prepared/ukam_canonical_addresses_chunks/"
         "canonical_addresses_chunk_00002_of_00002.parquet"
     )
