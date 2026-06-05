@@ -10,7 +10,7 @@
     {
       "mark": {
         "type": "rule",
-        "color": "#9AA1A6",
+        "color": "#A0A5B4",
         "strokeDash": [
           4,
           4
@@ -64,13 +64,13 @@
           "title": "Comparison",
           "scale": {
             "range": [
-              "#F58518",
-              "#54A24B",
-              "#E45756",
-              "#72B7B2",
-              "#EECA3B",
-              "#B279A2",
-              "#FF9DA6"
+              "#28A197",
+              "#F46A25",
+              "#801650",
+              "#1D609D",
+              "#30AA51",
+              "#A285D1",
+              "#00B1EB"
             ]
           }
         },
