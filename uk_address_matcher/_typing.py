@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TypeAlias, TypedDict
+
+import duckdb
 
 
 class StageDiagnosticRow(TypedDict):
@@ -14,3 +17,5 @@ class StageDiagnosticRow(TypedDict):
 
 
 StageDiagnostics: TypeAlias = list[StageDiagnosticRow]
+
+PrepareCanonicalInput: TypeAlias = duckdb.DuckDBPyRelation | str | Path | list[str | Path]
