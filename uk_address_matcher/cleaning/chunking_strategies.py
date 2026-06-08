@@ -123,7 +123,9 @@ def _log_progress(
     chunk_elapsed_seconds: float | None = None,
 ) -> None:
     if progress is not None:
-        progress.ensure_line_break()
+        ensure_line_break = getattr(progress, "ensure_line_break", None)
+        if callable(ensure_line_break):
+            ensure_line_break()
 
     chunk_position = "?/?"
     if chunk_index is not None and total_chunks is not None:
