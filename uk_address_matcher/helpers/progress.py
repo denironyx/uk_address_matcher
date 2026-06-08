@@ -80,6 +80,18 @@ class _ProgressBar:
         except (OSError, UnicodeEncodeError, ValueError):
             self._disable()
 
+    def ensure_line_break(self) -> None:
+        if not self.enabled or not self._rendered:
+            return
+
+        try:
+            self.stream.write("\n")
+            self.stream.flush()
+            self._rendered = False
+            self._last_render_length = 0
+        except (OSError, UnicodeEncodeError, ValueError):
+            self._disable()
+
     def close(self) -> None:
         if self.enabled and self._rendered:
             try:
