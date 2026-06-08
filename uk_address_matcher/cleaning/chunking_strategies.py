@@ -504,7 +504,6 @@ def derive_inverted_index(
                 total_rows,
                 total_rows,
                 stage_label=stage_label,
-                progress=progress,
                 chunk_index=0,
                 total_chunks=1,
                 chunk_elapsed_seconds=time.perf_counter() - stage_started_at,
