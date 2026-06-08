@@ -12,9 +12,8 @@ from uk_address_matcher.sql_pipeline.match_reasons import MatchReason
 @pytest.fixture
 def test_data(duck_con):
     """Set up test data as DuckDB PyRelations for exact matching tests."""
-    df_fuzzy = duck_con.sql(
-        """
-        SELECT *
+    df_fuzzy = duck_con.sql("""
+        SELECT *, NULL::VARCHAR AS sub_premise_location
         FROM (
             VALUES
                 (
@@ -89,12 +88,10 @@ def test_data(duck_con):
             peeled_tokens_list,
             ukam_address_id
         )
-        """
-    )
+        """)
 
-    df_canonical = duck_con.sql(
-        """
-        SELECT *
+    df_canonical = duck_con.sql("""
+        SELECT *, NULL::VARCHAR AS sub_premise_location
         FROM (
             VALUES
                 (
@@ -121,8 +118,7 @@ def test_data(duck_con):
             peeled_tokens_list,
             ukam_address_id
         )
-        """
-    )
+        """)
 
     return df_fuzzy, df_canonical
 
@@ -241,17 +237,15 @@ FLAT_CANONICAL_DUPLICATE_ROW_SQL = """
 
 
 def _address_relation_from_values(duck_con, values_sql: str):
-    return duck_con.sql(
-        f"""
-        SELECT *
+    return duck_con.sql(f"""
+        SELECT *, NULL::VARCHAR AS sub_premise_location
         FROM (
             VALUES
                 {values_sql}
         ) AS t(
             {ADDRESS_ROW_COLUMNS_SQL}
         )
-        """
-    )
+        """)
 
 
 def test_exact_matching_applies_no_whitespace_fallback_by_default(duck_con):
@@ -315,6 +309,26 @@ def test_exact_matching_flat_retraction_requires_unique_canonical_row(duck_con):
     assert matched.empty
 
 
+def test_exact_matching_flat_retraction_rejects_conflicting_sub_premise_location(
+    duck_con,
+):
+    df_messy = _address_relation_from_values(duck_con, FLAT_MESSY_ROW_SQL).select(
+        "* EXCLUDE (sub_premise_location), 'RIGHT'::VARCHAR AS sub_premise_location"
+    )
+    df_canonical = _address_relation_from_values(duck_con, FLAT_CANONICAL_ROW_SQL).select(
+        "* EXCLUDE (sub_premise_location), 'LEFT'::VARCHAR AS sub_premise_location"
+    )
+
+    results, _ = _run_matching(
+        con=duck_con,
+        df_messy_clean=df_messy,
+        df_canonical_clean=df_canonical,
+        stages=[ExactMatchStage()],
+    )
+    matched = results.fetchdf().dropna(subset=["resolved_canonical_id"])
+    assert matched.empty
+
+
 # -----------------------------------------------------------------------------
 # Peeled address matching tests
 # -----------------------------------------------------------------------------
@@ -324,9 +338,8 @@ def test_exact_matching_flat_retraction_requires_unique_canonical_row(duck_con):
 def peeled_test_data(duck_con):
     """Test data for peeled address matching with locality tokens to remove."""
     # Fuzzy addresses with various peeled token scenarios
-    df_fuzzy = duck_con.sql(
-        """
-        SELECT *
+    df_fuzzy = duck_con.sql("""
+        SELECT *, NULL::VARCHAR AS sub_premise_location
         FROM (
             VALUES
                 -- Case 1: Single peeled token (LONDON)
@@ -453,13 +466,11 @@ def peeled_test_data(duck_con):
             business_unit_id,
             ukam_address_id
         )
-        """
-    )
+        """)
 
     # Canonical addresses - some with peeling, some without
-    df_canonical = duck_con.sql(
-        """
-        SELECT *
+    df_canonical = duck_con.sql("""
+        SELECT *, NULL::VARCHAR AS sub_premise_location
         FROM (
             VALUES
                 -- Matches Case 1: same postcode, peeled address = '100 HIGH STREET'
@@ -598,8 +609,7 @@ def peeled_test_data(duck_con):
             business_unit_id,
             ukam_address_id
         )
-        """
-    )
+        """)
 
     return df_fuzzy, df_canonical
 
@@ -718,9 +728,8 @@ def test_peeled_address_multi_word_token_handling(duck_con):
     but we need to remove 2 words from the tokenised clean_full_address.
     """
     # Setup: fuzzy has 'TUNBRIDGE WELLS' as a single entry in peeled_tokens_list
-    df_fuzzy = duck_con.sql(
-        """
-        SELECT *
+    df_fuzzy = duck_con.sql("""
+        SELECT *, NULL::VARCHAR AS sub_premise_location
         FROM (
             VALUES
                 (
@@ -755,13 +764,11 @@ def test_peeled_address_multi_word_token_handling(duck_con):
             business_unit_id,
             ukam_address_id
         )
-        """
-    )
+        """)
 
     # Canonical: '10 TEST STREET' (no locality suffix)
-    df_canonical = duck_con.sql(
-        """
-        SELECT *
+    df_canonical = duck_con.sql("""
+        SELECT *, NULL::VARCHAR AS sub_premise_location
         FROM (
             VALUES
                 (
@@ -796,8 +803,7 @@ def test_peeled_address_multi_word_token_handling(duck_con):
             business_unit_id,
             ukam_address_id
         )
-        """
-    )
+        """)
 
     results, _stage_diagnostics = _run_matching(
         con=duck_con,
@@ -810,3 +816,107 @@ def test_peeled_address_multi_word_token_handling(duck_con):
     assert results_df.iloc[0]["resolved_canonical_id"] == 1000, (
         "Multi-word token 'TUNBRIDGE WELLS' should be correctly counted as 2 words"
     )
+
+
+def test_peeled_address_stripped_matching_is_enabled_by_default(duck_con):
+    df_fuzzy = duck_con.sql("""
+        SELECT *, NULL::VARCHAR AS sub_premise_location
+        FROM (
+            VALUES
+                (
+                    1,
+                    '10 TEST-LANE HACKNEY LONDON',
+                    '10 TEST-LANE HACKNEY LONDON',
+                    'E8 1AA',
+                    ARRAY['HACKNEY', 'LONDON'],
+                    ARRAY['10']::VARCHAR[],
+                    FALSE,
+                    NULL::VARCHAR,
+                    NULL::VARCHAR,
+                    NULL::VARCHAR,
+                    FALSE,
+                    NULL::VARCHAR,
+                    NULL::VARCHAR,
+                    1::BIGINT
+                )
+        ) AS t(
+            unique_id,
+            original_address_concat,
+            clean_full_address,
+            postcode,
+            peeled_tokens_list,
+            numeric_tokens,
+            has_flat_indicator,
+            flat_positional,
+            flat_letter,
+            flat_number,
+            has_business_unit,
+            business_unit_type,
+            business_unit_id,
+            ukam_address_id
+        )
+        """)
+
+    df_canonical = duck_con.sql("""
+        SELECT *, NULL::VARCHAR AS sub_premise_location
+        FROM (
+            VALUES
+                (
+                    1000,
+                    '10 TEST LANE',
+                    '10 TEST LANE',
+                    'E8 1AA',
+                    CAST([] AS VARCHAR[]),
+                    ARRAY['10']::VARCHAR[],
+                    FALSE,
+                    NULL::VARCHAR,
+                    NULL::VARCHAR,
+                    NULL::VARCHAR,
+                    FALSE,
+                    NULL::VARCHAR,
+                    NULL::VARCHAR,
+                    100::BIGINT
+                )
+        ) AS t(
+            unique_id,
+            original_address_concat,
+            clean_full_address,
+            postcode,
+            peeled_tokens_list,
+            numeric_tokens,
+            has_flat_indicator,
+            flat_positional,
+            flat_letter,
+            flat_number,
+            has_business_unit,
+            business_unit_type,
+            business_unit_id,
+            ukam_address_id
+        )
+        """)
+
+    default_results, _ = _run_matching(
+        con=duck_con,
+        df_messy_clean=df_fuzzy,
+        df_canonical_clean=df_canonical,
+        stages=[ExactMatchStage(), PeeledAddressStage()],
+    )
+    disabled_results, _ = _run_matching(
+        con=duck_con,
+        df_messy_clean=df_fuzzy,
+        df_canonical_clean=df_canonical,
+        stages=[
+            ExactMatchStage(),
+            PeeledAddressStage(enable_whitespace_punctuation_stripping=False),
+        ],
+    )
+
+    default_row = default_results.fetchdf().iloc[0]
+    disabled_row = disabled_results.select("resolved_canonical_id").fetchone()[0]
+
+    assert default_row["resolved_canonical_id"] == 1000
+    assert default_row["match_reason"] == (
+        "peeled_address_stripped: match after peeling and removing whitespace "
+        "and punctuation"
+    )
+    assert disabled_row is None

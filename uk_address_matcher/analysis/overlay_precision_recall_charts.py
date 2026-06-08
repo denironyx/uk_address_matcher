@@ -9,15 +9,18 @@ from pathlib import Path
 from typing import Any
 
 _OVERLAY_COLOUR_RANGE = [
-    "#4C78A8",
-    "#F58518",
-    "#54A24B",
-    "#E45756",
-    "#72B7B2",
-    "#EECA3B",
-    "#B279A2",
-    "#FF9DA6",
+    "#12436D",
+    "#28A197",
+    "#F46A25",
+    "#801650",
+    "#1D609D",
+    "#30AA51",
+    "#A285D1",
+    "#00B1EB",
 ]
+
+_HOVER_GUIDE_COLOUR = "#A0A5B4"
+_LABEL_MIN_VERTICAL_GAP = 0.012
 
 _ALTAIR_SPEC_ASSIGNMENT_RE = re.compile(r"\b(?:var|const|let)\s+spec\s*=\s*")
 
@@ -203,6 +206,60 @@ def _choose_label_record(records: list[dict[str, Any]]) -> dict[str, Any]:
     return max(records, key=lambda row: (row["recall"], row["precision"]))
 
 
+def _apply_label_offsets(label_records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not label_records:
+        return []
+
+    adjusted_records = [
+        {
+            **record,
+            "_label_order": index,
+            "label_precision": float(record["precision"]),
+            "label_has_connector": False,
+        }
+        for index, record in enumerate(label_records)
+    ]
+    adjusted_records.sort(
+        key=lambda record: (float(record["precision"]), float(record["recall"]))
+    )
+
+    for index in range(1, len(adjusted_records)):
+        previous_label_precision = float(adjusted_records[index - 1]["label_precision"])
+        current_label_precision = float(adjusted_records[index]["label_precision"])
+        minimum_label_precision = previous_label_precision + _LABEL_MIN_VERTICAL_GAP
+        if current_label_precision < minimum_label_precision:
+            adjusted_records[index]["label_precision"] = minimum_label_precision
+
+    overflow = float(adjusted_records[-1]["label_precision"]) - 1.0
+    if overflow > 0:
+        for record in adjusted_records:
+            record["label_precision"] = max(
+                0.0,
+                float(record["label_precision"]) - overflow,
+            )
+
+        for index in range(len(adjusted_records) - 2, -1, -1):
+            next_label_precision = float(adjusted_records[index + 1]["label_precision"])
+            current_label_precision = float(adjusted_records[index]["label_precision"])
+            maximum_label_precision = next_label_precision - _LABEL_MIN_VERTICAL_GAP
+            if current_label_precision > maximum_label_precision:
+                adjusted_records[index]["label_precision"] = max(
+                    0.0,
+                    maximum_label_precision,
+                )
+
+    for record in adjusted_records:
+        record["label_has_connector"] = (
+            abs(float(record["label_precision"]) - float(record["precision"])) > 1e-9
+        )
+
+    adjusted_records.sort(key=lambda record: int(record["_label_order"]))
+    return [
+        {key: value for key, value in record.items() if key != "_label_order"}
+        for record in adjusted_records
+    ]
+
+
 def _interpolate_precision_for_recall(
     records: list[dict[str, Any]],
     *,
@@ -319,7 +376,14 @@ def _build_overlay_chart_definition(
     diff_records: list[dict[str, Any]],
     label_records: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    ordered_series_labels = [record["series_label"] for record in label_records]
+    adjusted_label_records = _apply_label_offsets(label_records)
+    ordered_series_labels = [record["series_label"] for record in adjusted_label_records]
+    comparison_labels = [
+        record["series_label"]
+        for record in adjusted_label_records
+        if not bool(record["is_baseline"])
+    ]
+    comparison_colour_range = _OVERLAY_COLOUR_RANGE[1 : len(comparison_labels) + 1]
 
     top_panel = _prepare_nested_chart_definition(
         _load_chart_definition("precision_recall.json")
@@ -364,7 +428,71 @@ def _build_overlay_chart_definition(
             "encoding": top_encoding,
         },
         {
-            "data": {"values": label_records},
+            "mark": {
+                "type": "point",
+                "opacity": 0,
+                "size": 90,
+            },
+            "encoding": {
+                "x": {
+                    "field": "recall",
+                    "type": "quantitative",
+                },
+                "y": {
+                    "field": "precision",
+                    "type": "quantitative",
+                },
+                "detail": {
+                    "field": "series_id",
+                    "type": "nominal",
+                },
+                "tooltip": top_encoding["tooltip"],
+            },
+            "params": [
+                {
+                    "name": "curve_hover",
+                    "select": {
+                        "type": "point",
+                        "on": "mouseover",
+                        "clear": "mouseout",
+                        "nearest": True,
+                        "fields": ["series_id", "recall", "precision"],
+                    },
+                }
+            ],
+        },
+        {
+            "data": {"values": adjusted_label_records},
+            "transform": [{"filter": "datum.label_has_connector"}],
+            "mark": {
+                "type": "rule",
+                "strokeWidth": 1,
+            },
+            "encoding": {
+                "x": {
+                    "field": "recall",
+                    "type": "quantitative",
+                },
+                "y": {
+                    "field": "precision",
+                    "type": "quantitative",
+                },
+                "y2": {
+                    "field": "label_precision",
+                },
+                "color": {
+                    "field": "series_label",
+                    "type": "nominal",
+                    "legend": None,
+                    "scale": {
+                        "domain": ordered_series_labels,
+                        "range": _OVERLAY_COLOUR_RANGE[: len(ordered_series_labels)],
+                    },
+                },
+            },
+        },
+        {
+            "data": {"values": adjusted_label_records},
             "mark": {
                 "type": "text",
                 "align": "left",
@@ -379,7 +507,7 @@ def _build_overlay_chart_definition(
                     "type": "quantitative",
                 },
                 "y": {
-                    "field": "precision",
+                    "field": "label_precision",
                     "type": "quantitative",
                 },
                 "text": {
@@ -397,12 +525,46 @@ def _build_overlay_chart_definition(
                 },
             },
         },
+        {
+            "data": {"values": curve_records},
+            "mark": {
+                "type": "rule",
+                "color": _HOVER_GUIDE_COLOUR,
+                "strokeWidth": 1,
+            },
+            "encoding": {
+                "x": {
+                    "field": "recall",
+                    "type": "quantitative",
+                },
+            },
+            "transform": [{"filter": {"param": "curve_hover", "empty": False}}],
+        },
+        {
+            "data": {"values": curve_records},
+            "mark": {
+                "type": "rule",
+                "color": _HOVER_GUIDE_COLOUR,
+                "strokeWidth": 1,
+            },
+            "encoding": {
+                "y": {
+                    "field": "precision",
+                    "type": "quantitative",
+                },
+            },
+            "transform": [{"filter": {"param": "curve_hover", "empty": False}}],
+        },
     ]
 
     bottom_panel = _prepare_nested_chart_definition(
         _load_chart_definition("precision_recall_diff.json")
     )
     bottom_panel["data"]["values"] = diff_records
+    bottom_panel["layer"][1]["encoding"]["color"]["scale"] = {
+        "domain": comparison_labels,
+        "range": comparison_colour_range,
+    }
 
     return {
         "$schema": "https://vega.github.io/schema/vega-lite/v6.1.0.json",
@@ -473,10 +635,4 @@ def _overlay_precision_recall_charts(
         diff_records,
         label_records,
     )
-
-    try:
-        import altair as alt
-    except ImportError:
-        return chart_definition
-
-    return alt.VConcatChart.from_dict(chart_definition)
+    return chart_definition

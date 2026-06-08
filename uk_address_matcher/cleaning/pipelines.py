@@ -19,6 +19,7 @@ from uk_address_matcher.cleaning.steps import (
     _parse_out_business_unit,
     _parse_out_flat_position_and_letter,
     _parse_out_numbers,
+    _parse_out_sub_premise_location,
     _preserve_original_address_concat,
     _remove_duplicate_end_tokens,
     _rename_and_select_columns,
@@ -88,6 +89,7 @@ QUEUE_CLEAN_FULL_ADDRESS = [
 
 QUEUE_DERIVE_NON_TF_FEATURES = [
     _parse_out_flat_position_and_letter,
+    _parse_out_sub_premise_location,
     _parse_out_business_unit,
     _parse_out_numbers,
     _clean_address_string_second_pass,

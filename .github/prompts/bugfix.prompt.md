@@ -1,21 +1,30 @@
 ---
 mode: ask
+description: "Resolve a bug in uk_address_matcher with a root-cause-first fix and targeted validation."
 ---
 
-Fix a bug in `uk_address_matcher` with a root-cause-first approach:
+Resolve the bug end to end with a root-cause-first approach.
 
-1. **Reproduce**
-   - Capture failing behaviour with a targeted test (or identify existing failing test).
-2. **Diagnose**
-   - Explain root cause briefly, citing the affected module/stage.
-3. **Patch**
-   - Apply the smallest safe code change to fix the root cause.
-4. **Validate**
-   - Run targeted `uv run pytest ...` tests, then broader relevant tests.
-5. **Guard**
-   - Add/adjust regression coverage so the bug does not reappear.
-6. **Summarise**
-   - Bug, root cause, fix, and test evidence.
+Success means:
+
+- the failing behaviour is reproduced or anchored to an existing failing test
+- the owning defect is fixed with the smallest safe code change
+- regression coverage is added or updated where applicable
+- targeted `uv run pytest ...` validation passes before any broader check
+
+Working rules:
+
+- start from the failing command, test, file, symbol, or nearby implementation surface
+- fix the root cause rather than layering on defensive patches
+- keep the diff minimal and focused
+- if SQL stages are involved, follow the matching `.github/instructions/*.instructions.md` guidance
+
+Report:
+
+- bug summary
+- root cause
+- fix
+- validation evidence
 
 Constraints:
 - Keep changes minimal and focused.

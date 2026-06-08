@@ -1,21 +1,29 @@
 ---
 mode: ask
+description: "Perform a behaviour-preserving refactor with explicit boundaries and targeted validation."
 ---
 
-Perform a safe refactor in `uk_address_matcher`:
+Perform the refactor without behavioural drift.
 
-1. **Set boundaries**
-   - Define what will and will not change (no behavioural drift).
-2. **Baseline**
-   - Identify existing tests that protect current behaviour.
-3. **Refactor plan**
-   - Break into small, reviewable edits with low risk.
-4. **Execute**
-   - Preserve public interfaces unless explicitly requested otherwise.
-5. **Verify**
-   - Run targeted tests after each logical chunk where practical.
-6. **Final check**
-   - Run broader relevant tests and summarise equivalence evidence.
+Success means:
+
+- the refactor boundary is explicit before edits begin
+- existing behaviour is anchored with nearby tests or other concrete checks
+- public interfaces stay stable unless the user asked otherwise
+- targeted validation is run after each meaningful slice where practical
+
+Working rules:
+
+- break the work into small, reviewable edits
+- prefer local simplification over repo-wide cleanup
+- preserve DuckDB/Splink pipeline behaviour and placeholders
+
+Report:
+
+- refactor boundary
+- preserved behaviour evidence
+- main internal simplification
+- validation evidence
 
 Constraints:
 - No opportunistic rewrites.

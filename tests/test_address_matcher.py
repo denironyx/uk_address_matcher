@@ -189,29 +189,69 @@ def test_cleaning_num_chunks_is_propagated_to_cleaning_steps(
         cleaning_num_chunks=2,
     )
 
-    with caplog.at_level(logging.INFO, logger="uk_address_matcher"):
+    with caplog.at_level(logging.DEBUG, logger="uk_address_matcher"):
         matcher._resolve_canonical_data()
         matcher._resolve_messy_data()
 
     info_messages = [
         record.getMessage() for record in caplog.records if record.levelno == logging.INFO
     ]
-
-    cleaned_logs = [
-        message
-        for message in info_messages
-        if message.startswith("Cleaned and preprocessed:")
-    ]
-    tf_logs = [
-        message
-        for message in info_messages
-        if message.startswith("Applied term frequencies:")
+    debug_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno == logging.DEBUG
     ]
 
-    assert any("chunk 1/2" in message for message in cleaned_logs)
-    assert any("chunk 2/2" in message for message in cleaned_logs)
-    assert any("chunk 1/2" in message for message in tf_logs)
-    assert any("chunk 2/2" in message for message in tf_logs)
+    cleaned_info_logs = [
+        message
+        for message in info_messages
+        if message.startswith("Cleaning and preprocessing")
+    ]
+    tf_info_logs = [
+        message
+        for message in info_messages
+        if message.startswith("Applying term frequencies")
+    ]
+    cleaned_debug_logs = [
+        message
+        for message in debug_messages
+        if message.startswith("Cleaning and preprocessing:")
+    ]
+    tf_debug_logs = [
+        message
+        for message in debug_messages
+        if message.startswith("Applying term frequencies:")
+    ]
+
+    assert any(
+        "Cleaning and preprocessing: 20,500 records across 2 chunks" == message
+        for message in cleaned_info_logs
+    )
+    assert any(
+        message.startswith("Cleaning and preprocessing completed:")
+        for message in cleaned_info_logs
+    )
+    assert any(
+        "Applying term frequencies: 20,500 records across 2 chunks" == message
+        for message in tf_info_logs
+    )
+    assert any(
+        message.startswith("Applying term frequencies completed:")
+        for message in tf_info_logs
+    )
+    assert any("chunk 1/2" in message for message in cleaned_debug_logs)
+    assert any("chunk 2/2" in message for message in cleaned_debug_logs)
+    assert any("chunk 1/2" in message for message in tf_debug_logs)
+    assert any("chunk 2/2" in message for message in tf_debug_logs)
+    progress_glyphs = ("█", "░", "▕", "▏", "▮", "▯")
+    assert all(
+        all(glyph not in message for glyph in progress_glyphs)
+        for message in info_messages
+    )
+    assert all(
+        all(glyph not in message for glyph in progress_glyphs)
+        for message in debug_messages
+    )
 
 
 def test_match_with_custom_splink_stage(con, canonical_data, messy_data):

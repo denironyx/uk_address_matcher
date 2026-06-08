@@ -1,4 +1,5 @@
 import duckdb
+import pytest
 
 from uk_address_matcher import prepare_data_for_matching
 from uk_address_matcher.linking_model.splink_model import _get_linker
@@ -240,6 +241,23 @@ ONE_SIDED_NUMBER_LETTER_CANONICAL = [
     ("c_flat_2_reference", "FLAT 2 10 KINGS ROAD LONDON", "SW3 4ND"),
 ]
 
+SAME_LETTER_NUMBER_ONESIDED_MESSY = [
+    ("m_missing_number_2a", "2A GARDENSVILLE THE ROAD LONDON", "EC1V 9NX"),
+]
+
+SAME_LETTER_NUMBER_ONESIDED_CANONICAL = [
+    (
+        "c_same_letter_match",
+        "FLAT 2A GARDENSVILLE THE ROAD LONDON",
+        "EC1V 9NX",
+    ),
+    (
+        "c_letter_mismatch",
+        "FLAT 2B GARDENSVILLE THE ROAD LONDON",
+        "EC1V 9NX",
+    ),
+]
+
 CARDIFF_ROOM_VS_BUILDING_MESSY = [
     (
         "m_cardiff_room_23",
@@ -414,6 +432,73 @@ def test_flat_number_letter_one_sided_penalty_not_fuzzy_equivalence():
     )
 
 
+def test_same_letter_number_one_sided_scores_between_fuzzy_and_mismatch():
+    """2A vs FLAT 2A should beat a letter mismatch"""
+    con = duckdb.connect()
+
+    messy_values = ", ".join(
+        f"('{uid}'::VARCHAR, '{addr}'::VARCHAR, '{pc}'::VARCHAR)"
+        for uid, addr, pc in SAME_LETTER_NUMBER_ONESIDED_MESSY
+    )
+    messy_rel = con.sql(f"""
+        SELECT * FROM (VALUES {messy_values})
+        AS t(unique_id, address_concat, postcode)
+    """)
+
+    canon_values = ", ".join(
+        f"('{uid}'::VARCHAR, '{addr}'::VARCHAR, '{pc}'::VARCHAR)"
+        for uid, addr, pc in SAME_LETTER_NUMBER_ONESIDED_CANONICAL
+    )
+    canon_rel = con.sql(f"""
+        SELECT * FROM (VALUES {canon_values})
+        AS t(unique_id, address_concat, postcode)
+    """)
+
+    messy_cleaned = prepare_data_for_matching(messy_rel, con=con)
+    canon_cleaned = prepare_data_for_matching(canon_rel, con=con)
+
+    linker = _get_linker(
+        messy_cleaned,
+        canon_cleaned,
+        con=con,
+        include_full_postcode_block=True,
+        include_outside_postcode_block=False,
+        retain_intermediate_calculation_columns=True,
+    )
+    predictions = linker.inference.predict(threshold_match_probability=0.00001)
+    results_df = predictions.as_pandas_dataframe()
+
+    def _row_for(canonical_id: str):
+        row = results_df[
+            (results_df["unique_id_l"] == "m_missing_number_2a")
+            & (results_df["unique_id_r"] == canonical_id)
+            | (
+                (results_df["unique_id_r"] == "m_missing_number_2a")
+                & (results_df["unique_id_l"] == canonical_id)
+            )
+        ]
+        assert not row.empty, f"Missing comparison row for {canonical_id}"
+        return row.iloc[0]
+
+    same_letter_row = _row_for("c_same_letter_match")
+    mismatch_row = _row_for("c_letter_mismatch")
+    same_letter_bf = float(same_letter_row["bf_flat_identity"])
+    mismatch_bf = float(mismatch_row["bf_flat_identity"])
+
+    assert same_letter_bf > 1.0, (
+        "Expected 2A vs FLAT 2A to receive a positive flat-identity signal; "
+        f"got bf_flat_identity={same_letter_bf:.6f}."
+    )
+    assert same_letter_bf > mismatch_bf, (
+        "Expected same-letter one-sided-number case to score above a true letter "
+        f"mismatch; got same_letter={same_letter_bf:.6f}, mismatch={mismatch_bf:.6f}."
+    )
+    assert same_letter_bf < 13.0, (
+        "Expected same-letter one-sided-number case to stay below full fuzzy "
+        f"equivalence; got bf_flat_identity={same_letter_bf:.6f}."
+    )
+
+
 def test_cardiff_room_vs_ambassador_scores_plus_five_or_more():
     """Fictional Cardiff-style room vs building comparison should score +5+."""
     con = duckdb.connect()
@@ -468,3 +553,97 @@ def test_cardiff_room_vs_ambassador_scores_plus_five_or_more():
         "Expected Cardiff room-vs-building case to score at least +5; "
         f"got match_weight={match_weight:.6f}."
     )
+
+
+SUB_PREMISE_LOCATION_MESSY = [
+    (
+        "m_location_right",
+        "FLAT 4 FIRST FLOOR RIGHT 20 HIGH STREET LONDON",
+        "E1 6AA",
+    ),
+    (
+        "m_location_missing",
+        "FLAT 4 FIRST FLOOR 20 HIGH STREET LONDON",
+        "E1 6AA",
+    ),
+]
+
+SUB_PREMISE_LOCATION_CANONICAL = [
+    (
+        "c_location_right",
+        "FLAT 4 FIRST FLOOR RIGHT 20 HIGH STREET LONDON",
+        "E1 6AA",
+    ),
+    (
+        "c_location_left",
+        "FLAT 4 FIRST FLOOR LEFT 20 HIGH STREET LONDON",
+        "E1 6AA",
+    ),
+    (
+        "c_location_missing",
+        "FLAT 4 FIRST FLOOR 20 HIGH STREET LONDON",
+        "E1 6AA",
+    ),
+]
+
+
+def test_sub_premise_location_comparison_is_mild_and_ordered():
+    """Sub-premise location should be a separate mild comparison."""
+    con = duckdb.connect()
+
+    messy_values = ", ".join(
+        f"('{uid}'::VARCHAR, '{addr}'::VARCHAR, '{pc}'::VARCHAR)"
+        for uid, addr, pc in SUB_PREMISE_LOCATION_MESSY
+    )
+    messy_rel = con.sql(f"""
+        SELECT * FROM (VALUES {messy_values})
+        AS t(unique_id, address_concat, postcode)
+    """)
+
+    canon_values = ", ".join(
+        f"('{uid}'::VARCHAR, '{addr}'::VARCHAR, '{pc}'::VARCHAR)"
+        for uid, addr, pc in SUB_PREMISE_LOCATION_CANONICAL
+    )
+    canon_rel = con.sql(f"""
+        SELECT * FROM (VALUES {canon_values})
+        AS t(unique_id, address_concat, postcode)
+    """)
+
+    messy_cleaned = prepare_data_for_matching(messy_rel, con=con)
+    canon_cleaned = prepare_data_for_matching(canon_rel, con=con)
+
+    linker = _get_linker(
+        messy_cleaned,
+        canon_cleaned,
+        con=con,
+        include_full_postcode_block=True,
+        include_outside_postcode_block=False,
+        retain_intermediate_calculation_columns=True,
+    )
+    predictions = linker.inference.predict(threshold_match_probability=0.00001)
+    results_df = predictions.as_pandas_dataframe()
+
+    def get_row(messy_id: str, canon_id: str):
+        row = results_df[
+            (
+                (results_df["unique_id_l"] == messy_id)
+                & (results_df["unique_id_r"] == canon_id)
+            )
+            | (
+                (results_df["unique_id_r"] == messy_id)
+                & (results_df["unique_id_l"] == canon_id)
+            )
+        ]
+        assert not row.empty, f"Missing prediction row for {messy_id} -> {canon_id}"
+        return row.iloc[0]
+
+    exact_row = get_row("m_location_right", "c_location_right")
+    one_sided_row = get_row("m_location_right", "c_location_missing")
+    mismatch_row = get_row("m_location_right", "c_location_left")
+
+    assert float(exact_row["bf_sub_premise_location"]) == pytest.approx(8.0)
+    assert float(one_sided_row["bf_sub_premise_location"]) == pytest.approx(1.0)
+    assert float(mismatch_row["bf_sub_premise_location"]) == pytest.approx(0.125)
+
+    assert exact_row["match_weight"] > one_sided_row["match_weight"]
+    assert one_sided_row["match_weight"] > mismatch_row["match_weight"]

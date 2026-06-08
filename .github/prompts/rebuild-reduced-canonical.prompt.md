@@ -1,28 +1,25 @@
 ---
 mode: ask
-description: "Quickly rebuild the reduced canonical dataset using the repository's standard script and report the exact source, output, and readiness for benchmarking."
+description: "Use the benchmark-experiment skill to rebuild the reduced canonical dataset with the standard workflow and report readiness for benchmarking."
 ---
 
-Rebuild the reduced canonical dataset for `uk_address_matcher` with the standard repository workflow:
+Use the `benchmark-experiment` skill for this workflow.
 
-1. **Read the experiment workflow instructions**
-   - Read `.github/instructions/benchmark-experiments.instructions.md` and any relevant data-handling instructions.
+Goal:
 
-2. **Use the existing rebuild path**
-   - Prefer `uv run python scripts/reduced_canonical.py`.
-   - Do not invent a one-off canonical-preparation script unless the existing script is broken.
+- rebuild the reduced canonical dataset with the standard repository path and report whether it is ready for the next benchmark run
 
-3. **Verify the rebuild inputs and outputs**
-   - Report the source canonical path.
-   - Report the output folder.
-   - Report the filtered row count if available.
+Success means:
 
-4. **Check readiness for benchmarking**
-   - Confirm whether the rebuilt folder is the path used by `benchmarking/settings.py` or by the current benchmark workflow.
-   - Flag any mismatch explicitly.
+- `.github/instructions/benchmark-experiments.instructions.md` is used first
+- the standard rebuild path is used unless it is broken
+- the source path, output path, and filtered row count are reported when available
+- readiness for the next benchmark run is stated clearly
 
-5. **Close with next-step readiness**
-   - State whether the reduced canonical is ready for the next benchmark run.
+Stop rules:
+
+- do not invent a bespoke canonical-preparation script unless the standard rebuild path is broken
+- do not treat the rebuild as successful until the output path and benchmark-readiness check are both reported
 
 Constraints:
 - Use `uv`.
