@@ -117,10 +117,16 @@ def _log_progress(
     processed_records: int,
     stage_label: str,
     *,
+    progress: _ProgressBar | None = None,
     chunk_index: int | None = None,
     total_chunks: int | None = None,
     chunk_elapsed_seconds: float | None = None,
 ) -> None:
+    if progress is not None:
+        ensure_line_break = getattr(progress, "ensure_line_break", None)
+        if callable(ensure_line_break):
+            ensure_line_break()
+
     chunk_position = "?/?"
     if chunk_index is not None and total_chunks is not None:
         chunk_position = f"{chunk_index + 1}/{total_chunks}"
@@ -242,6 +248,7 @@ def clean_data_pre_term_frequencies(
                 total_rows,
                 processed_records,
                 stage_label=stage_label,
+                progress=progress,
                 chunk_index=chunk_index,
                 total_chunks=total_chunks,
                 chunk_elapsed_seconds=time.perf_counter() - chunk_started_at,
@@ -370,6 +377,7 @@ def derive_term_frequencies_table(
                 total_rows,
                 processed_records,
                 stage_label=stage_label,
+                progress=progress,
                 chunk_index=chunk_index,
                 total_chunks=total_chunks,
                 chunk_elapsed_seconds=time.perf_counter() - chunk_started_at,
@@ -562,6 +570,7 @@ def derive_inverted_index(
                         total_rows,
                         processed_records,
                         stage_label=stage_label,
+                        progress=progress,
                         chunk_index=chunk_index,
                         total_chunks=num_of_chunks,
                         chunk_elapsed_seconds=(time.perf_counter() - chunk_started_at),
@@ -746,6 +755,7 @@ def prepare_data_for_matching(
                 total_rows,
                 processed_records,
                 stage_label=stage_label,
+                progress=progress,
                 chunk_index=chunk_index,
                 total_chunks=total_chunks,
                 chunk_elapsed_seconds=time.perf_counter() - chunk_started_at,
