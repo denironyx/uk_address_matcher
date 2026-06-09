@@ -213,18 +213,6 @@ These settings mattered because ART build allocations and large checkpoints sit 
                                           +----------------------------+
 ```
 
-## Reproduce it
-
-### Full-canonical benchmark command
-
-```bash
-cd /path/to/uk_address_matcher
-PYTHONPATH=. PYTHONUNBUFFERED=1 uv run python \
-  scripts/experiments/art_index_candidate_assembly_probe.py \
-  --full-canonical \
-  --database-path /path/to/ukam_prepared_canonical/ukam_full_canonical_art.duckdb
-```
-
 ### Most performant ART scoring logic
 
 The fastest measured end-to-end path in this experiment was the prefiltered ART-scored path.
@@ -311,18 +299,6 @@ pipeline.enqueue_list_of_sqls(
 
 </details>
 
-## Recommendations
-
-1. Use the **prefiltered ART-scored path** when the goal is the fastest possible
-   realtime scoring over ART-derived candidates.
-2. Use the **prefiltered full-block path** when the goal is stock-blocking recall
-   with materially lower latency than baseline Splink.
-3. Keep the legacy unfiltered paths only as diagnostics.
-4. Persist the ART database, including `canonical_ukam_lookup`, as a reusable
-   artefact.
-5. Prioritise fixing the inverted-index lookup planner fallback. That is now the
-   main remaining optimisation target.
-
 ## Environment and technology used for the experiment
 
 - Machine: Apple Silicon MacBook Pro, M4, 36 GB RAM.
@@ -340,21 +316,6 @@ pipeline.enqueue_list_of_sqls(
   - full canonical run summary and results
   - Hackney residential run summary and results
 - Match-weight equivalence: `max |Δ| = 0.00e+00` in all validated configurations.
-
-## Artefacts
-
-- Full canonical summary: `benchmarking/results/art_candidate_assembly_probe/2026-06-08/67f90a482222e45e/summary.md`
-- Full canonical results: `benchmarking/results/art_candidate_assembly_probe/2026-06-08/67f90a482222e45e/results.json`
-- Hackney residential summary: `benchmarking/results/art_candidate_assembly_probe/2026-06-08/e0683f8a1be05610/summary.md`
-- Hackney residential results: `benchmarking/results/art_candidate_assembly_probe/2026-06-08/e0683f8a1be05610/results.json`
-# ART-index blocking for real-time linkage
-
-Status: validated experiment (2026-06-09)
-
-This document is a GitHub-ready summary of the ART-index experiments for
-real-time address linkage. It keeps the detailed local write-up intact and
-focuses on the key findings, the build process, the most effective runtime
-logic, and the practical recommendations.
 
 ## 1. Executive summary
 
@@ -408,8 +369,6 @@ legacy ART-scored cost from about 2.5 seconds to tens of milliseconds for the
 smallest full-canonical batches.
 
 ## 3. Where the gains come from, and where they do not
-
-This point is important.
 
 ### Where the gains come from
 
@@ -506,31 +465,7 @@ SET temp_directory = '.../ukam_art_duckdb_tmp';
 SET max_temp_directory_size = '200GB';
 ```
 
-## 5. Planner behaviour discovered by `EXPLAIN ANALYSE`
-
-A major finding from the later experiments is that the candidate lookup itself
-still has a planner problem.
-
-For the ART-backed inverted-index lookup on the full canonical:
-
-| Row limit | Index scan | Sequential scan | Max reported rows |
-| ---: | --- | --- | ---: |
-| 1 | Yes | Yes | 9 |
-| 10 | No | Yes | 56,887,704 |
-| 100 | No | Yes | 61,312,633 |
-
-Interpretation:
-
-- At row limit 1, DuckDB still uses the ART index and the lookup is genuinely
-  tiny.
-- At row limits 10 and 100, DuckDB flips to a sequential scan over tens of
-  millions of rows.
-
-This means the candidate-generation stage is still not at its true floor for
-multi-row batches. The next meaningful optimisation target is keeping that
-lookup index-driven for larger probe sets.
-
-## 6. System flow
+## 5. System flow
 
 ```text
 +--------------------+
@@ -601,7 +536,7 @@ lookup index-driven for larger probe sets.
 +-----------------------------+
 ```
 
-## 7. Most performant ART logic
+## 6. Most performant ART logic
 
 Below is the core logic for the fastest end-to-end ART scoring path. It is the
 prefiltered ART-scored path, not the faithful full-block path.
@@ -700,77 +635,3 @@ Why this is fast:
 - it restricts the canonical-side input before Splink scoring
 - it reuses Splink's own comparison and predict SQL, so the scores stay aligned
   with the stock model
-
-## 8. Reproduce it
-
-### Prerequisites
-
-- Prepared canonical folder containing:
-  - `ukam_canonical_addresses.parquet`
-  - `ukam_inverted_index.parquet`
-  - `ukam_term_frequencies.parquet`
-  - `ukam_manifest.json`
-- Run commands with `uv` and `PYTHONPATH=.`
-
-### Commands
-
-Hackney-scale run:
-
-```bash
-cd /path/to/uk_address_matcher
-PYTHONPATH=. uv run python scripts/experiments/art_index_candidate_assembly_probe.py \
-  --overwrite-database
-```
-
-Full-canonical run:
-
-```bash
-cd /path/to/uk_address_matcher
-PYTHONPATH=. PYTHONUNBUFFERED=1 uv run python \
-  scripts/experiments/art_index_candidate_assembly_probe.py \
-  --full-canonical \
-  --database-path /path/to/ukam_prepared_canonical/ukam_full_canonical_art.duckdb
-```
-
-Useful flags:
-
-- `--row-limits 1,10,100`
-- `--canonical-filter "<sql>"`
-- `--threads`
-- `--memory-limit`
-- `--output-dir`
-- `--overwrite-database`
-
-## 9. Experiment environment
-
-This is the environment used to generate the findings in this summary.
-
-### Hardware and OS
-
-- Apple Silicon MacBook Pro, M4
-- 36 GB RAM
-- macOS
-
-### Core software
-
-- Python
-- DuckDB
-- Splink
-- `uv` for environment and command execution
-
-### Data used
-
-- Prepared canonical: 71,438,939 rows
-- Prepared inverted index: 61,559,861 keys
-- Persisted auxiliary lookup: `canonical_ukam_lookup` with 71,438,939 rows
-- Small-canonical comparison run: Hackney residential subset with 346,168 rows
-
-### Validated artefacts
-
-- Full canonical result set:
-  `benchmarking/results/art_candidate_assembly_probe/2026-06-08/67f90a482222e45e/`
-- Hackney residential result set:
-  `benchmarking/results/art_candidate_assembly_probe/2026-06-08/e0683f8a1be05610/`
-- Match-weight equivalence:
-  `max |Δ| = 0.00e+00` in all validated configurations
-</attachment>Could you update this summary based on our local findings? I basically want a markdown document that is self-contained for github and covers the relevant details, I don't think it should be a direct copy of our local writeup necessarily. I need it to be high quality and cover the actual findings clearly, carefully and precisely. If possible, could you provide the markdown in the chat and I'll copy it over. Do not mention line numbers, but focus on the concrete content please. It's crucial that we spell out what was slow about the original splink process, and also how the ART path changes things. If there are any inaccurate things in the document vs our local findings, please fix them.</userRequest>We need provide markdown in chat, not modify file. Need self-contained github-ready. Should not mention line numbers. Need carefully correct inaccuracies in current doc. Need maybe based on local findings. Need summarize clearly. We should review for inaccuracies: current says stock dominated by concat_with_tf_filtered. For new path, also mention prefiltered art-scored path uses partial recall. Need mention not direct copy local. Need maybe note build times, ukam_lookup build on existing db maybe not one-off on fresh build included? Could mention 10.8s when upgrading existing db; on fresh build included. Need mention maybe candidate generation speed using ART only depends on planner, and at row limit 10 and 100 plan fallback. Need mention on Hackney small canonical prefilter sometimes slightly worse than legacy. Need mention that art path gains only when using inverted index blocking, while reintroducing Splink blocking rules slows things. Need mention old 2.5s due scoring against full canonical; actual scoring maths tiny. Need mention full-block faithful at 100 slower due blocking candidate assembly not scoring. Need mention maybe
