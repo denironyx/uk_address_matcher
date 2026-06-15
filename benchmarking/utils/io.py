@@ -8,6 +8,8 @@ from typing import Dict, Optional
 
 import duckdb
 
+from benchmarking.constants import DUCKDB_MAX_MEMORY
+
 _PRIVATE_CONFIG_PATH = Path(__file__).resolve().parent.parent / ".config.json"
 
 
@@ -126,7 +128,9 @@ def load_duckdb_excel(con: duckdb.DuckDBPyConnection) -> None:
 
 def setup_connection() -> duckdb.DuckDBPyConnection:
     """Initialise DuckDB connection for benchmarking."""
-    return duckdb.connect(database=":memory:")
+    con = duckdb.connect(database=":memory:")
+    con.execute(f"SET memory_limit='{DUCKDB_MAX_MEMORY}';")
+    return con
 
 
 __all__ = [
