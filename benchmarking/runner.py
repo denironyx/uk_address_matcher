@@ -42,6 +42,7 @@ class BenchmarkRunResult:
     timings: dict[str, float]
     con: duckdb.DuckDBPyConnection
     diagnostics: DatasetDiagnostics | None = None
+    initialisation_diagnostics: list[dict[str, Any]] | None = None
     accuracy_table: duckdb.DuckDBPyRelation | None = None
     stage_diagnostics_table: duckdb.DuckDBPyRelation | None = None
     precision_recall_curve_records: list[dict[str, Any]] | None = None
@@ -114,6 +115,24 @@ def run_single_dataset(
     matches.to_table(table_name)
     timings["match_pipeline"] = perf_counter() - pipeline_start
 
+    initialisation_diagnostics = getattr(
+        match_result,
+        "_initialisation_diagnostics",
+        None,
+    )
+    if initialisation_diagnostics:
+        for row in initialisation_diagnostics:
+            phase = str(row["phase"])
+            timings[f"{phase}_seconds"] = float(row["elapsed_seconds"])
+            for key in (
+                "process_rss_before_mb",
+                "process_rss_after_mb",
+                "process_rss_delta_mb",
+            ):
+                value = row.get(key)
+                if value is not None:
+                    timings[f"{phase}_{key}"] = float(value)
+
     timings["total_runtime"] = perf_counter() - total_start
     accuracy_rel = match_result._accuracy_table()
     stage_diagnostics_rel = match_result._stage_diagnostics_table()
@@ -184,6 +203,7 @@ def run_single_dataset(
         timings=timings,
         con=con,
         diagnostics=diagnostics,
+        initialisation_diagnostics=initialisation_diagnostics,
         precision_recall_curve_records=precision_recall_curve_records,
         splink_predictions=splink_predictions,
         splink_available=splink_predictions is not None,
