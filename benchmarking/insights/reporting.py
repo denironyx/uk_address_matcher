@@ -92,6 +92,18 @@ def print_benchmark_summary(
 ) -> None:
     output_options = output_options or BenchmarkOutputOptions()
 
+    def _format_rss(value: object) -> str:
+        if value is None:
+            return "n/a"
+
+        value_mb = float(value)
+        units = ((1024**2, "TiB"), (1024, "GiB"), (1, "MiB"))
+        for threshold_mb, unit in units:
+            if value_mb >= threshold_mb:
+                return f"{value_mb / threshold_mb:.2f} {unit}"
+
+        return f"{value_mb:.2f} MiB"
+
     print("\nBenchmark summary")
     for result in results:
         print(f"\nDataset: {result.dataset_key}")
@@ -106,6 +118,19 @@ def print_benchmark_summary(
                 else ""
             )
         )
+
+        if result.initialisation_diagnostics:
+            print("Initialisation diagnostics:")
+            for row in result.initialisation_diagnostics:
+                print(
+                    "  "
+                    f"{row['phase']}: "
+                    f"rows={row['rows_resolved']}, "
+                    f"elapsed={float(row['elapsed_seconds']):.2f}s, "
+                    f"rss={_format_rss(row['process_rss_before_mb'])} -> "
+                    f"{_format_rss(row['process_rss_after_mb'])}, "
+                    f"delta={_format_rss(row['process_rss_delta_mb'])}"
+                )
 
         if result.accuracy_table is not None:
             print("\nAccuracy table:")

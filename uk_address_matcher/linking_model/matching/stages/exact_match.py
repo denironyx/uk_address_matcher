@@ -62,7 +62,7 @@ def _flat_retraction_unit_evidence_sql(alias: str) -> str:
 
 @dataclass(frozen=True, repr=False)
 class ExactMatchStage(MatchingStage):
-    """Deterministic exact matching on ``clean_full_address`` and ``postcode``.
+    """Deterministic exact matching on `clean_full_address` and `postcode`.
 
     This is usually the first stage in a pipeline. It accepts the easy,
     unambiguous cases before any probabilistic matching is attempted.
