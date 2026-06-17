@@ -161,6 +161,24 @@ def _duckdb_table_exists(con: duckdb.DuckDBPyConnection, table_name: str) -> boo
     return result[0] > 0
 
 
+def _quote_identifier(identifier: str) -> str:
+    return '"' + identifier.replace('"', '""') + '"'
+
+
+def _relation_from_registered_alias(
+    con: duckdb.DuckDBPyConnection,
+    alias: str,
+) -> duckdb.DuckDBPyRelation:
+    """Read a registered alias via SQL rather than ``con.table(alias)``.
+
+    DuckDB 1.3.2 returns a debug-style ``sql_query()`` string for relations
+    created with ``con.table(alias)`` after ``con.register(...)``. Building the
+    relation via ``SELECT * FROM <alias>`` keeps ``sql_query()`` valid across
+    DuckDB versions, which matters because downstream code nests that SQL.
+    """
+    return con.sql(f"SELECT * FROM {_quote_identifier(alias)}")
+
+
 def _drop_table_and_registered_aliases(
     con: duckdb.DuckDBPyConnection,
     table_name: str,
@@ -197,7 +215,7 @@ def _register_input_relation_once(
     relation_sql = relation.sql_query()
     cached_alias = registration_cache.get(relation_sql)
     if cached_alias and _duckdb_table_exists(con, cached_alias):
-        return con.table(cached_alias)
+        return _relation_from_registered_alias(con, cached_alias)
 
     relation_alias = getattr(relation, "alias", None)
     if (
@@ -206,7 +224,7 @@ def _register_input_relation_once(
         and _duckdb_table_exists(con, str(relation_alias))
     ):
         registration_cache[relation_sql] = str(relation_alias)
-        return con.table(str(relation_alias))
+        return _relation_from_registered_alias(con, str(relation_alias))
 
     alias = f"__ukam__tmp_input_{role}_{_uid()}"
     while _duckdb_table_exists(con, alias):
@@ -220,7 +238,7 @@ def _register_input_relation_once(
         con.register(alias, relation.to_arrow_table())
 
     registration_cache[relation_sql] = alias
-    return con.table(alias)
+    return _relation_from_registered_alias(con, alias)
 
 
 def _explain_debug(con: duckdb.DuckDBPyConnection, sql: str) -> None:
